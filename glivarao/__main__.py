@@ -87,6 +87,24 @@ def cmd_sample(args, s):
     print(report.summary())
 
 
+def cmd_research(args, s):
+    """R1: research and rank finance topics. Report only: no video production, nothing uploaded."""
+    from datetime import date
+    from pathlib import Path
+
+    from .research.run import TOP_N, run_research
+
+    day = date.fromisoformat(args.date) if args.date else date.today()
+    out = Path(args.out)
+    rep = run_research(day, out, _store(s))
+    for src in rep["sources"]:
+        print(f"[{'ok' if src['ok'] else '--'}] {src['name']}: {src['detail']}")
+    print(f"\n{'#':>2} {'score':>5}  {'conf':6} {'market':6} {'category':28} topic")
+    for t in rep["ranked"][:TOP_N]:
+        print(f"{t['rank']:>2} {t['score']:>5}  {t['confidence']:6} {t['market']:6} {t['category']:28} {t['topic']}")
+    print(f"\nreport: {out / (day.isoformat() + '.md')}  (rejected off-topic: {len(rep['rejected_off_topic'])})")
+
+
 def cmd_list(args, s):
     for j in _store(s).list(JobStatus(args.status) if args.status else None, limit=args.limit):
         print(f"{j.id:28s} {j.status.value:20s} {j.format:5s} {j.duration_sec or 0:7.1f}s  {j.topic}")
@@ -167,6 +185,10 @@ def main(argv=None):
     sm.add_argument("--script", default="config/samples/sample_60s.json")
     sm.add_argument("--voice", default="am_michael")
     sm.set_defaults(fn=cmd_sample)
+    rs = sub.add_parser("research", help="R1: research and rank finance topics (report only)")
+    rs.add_argument("--date", help="YYYY-MM-DD (default today)")
+    rs.add_argument("--out", default="reports/research")
+    rs.set_defaults(fn=cmd_research)
     ls = sub.add_parser("list")
     ls.add_argument("--status", choices=[x.value for x in JobStatus])
     ls.add_argument("--limit", type=int, default=30)

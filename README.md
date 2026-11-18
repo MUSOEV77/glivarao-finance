@@ -39,6 +39,16 @@ python -m glivarao publish <job_id>   # optional, manual, interactive, private-o
 python -m glivarao analytics
 ```
 
+## Topic research (R1, report only)
+
+```bash
+python -m glivarao research          # ranked, evidence-backed finance topic report -> reports/research/<date>.md
+```
+Topics are discovered from live public data: CFPB complaints, Stack Exchange Personal Finance & Money, and
+Wikipedia pageviews. They are filtered to finance only and scored on 8 criteria, each labelled MEASURED,
+RULE, ESTIMATE or UNAVAILABLE. Research never produces videos and never touches YouTube. See
+`docs/AUTONOMOUS_RESEARCH_PLAN.md`.
+
 ## Docs
 - `docs/IMPLEMENTATION_PLAN.md`: architecture, phases and risks
 - `docs/CREDENTIALS.md`: every credential and service needed, and where to get it
