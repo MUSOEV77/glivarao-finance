@@ -1,0 +1,41 @@
+import pytest
+
+from glivarao.config import Settings
+from glivarao.storage import JobStore
+
+
+@pytest.fixture
+def settings(tmp_path):
+    return Settings(mode="dry-run", output_dir=tmp_path / "out", db_path=tmp_path / "db.sqlite3", fps=6,
+                    tts_provider="silent", anthropic_api_key="", telegram_bot_token="",
+                    telegram_approver_chat_id="", youtube_publish_enabled=False,
+                    youtube_client_secrets_file=tmp_path / "none.json", youtube_token_file=tmp_path / "tok.json")
+
+
+@pytest.fixture
+def store(settings):
+    return JobStore(settings.db_path)
+
+
+class FakeResponse:
+    def __init__(self, payload, status=200):
+        self._p, self.status_code, self.text = payload, status, str(payload)
+
+    def json(self):
+        return self._p
+
+
+class FakeTelegramSession:
+    """Records Bot API calls and replays queued getUpdates results."""
+
+    def __init__(self, updates=None):
+        self.calls, self.updates, self._mid = [], list(updates or []), 100
+
+    def post(self, url, json=None, data=None, files=None, timeout=None):
+        method = url.rsplit("/", 1)[-1]
+        self.calls.append((method, json or data))
+        if method == "getUpdates":
+            res, self.updates = self.updates, []
+            return FakeResponse({"ok": True, "result": res})
+        self._mid += 1
+        return FakeResponse({"ok": True, "result": {"message_id": self._mid}})

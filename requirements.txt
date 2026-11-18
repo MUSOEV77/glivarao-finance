@@ -1,0 +1,21 @@
+# Core
+pydantic>=2.6
+python-dotenv>=1.0
+requests>=2.31
+numpy>=1.26
+pillow>=10.2
+PyYAML>=6.0
+
+# Script generation (Claude API)
+anthropic>=2.0
+
+# YouTube upload + analytics
+google-api-python-client>=2.120
+google-auth-oauthlib>=1.2
+google-auth>=2.28
+
+# Dev
+pytest>=8.0
+
+# System dependencies (not pip): ffmpeg (with libx264 + libass).
+# Optional dev-only placeholder voice: espeak-ng (apt-get install espeak-ng).
