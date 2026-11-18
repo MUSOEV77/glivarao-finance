@@ -56,6 +56,7 @@ RULE, ESTIMATE or UNAVAILABLE. Research never produces videos and never touches 
 - `docs/OPERATIONS.md`: daily runbook and publishing policy
 - `docs/DEPLOYMENT.md`: step-by-step VPS deployment
 - `docs/TEST_REPORT.md`: first MVP test report
+- `docs/PRODUCTION_STATUS.md`: latest status after production hardening and the editorial redesign
 - `docs/FINAL_REPORT.md`: current status: fully working, partial, and what needs credentials/VPS
 
 ## Layout

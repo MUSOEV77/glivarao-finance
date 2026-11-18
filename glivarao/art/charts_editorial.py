@@ -60,9 +60,13 @@ def _callout(d, x, y, label, color, s, side="left", sub=None):
     f = face("sans_xbold", 40 * s)
     tw = f.getlength(label)
     tx = x - tw - 22 * s if side == "left" else x + 22 * s
-    draw_text(d, (tx, y - 34 * s), label, "sans_xbold", 40 * s, color)
+    ty = y - 92 * s if y > 110 * s else y + 20 * s  # above the line end, clear of the stroke
+    # paper-coloured knockout behind the label so it never fights the chart lines
+    d.rectangle((tx - 10 * s, ty - 6 * s, tx + tw + 10 * s, ty + 50 * s + (34 * s if sub else 0)),
+                fill=(*PAL["paper"], 230))
+    draw_text(d, (tx, ty), label, "sans_xbold", 40 * s, color)
     if sub:
-        draw_text(d, (tx, y + 14 * s), sub, "sans_med", 22 * s, "sub")
+        draw_text(d, (tx, ty + 52 * s), sub, "sans_med", 22 * s, "sub")
 
 
 def _compound(d, spec: ChartSpec, box, t, s):
@@ -191,7 +195,7 @@ def draw_editorial_chart(spec: ChartSpec, w: int, h: int, progress: float = 1.0,
     d = ImageDraw.Draw(img, "RGBA")
     top = _header(d, w * s, spec.title, s, compact)
     src = source_line(spec)
-    bottom_pad = (44 + (40 if src else 0)) * s + (44 * s if spec.kind in ("bar_compare",) else 0)
+    bottom_pad = (58 + (44 if src else 0)) * s + (44 * s if spec.kind in ("bar_compare",) else 0)
     left = 120 * s if spec.kind != "pie_split" else 0
     box = (left, top + 40 * s, w * s - 30 * s, h * s - bottom_pad)
     DRAW.get(spec.kind, _bars)(d, spec, box, progress, s)

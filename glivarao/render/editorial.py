@@ -333,15 +333,20 @@ class EditorialFrames:
         cur = self._beat_img(self.beats[i], w, h, t, portrait)
         tb = t - self.beats[i].t0
         if i > 0 and tb < FADE:
-            e = ease_in_out(tb / FADE)
-            prev = self._beat_img(self.beats[i - 1], w, h, t, portrait)
+            # sequential dissolve: the old beat clears in the first half, the new one settles in the second,
+            # so two layouts (e.g. consecutive quotes) never sit on top of each other
+            u = tb / FADE
+            e_out = 1 - ease_in_out(min(1.0, u / 0.5))
+            e_in = ease_in_out(max(0.0, (u - 0.35) / 0.65))
             out = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-            p2 = prev.copy()
-            p2.putalpha(p2.getchannel("A").point(lambda v: int(v * (1 - e))))
-            out.alpha_composite(p2)
-            c2 = cur.copy()
-            c2.putalpha(c2.getchannel("A").point(lambda v: int(v * e)))
-            out.alpha_composite(c2, (0, int((1 - e) * 22)))
+            if e_out > 0:
+                prev = self._beat_img(self.beats[i - 1], w, h, t, portrait).copy()
+                prev.putalpha(prev.getchannel("A").point(lambda v: int(v * e_out)))
+                out.alpha_composite(prev)
+            if e_in > 0:
+                c2 = cur.copy()
+                c2.putalpha(c2.getchannel("A").point(lambda v: int(v * e_in)))
+                out.alpha_composite(c2, (0, int((1 - e_in) * 22)))
             return out
         return cur
 

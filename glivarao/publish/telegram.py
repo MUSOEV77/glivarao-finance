@@ -161,8 +161,13 @@ def poll_decisions(store: JobStore, settings: Settings, client: TelegramClient |
         to = JobStatus.APPROVED if action == "approve" else JobStatus.REJECTED
         store.transition(job, to, f"telegram user {sender}")
         client.call("answerCallbackQuery", callback_query_id=cq["id"], text=f"{to.value}")
-        client.call("editMessageReplyMarkup", chat_id=chat_id, message_id=cq["message"]["message_id"],
-                    reply_markup={"inline_keyboard": []})
+        mid = cq.get("message", {}).get("message_id")
+        if mid is not None:  # remove the buttons; cosmetic, so a failure must not block other decisions
+            try:
+                client.call("editMessageReplyMarkup", chat_id=chat_id, message_id=mid,
+                            reply_markup={"inline_keyboard": []})
+            except Exception as exc:  # noqa: BLE001
+                log.warning("could not remove buttons for %s: %s", job_id, exc)
         client.call("sendMessage", chat_id=chat_id, text=f"{job_id}: {to.value.upper()}")
         decisions.append((job_id, to.value))
     return decisions
