@@ -95,7 +95,8 @@ def review_video_file(job: Job, settings: Settings) -> tuple[Path, str]:
 
 
 def request_approval(job: Job, store: JobStore, settings: Settings, script: Script, compliance_summary: str,
-                     preview: Path | None = None, client: TelegramClient | None = None) -> Job:
+                     preview: Path | None = None, client: TelegramClient | None = None,
+                     attachments: list[tuple[Path, str]] | None = None) -> Job:
     if job.status != JobStatus.RENDERED:
         raise TelegramError(f"Job {job.id} is {job.status.value}; only rendered jobs can be sent for approval")
     client = _client(settings, client)
@@ -117,6 +118,10 @@ def request_approval(job: Job, store: JobStore, settings: Settings, script: Scri
     if job.subtitles_path and Path(job.subtitles_path).exists():
         with open(job.subtitles_path, "rb") as fh:
             client.call("sendDocument", files={"document": fh}, chat_id=chat, caption="Captions (SRT)")
+    for path, caption in attachments or []:  # e.g. "why this topic" research card and the fact sheet
+        if Path(path).exists():
+            with open(path, "rb") as fh:
+                client.call("sendDocument", files={"document": fh}, chat_id=chat, caption=caption[:1024])
     report = (f"Automated checks for {job.id}:\n{compliance_summary}\n\n"
               "Approving does NOT upload or publish anything. Uploading is a separate manual step.")
     parts = _chunks(report)

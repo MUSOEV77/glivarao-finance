@@ -124,6 +124,19 @@ def cmd_backtest(args, s):
     print("in top-10 every time:", res["in_top_every_time"])
 
 
+def cmd_daily_v2(args, s):
+    """Autonomous daily production (research -> topic -> scripts -> video -> Telegram review). Never uploads."""
+    from datetime import date
+
+    from .daily_v2 import run_daily_v2
+
+    day = date.fromisoformat(args.date) if args.date else None
+    res = run_daily_v2(s, _store(s), today=day, send=not args.no_telegram, workers=args.workers, shorts=args.shorts)
+    print(f"topic: {res.topic}\nwriter: {res.writer}")
+    for job_id, fmt, status, video, note in res.jobs:
+        print(f"  {job_id:28s} {fmt:5s} {status:20s} {video or ''} {note}")
+
+
 def cmd_list(args, s):
     for j in _store(s).list(JobStatus(args.status) if args.status else None, limit=args.limit):
         print(f"{j.id:28s} {j.status.value:20s} {j.format:5s} {j.duration_sec or 0:7.1f}s  {j.topic}")
@@ -212,6 +225,12 @@ def main(argv=None):
     bt.add_argument("--dates", required=True, help="comma-separated YYYY-MM-DD")
     bt.add_argument("--out", default="reports/research/backtest")
     bt.set_defaults(fn=cmd_backtest)
+    d2 = sub.add_parser("daily-v2", help="autonomous daily production: 1 long + 2 Shorts (never uploads)")
+    d2.add_argument("--date", help="YYYY-MM-DD (default today)")
+    d2.add_argument("--no-telegram", action="store_true")
+    d2.add_argument("--workers", type=int)
+    d2.add_argument("--shorts", type=int, default=2)
+    d2.set_defaults(fn=cmd_daily_v2)
     ls = sub.add_parser("list")
     ls.add_argument("--status", choices=[x.value for x in JobStatus])
     ls.add_argument("--limit", type=int, default=30)

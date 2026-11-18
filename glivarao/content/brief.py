@@ -143,12 +143,17 @@ def _add_calcs(b: Brief) -> None:
                     Fact("EDITORIAL", "7% is a hypothetical rate for illustration; returns are not guaranteed.")]
 
 
-def pick_card(report: dict, used_recently: set[str], free_writer: bool = True) -> dict | None:
+def pick_card(report: dict, used_recently: set[str], free_writer: bool = True,
+              recent_categories: list[str] | None = None, max_per_category: int = 2) -> dict | None:
     """Highest-ranked card with at least medium confidence that wasn't used in the last 90 days.
 
     With the free writer, only topics it has reviewed explanations for are eligible (raw forum tags such as a
     software name can rank in research but can't be written well without the Claude writer)."""
+    recent_categories = recent_categories or []
+
     def writable(card):
+        if recent_categories.count(card["category"]) >= max_per_category:  # rotate categories (7-day window)
+            return False
         return not free_writer or family_of(card["key"]) != "generic"
 
     for card in report["ranked"]:

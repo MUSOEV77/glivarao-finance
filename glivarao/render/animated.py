@@ -117,6 +117,12 @@ class SceneFrames:
         for k, (text, t0) in enumerate(plan.notes):
             if s.chart.kind == "none":
                 sticky_note(stage, text, bx + 470, by + 40 + k * 220, t, t0, k, boil)
+        if not getattr(self, "_skip_fx", False):
+            self._fx(stage, t, boil)
+
+    def _fx(self, stage: Image.Image, t: float, boil: int):
+        plan = self.plan
+        bx, by, bw, bh = self.board
         main = plan.actors[0]
         for kind, t0 in plan.fx:
             if kind == "coins":
@@ -125,9 +131,13 @@ class SceneFrames:
                 flying_bills(stage, main.x + 180, self.L.floor_y - 560, bx + bw / 2, by + bh / 2, t, t0, boil,
                              seed=self.idx)
 
-    def _stage(self, t: float, boil: int) -> Image.Image:
-        stage = self.bg.copy()
-        self._content(stage, t, boil)
+    def _stage(self, t: float, boil: int, characters_only: bool = False) -> Image.Image:
+        if characters_only:  # Shorts character panel: clean set, no board content (avoids showing it twice)
+            stage = background("studio" if self.plan.set == "board" else self.plan.set).copy()
+            self._fx(stage, t, boil)
+        else:
+            stage = self.bg.copy()
+            self._content(stage, t, boil)
         for actor in self.actors:
             pose, x, ey = actor.state(t)
             sc = actor.p.scale
@@ -142,9 +152,10 @@ class SceneFrames:
     def frame(self, f: int, portrait: bool = False) -> Image.Image:
         t = f / FPS
         boil = (f // 3) % 3  # ~8 fps line boil: alive, not jittery
-        stage = self._stage(t, boil)
         if portrait:
-            return self._portrait(stage, t)
+            self._skip_fx = True
+            return self._portrait(self._stage(t, boil), self._stage(t, boil, characters_only=True), t)
+        stage = self._stage(t, boil)
         cx, cy, z = self.plan.cam(t, self.noise)
         z = max(z, W / STAGE_W + 1e-3)
         vw, vh = W / z, H / z
@@ -156,7 +167,7 @@ class SceneFrames:
         return frame
 
 
-    def _portrait(self, stage: Image.Image, t: float) -> Image.Image:
+    def _portrait(self, stage: Image.Image, char_stage: Image.Image, t: float) -> Image.Image:
         """Vertical 1080x1920 frame: board panel on top, captions zone, character panel below."""
         out = paper(PW, PH, seed=2).copy()
         push = 1 - 0.035 * ease_in_out(min(1.0, t / max(4.0, self.plan.duration)))  # slow push-in
@@ -174,7 +185,7 @@ class SceneFrames:
         cw, ch = 1140 * push, 950 * push
         top = self.L.floor_y - ch + 30
         x0 = clamp(ccx - cw / 2, 0, STAGE_W - cw)
-        chars = stage.crop((int(x0), int(top), int(x0 + cw), int(top + ch))).resize((PW, 900), Image.BILINEAR)
+        chars = char_stage.crop((int(x0), int(top), int(x0 + cw), int(top + ch))).resize((PW, 900), Image.BILINEAR)
         out.paste(chars, (0, PH - 900))
         _title_card(out, self.scene.heading, t)
         return out

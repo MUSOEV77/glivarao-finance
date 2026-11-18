@@ -22,7 +22,8 @@ def overlap(a: list[str], b: list[str]) -> float:
 def backtest(dates: list[date], out_dir: Path, top: int = 10) -> dict:
     runs = {}
     for d in dates:
-        rep = run_research(d, out_dir / d.isoformat())
+        cached = out_dir / d.isoformat() / f"{d.isoformat()}.json"
+        rep = json.loads(cached.read_text()) if cached.exists() else run_research(d, out_dir / d.isoformat())
         runs[d.isoformat()] = {
             "top": [t["key"] for t in rep["ranked"][:top]],
             "labels": [t["topic"] for t in rep["ranked"][:top]],
