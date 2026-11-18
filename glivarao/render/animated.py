@@ -27,7 +27,7 @@ from ..anim.easing import Noise, clamp, ease_in_out, ease_out, progress
 from ..anim.props import coin_shower, flying_bills, icon, sticky_note
 from ..anim.sets import LAYOUTS, STAGE_H, STAGE_W, background
 from ..art.charts import draw_chart
-from ..art.style import Ink, font
+from ..art.style import Ink, font, paper
 from ..config import Settings
 from ..models import Script
 from ..tts.kokoro import KOKORO_SR, KokoroEngine, Narration
@@ -36,6 +36,7 @@ from .video import _ffmpeg_filter_path
 
 log = logging.getLogger(__name__)
 W, H, FPS = 1920, 1080, 24
+PW, PH = 1080, 1920  # Shorts
 TRANSITION_FRAMES = 12
 
 
@@ -47,6 +48,7 @@ class AnimatedResult:
     render_seconds: float
     unknown_words: list[str]
     voice: str
+    scene_starts: list[float] = None
 
 
 # ------------------------------------------------------------------ frame composition
@@ -123,9 +125,7 @@ class SceneFrames:
                 flying_bills(stage, main.x + 180, self.L.floor_y - 560, bx + bw / 2, by + bh / 2, t, t0, boil,
                              seed=self.idx)
 
-    def frame(self, f: int) -> Image.Image:
-        t = f / FPS
-        boil = (f // 3) % 3  # ~8 fps line boil: alive, not jittery
+    def _stage(self, t: float, boil: int) -> Image.Image:
         stage = self.bg.copy()
         self._content(stage, t, boil)
         for actor in self.actors:
@@ -137,6 +137,14 @@ class SceneFrames:
             sh = _shadow(int(220 * sc))
             stage.paste(sh, (int(x - sh.width / 2), int(self.L.floor_y - 40)), sh)
             stage.paste(img, (int(x - rx * sc), int(self.L.floor_y - feet + ey)), img)
+        return stage
+
+    def frame(self, f: int, portrait: bool = False) -> Image.Image:
+        t = f / FPS
+        boil = (f // 3) % 3  # ~8 fps line boil: alive, not jittery
+        stage = self._stage(t, boil)
+        if portrait:
+            return self._portrait(stage, t)
         cx, cy, z = self.plan.cam(t, self.noise)
         z = max(z, W / STAGE_W + 1e-3)
         vw, vh = W / z, H / z
@@ -148,7 +156,32 @@ class SceneFrames:
         return frame
 
 
+    def _portrait(self, stage: Image.Image, t: float) -> Image.Image:
+        """Vertical 1080x1920 frame: board panel on top, captions zone, character panel below."""
+        out = paper(PW, PH, seed=2).copy()
+        push = 1 - 0.035 * ease_in_out(min(1.0, t / max(4.0, self.plan.duration)))  # slow push-in
+        bx, by, bw, bh = self.board
+        m = 40
+        crop_w, crop_h = (bw + 2 * m) * push, (bh + 2 * m) * push
+        cx, cy = bx + bw / 2, by + bh / 2
+        board = stage.crop((int(cx - crop_w / 2), int(cy - crop_h / 2), int(cx + crop_w / 2), int(cy + crop_h / 2)))
+        bw2 = PW - 40
+        board = board.resize((bw2, int(board.height * bw2 / board.width)), Image.BILINEAR)
+        out.paste(board, (20, 190))
+        Ink(out, seed=3, wobble=1.5, width=6).rect((20, 190, 20 + bw2, 190 + board.height), outline="ink")
+        xs = [a.p.x for a in self.actors]
+        ccx = (min(xs) + max(xs)) / 2 + (60 if len(xs) == 1 else 0)
+        cw, ch = 1140 * push, 950 * push
+        top = self.L.floor_y - ch + 30
+        x0 = clamp(ccx - cw / 2, 0, STAGE_W - cw)
+        chars = stage.crop((int(x0), int(top), int(x0 + cw), int(top + ch))).resize((PW, 900), Image.BILINEAR)
+        out.paste(chars, (0, PH - 900))
+        _title_card(out, self.scene.heading, t)
+        return out
+
+
 def _transition(kind: str, prev: Image.Image, cur: Image.Image, f: int) -> Image.Image:
+    W, H = cur.size  # works for landscape and portrait frames
     e = ease_in_out((f + 1) / TRANSITION_FRAMES)
     if kind == "fade":
         return Image.blend(prev, cur, e)
@@ -185,18 +218,21 @@ def _init_worker(job: dict) -> None:
 
 def _render_segment(i: int) -> str:
     script, plans, envs, starts, workdir = (_JOB[k] for k in ("script", "plans", "envs", "starts", "workdir"))
+    portrait = script.format == "short"
+    fw, fh = (PW, PH) if portrait else (W, H)
     n_frames = starts[i + 1] - starts[i]
     seg = workdir / f"seg_{i:03d}.mp4"
     sf_ = SceneFrames(script, i, plans[i], envs[i])
     prev_last = None
     if i > 0 and plans[i].transition != "cut":
-        prev_last = SceneFrames(script, i - 1, plans[i - 1], envs[i - 1]).frame(starts[i] - starts[i - 1] - 1)
-    cmd = ["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}",
+        prev_last = SceneFrames(script, i - 1, plans[i - 1], envs[i - 1]).frame(starts[i] - starts[i - 1] - 1,
+                                                                             portrait)
+    cmd = ["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{fw}x{fh}",
            "-r", str(FPS), "-i", "-", "-c:v", "libx264", "-preset", "veryfast", "-crf", "16", "-threads", "2",
            "-pix_fmt", "yuv420p", str(seg)]
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
     for f in range(n_frames):
-        img = sf_.frame(f)
+        img = sf_.frame(f, portrait)
         if prev_last is not None and f < TRANSITION_FRAMES:
             img = _transition(plans[i].transition, prev_last, img, f)
         proc.stdin.write(np.asarray(img, dtype=np.uint8).tobytes())
@@ -217,10 +253,10 @@ def _loudnorm_args(wav: Path) -> str:
 
 
 def render_animated(script: Script, workdir: Path, settings: Settings, voice: str = "am_michael",
-                    workers: int | None = None) -> AnimatedResult:
-    if script.format != "long":
-        raise NotImplementedError("v2 renderer currently supports landscape (long) videos; Shorts use v1")
+                    workers: int | None = None, with_audio_mix: bool = True) -> AnimatedResult:
     t0 = time.time()
+    portrait = script.format == "short"
+    fw, fh = (PW, PH) if portrait else (W, H)
     workdir.mkdir(parents=True, exist_ok=True)
     engine = KokoroEngine.get(voice)
     narrations: list[Narration] = [engine.narrate(s.narration) for s in script.scenes]
@@ -237,7 +273,7 @@ def render_animated(script: Script, workdir: Path, settings: Settings, voice: st
     for n in narrations:
         starts_sec.append(offset)
         for s in n.sentences:
-            chunks = chunk_text(s.text, 9)
+            chunks = chunk_text(s.text, 5 if portrait else 9)
             span = s.end - s.start
             total_chars = sum(len(c) for c in chunks) or 1
             tt = offset + s.start
@@ -248,7 +284,8 @@ def render_animated(script: Script, workdir: Path, settings: Settings, voice: st
         offset += n.duration
     starts_sec.append(offset)
     srt = write_srt(cues, workdir / "captions.srt")
-    ass = write_ass(cues, workdir / "captions.ass", W, H, portrait=False)
+    ass = write_ass(cues, workdir / "captions.ass", fw, fh, portrait=portrait,
+                    margin_v=(PH - 1010) if portrait else None)
 
     plans, prev_sets = [], []
     for i, (scene, n) in enumerate(zip(script.scenes, narrations)):
@@ -256,14 +293,26 @@ def render_animated(script: Script, workdir: Path, settings: Settings, voice: st
         plans.append(p)
         prev_sets.append(p.set)
     envs = [envelope(n.audio, KOKORO_SR, FPS) for n in narrations]
+    if with_audio_mix:  # music bed + SFX at animation cues, music ducked under the narration
+        from ..anim.audio import cue_list, mix
+
+        sfx_cues = cue_list(plans, starts_sec[:-1])
+        mixed = mix(audio, sfx_cues, seed=abs(hash(script.title)) % 1000)
+        sf.write(raw_wav, mixed, KOKORO_SR, subtype="PCM_16")
     frame_starts = [int(round(s * FPS)) for s in starts_sec]
 
     job = dict(script=script, plans=plans, envs=envs, starts=frame_starts, workdir=workdir)
     workers = workers or max(1, (os.cpu_count() or 2))
     t1 = time.time()
     # "spawn" (not fork): the parent holds ONNX Runtime threads, and forking a threaded process can deadlock
+    # generous timeout (~2 s per frame of the whole video) so a crashed worker fails loudly instead of hanging
+    timeout = max(300.0, 2.0 * frame_starts[-1])
     with mp.get_context("spawn").Pool(workers, initializer=_init_worker, initargs=(job,)) as pool:
-        segs = pool.map(_render_segment, range(len(script.scenes)), chunksize=1)
+        try:
+            segs = pool.map_async(_render_segment, range(len(script.scenes)), chunksize=1).get(timeout=timeout)
+        except mp.TimeoutError:
+            pool.terminate()
+            raise RuntimeError(f"scene rendering did not finish within {timeout:.0f}s (a worker likely crashed)")
     log.info("frames rendered in %.1fs", time.time() - t1)
 
     concat = workdir / "segments.txt"
@@ -277,12 +326,13 @@ def render_animated(script: Script, workdir: Path, settings: Settings, voice: st
         "ffmpeg", "-y", "-loglevel", "error", "-i", str(joined), "-i", str(raw_wav),
         "-vf", f"ass='{_ffmpeg_filter_path(ass)}':fontsdir='{_ffmpeg_filter_path(fonts_dir)}'",
         "-af", _loudnorm_args(raw_wav), "-ar", "48000",
-        "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p", "-r", str(FPS),
+        "-c:v", "libx264", "-preset", "medium", "-crf", "18" if not portrait else "20", "-pix_fmt", "yuv420p",
+        "-r", str(FPS),
         "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", "-shortest", str(video)], check=True)
     for s in segs:
         Path(s).unlink(missing_ok=True)
     joined.unlink(missing_ok=True)
-    return AnimatedResult(video, srt, total, time.time() - t0, unknown, voice)
+    return AnimatedResult(video, srt, total, time.time() - t0, unknown, voice, starts_sec[:-1])
 
 
 __all__ = ["render_animated", "SceneFrames", "AnimatedResult"]

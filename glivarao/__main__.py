@@ -105,6 +105,25 @@ def cmd_research(args, s):
     print(f"\nreport: {out / (day.isoformat() + '.md')}  (rejected off-topic: {len(rep['rejected_off_topic'])})")
 
 
+def cmd_backtest(args, s):
+    """Historical replay of the research for past dates (accelerated validation; not live observations)."""
+    from datetime import date
+    from pathlib import Path
+
+    from .research.backtest import backtest
+
+    dates = [date.fromisoformat(d) for d in args.dates.split(",")]
+    res = backtest(dates, Path(args.out))
+    print(res["kind"])
+    for d in res["dates"]:
+        r = res["runs"][d]
+        print(f"{d}: recommended={r['recommended']} sources={len(r['sources_ok'])} rejected={r['rejected']}")
+        print("   top: " + " | ".join(r["labels"][:6]))
+    for p in res["consecutive_overlap"]:
+        print(f"top-10 overlap {p['from']} -> {p['to']}: {p['top_overlap_jaccard']}")
+    print("in top-10 every time:", res["in_top_every_time"])
+
+
 def cmd_list(args, s):
     for j in _store(s).list(JobStatus(args.status) if args.status else None, limit=args.limit):
         print(f"{j.id:28s} {j.status.value:20s} {j.format:5s} {j.duration_sec or 0:7.1f}s  {j.topic}")
@@ -189,6 +208,10 @@ def main(argv=None):
     rs.add_argument("--date", help="YYYY-MM-DD (default today)")
     rs.add_argument("--out", default="reports/research")
     rs.set_defaults(fn=cmd_research)
+    bt = sub.add_parser("research-backtest", help="historical replay of research for past dates")
+    bt.add_argument("--dates", required=True, help="comma-separated YYYY-MM-DD")
+    bt.add_argument("--out", default="reports/research/backtest")
+    bt.set_defaults(fn=cmd_backtest)
     ls = sub.add_parser("list")
     ls.add_argument("--status", choices=[x.value for x in JobStatus])
     ls.add_argument("--limit", type=int, default=30)

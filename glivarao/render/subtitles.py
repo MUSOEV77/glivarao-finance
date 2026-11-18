@@ -61,9 +61,10 @@ def write_srt(cues: list[Cue], path: Path) -> Path:
     return path
 
 
-def write_ass(cues: list[Cue], path: Path, w: int, h: int, portrait: bool) -> Path:
+def write_ass(cues: list[Cue], path: Path, w: int, h: int, portrait: bool, margin_v: int | None = None) -> Path:
     size = 76 if portrait else 62
-    margin_v = int(h * 0.355) if portrait else 40  # Shorts: between chart and character, above the UI overlay
+    if margin_v is None:
+        margin_v = int(h * 0.355) if portrait else 40  # Shorts: between chart and character, above the UI overlay
     header = f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: {w}

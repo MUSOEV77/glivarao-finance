@@ -91,7 +91,8 @@ def check_script(script: Script, enforce_length: bool = True,
                 r.errors.append(f"Scene {i}: FRED chart '{c.title}' was not filled with data")
             elif not c.values or (c.labels and len(c.labels) != len(c.values)):
                 r.errors.append(f"Scene {i}: chart '{c.title}' has mismatched labels/values")
-            if c.source.strip().lower() != "illustrative example" and not c.source.startswith("FRED, "):
+            if c.source.strip().lower() not in ("illustrative example", "calculated example") \
+                    and not c.source.startswith("FRED, "):
                 r.fact_check.append(f"Scene {i}: chart '{c.title}' cites '{c.source}' — verify numbers")
         if c.kind == "compound_growth" and not c.params.get("years"):
             r.errors.append(f"Scene {i}: compound_growth chart needs params.years")

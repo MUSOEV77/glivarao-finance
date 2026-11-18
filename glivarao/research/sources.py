@@ -69,9 +69,10 @@ def stackexchange(http: Http, today: date, recent_days: int = 365, pages: int = 
         for sort, days, npages in plans:
             frm = int(datetime.combine(today - timedelta(days=days), datetime.min.time(),
                                        tzinfo=timezone.utc).timestamp())
+            to = int(datetime.combine(today, datetime.min.time(), tzinfo=timezone.utc).timestamp())
             for page in range(1, npages + 1):
                 d = http.get_json(SE_API, {"site": "money", "sort": sort, "order": "desc", "pagesize": 100,
-                                           "page": page, "fromdate": frm, "filter": "default"},
+                                           "page": page, "fromdate": frm, "todate": to, "filter": "default"},
                                   save_as=f"se_{sort}_{page}.json")
                 for q in d.get("items", []):
                     if q["question_id"] in seen:

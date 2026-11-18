@@ -41,6 +41,8 @@ class Settings:
     fps: int = field(default_factory=lambda: int(_env("GLIVARAO_FPS", "12")))
     timezone: str = field(default_factory=lambda: _env("GLIVARAO_TIMEZONE", "America/New_York"))
 
+    # Owner approval switch for anything that costs money (Claude API). Default: off.
+    allow_paid_apis: bool = field(default_factory=lambda: _bool("ALLOW_PAID_APIS", False))
     anthropic_api_key: str = field(default_factory=lambda: _env("ANTHROPIC_API_KEY"))
     script_model: str = field(default_factory=lambda: _env("GLIVARAO_SCRIPT_MODEL", "claude-opus-5-5"))
 
