@@ -2,6 +2,22 @@
 
 **Status:** analysis and proposal only. The production pipeline has **not** been changed. Waiting for approval.
 
+> **Direction (set by the owner): GLIVARAO Finance is a finance-only channel.**
+> Casual Finance is used **only as a reference for visual and storytelling quality**, not for topics.
+> Every video must be directly about money and personal finance, within these seven categories:
+>
+> 1. Personal Finance
+> 2. Financial Psychology
+> 3. Investing
+> 4. Credit and Debt
+> 5. Saving and Wealth Building
+> 6. Banking and Money
+> 7. Financial Scams and Money Mistakes
+>
+> **Out of scope:** general economics, politics, geopolitics, country or sovereign-debt stories, and other
+> unrelated topics. Where this document describes the reference's macro or crisis topics, that is only to
+> describe the benchmark. It is not a recommendation.
+
 ## What this is based on (and what it isn't)
 
 | Source | Status |
@@ -86,13 +102,19 @@ and no sound effects at all**, which makes the sample feel empty compared with a
 Economy". They are about **systemic events** (AI bubble, real estate, sovereign debt, margin debt, cost of
 money), they are timely (2026), and the title and thumbnail **complement** each other rather than repeat.
 
-**Ours.** Evergreen personal-finance lessons ("compound interest, explained"). This is a different market
-position. It is less clickable, but also safer and more durable.
+**Ours.** Evergreen personal-finance lessons ("compound interest, explained"). **This positioning is kept:
+the channel stays finance-only.** What we take from the reference is *packaging craft*, not topics:
+- a short emotional serif reaction line on the thumbnail;
+- a title that adds tension or curiosity instead of repeating the thumbnail;
+- a real number in the hook.
+
+Applied to finance-only subjects, for example: "The Minimum Payment Trap Costs More Than You Think", or
+the thumbnail line "It Never Ends.". The rule is tension, not fear, and every claim must be sourced.
 
 **Structure _[genre, unverified]_.** A cold-open hook with the most striking real number in the first
 20–30 seconds, then:
 1. why it matters now;
-2. a historical parallel (2000, 2008);
+2. a relatable money story or historical parallel (for GLIVARAO: a person's real-life money decision, never politics);
 3. the mechanism;
 4. the evidence, chart after chart;
 5. the counter-argument;
@@ -115,7 +137,7 @@ channel's characters, specific drawings, fonts, layouts or wording.
 | Data colors | Grey history; **crimson (#C8102E) for stress or downside**; **ledger green (#2E7D4F) for recovery or upside** | Red/grey is a universal finance convention; we pair it with green and amber |
 | Headline font | **Fraunces** (open-licensed serif, black weight) with an amber highlighter stroke behind one word | A different serif, plus the highlighter device |
 | Cast | **Max redesigned as a doodle** (round head, round glasses, green scarf as his single color), **Penny the copper coin** (the only colored character), plus a disposable crowd of generic doodle extras | Original mascots; ours are recurring and branded, theirs are anonymous |
-| Maps | Country outlines from **Natural Earth (public domain)**, hatched in pencil, with eyes. **Color driven by data** (crimson = stressed, green = healthy) | Data-colored, hatched maps rather than flat green |
+| Personified money objects (replaces country maps) | Finance-only metaphor cast: a **credit card with a mischievous grin**, a **worried wallet**, a **smug interest-rate % sign**, a **sleepy savings account** (bank building with eyelids), a **paycheck that runs away**, a **scam envelope wearing a disguise**. A US map is used only when a finance topic needs it (for example, state income-tax differences) | Their maps personify countries; ours personify money itself |
 | Thumbnail layout | Three templates to A/B test. **(A)** a centered big number with a highlighter swipe and the serif reaction line above; **(B)** a split "then vs now" with two mini charts; **(C)** one large personified object or map with the serif line. All on ledger paper with an amber accent | Avoids copying their top-left headline / right chart / bottom-left character arrangement |
 | Sound | GLIVARAO sonic logo (a short pencil-tap plus soft piano motif), a quiet licensed music bed, and a sound-effects set | Our own audio identity |
 
@@ -125,13 +147,54 @@ channel's characters, specific drawings, fonts, layouts or wording.
 
 | Phase | Deliverable | What it changes | Needs from you |
 |---|---|---|---|
-| **A. Style frames** | 3 still frames, 1 thumbnail per template, and a **15-second motion test** in the new identity, re-rendering part of the existing 60-second script | Nothing in production (sandbox only) | Approval of the look |
-| **B. Doodle renderer (v3)** | Ledger-paper infinite canvas; stroke draw-on engine; camera that glides between vignettes; redesigned Max and Penny; doodle crowd; personified Natural Earth maps; new chart style (grey history, crimson highlight, red year label, pulsing endpoint, hand-drawn annotation arrows); highlighter callouts | New renderer **alongside** v1 and v2 (nothing removed) | — |
-| **C. Beat-level scripting** | The Claude script schema gains, for each sentence, a visual beat (metaphor, characters, props, map, chart, annotation). The director animates each beat in sync with that sentence's timing. Targets: a new visual every 3–6 s, and a hook containing a real number in the first 25 s | Script prompt and schema | Content positioning decision (below) |
-| **D. Real data charts** | Expand the FRED series list (house prices, mortgage delinquencies, margin debt, credit spreads, unemployment, 2y/10y yields, CPI, money supply). Every chart cites its source on screen | Data layer | **FRED API key** (free) |
+| **A. Phase 1: style test (finance-only)** | See "Phase 1 in detail" below: 3 style frames, 3 thumbnails and a 15-second motion test, all on finance-only topics | Nothing in production (sandbox only) | Approval of the look |
+| **B. Doodle renderer (v3)** | Ledger-paper infinite canvas; stroke draw-on engine; camera that glides between vignettes; redesigned Max and Penny; doodle crowd; personified money objects; new chart style (grey history, crimson highlight, red year label, pulsing endpoint, hand-drawn annotation arrows); highlighter callouts | New renderer **alongside** v1 and v2 (nothing removed) | — |
+| **C. Beat-level scripting** | The Claude script schema gains a required **category** (one of the seven) and, for each sentence, a visual beat (metaphor, characters, props, chart, annotation). The prompt and compliance check reject off-topic scripts (economics, politics, geopolitics). The director animates each beat in sync with that sentence's timing. Targets: a new visual every 3–6 s, and a hook containing a real number in the first 25 s | Script prompt, schema, topic bank | — |
+| **D. Money-relevant data charts** | **Exact math charts first** (no key needed): credit-card payoff schedules, loan amortization, compound growth, fee drag, inflation's effect on cash savings. Then **household-finance data from FRED** only: average credit-card interest rate (TERMCBCCALLNS), personal saving rate (PSAVERT), revolving consumer credit (REVOLSL), credit-card delinquency rate (DRCCLACBS), 30-year mortgage rate (MORTGAGE30US), and CPI only when framed as "what your dollar buys". Every chart cites its source on screen | Data layer | **FRED API key** (free) |
 | **E. Audio** | Sound-effects set (pencil, whoosh, paper, cash, sting); a music bed ducked under the voice; loudness at −14 LUFS; voice delivery tuned to about 155 wpm with dramatic pauses on reveals; A/B test Kokoro vs ElevenLabs | Mixer | Music licensing choice; optional ElevenLabs budget |
 | **F. Packaging** | New thumbnail templates (A/B/C); title rules allowing tension while staying factual; compliance that requires every alarming claim to be backed by a chart or source | Thumbnail and compliance modules | Tone decision (below) |
 | **G. Shorts** | Vertical version of v3: a single beat-driven story under 60 s | Shorts renderer | — |
+| **H. Topic bank** | Replace `config/topics.yaml` with a finance-only bank organized by the seven categories, rotating categories through the week. Today's bank still contains three general-economics topics (the Federal Reserve, recessions, and Treasury securities explained as macro), which would be removed or reframed as personal money decisions | Topic config | Approval of the topic list |
+
+### Phase 1 in detail (finance-only style test)
+
+**Goal:** you judge the new GLIVARAO look and motion before any production code changes. Everything is
+built in a separate sandbox folder and attached here for review. Nothing is uploaded or sent anywhere.
+
+**1. Three style frames (1920×1080 stills), one per category to show range**
+
+| # | Category | Scene shown | What it demonstrates |
+|---|---|---|---|
+| 1 | Credit and Debt | "The minimum payment trap": a grinning credit card holds a long receipt-chain that wraps around a worried Max. Beside it, a payoff chart: the grey "balance" line declines painfully slowly over 20+ years, the total-interest area is filled in crimson, and the final figure has an amber highlighter swipe | Personified money object; crimson-highlight chart from **exact amortization math**; highlighter callout |
+| 2 | Financial Psychology | "Why buying feels so good": a doodle brain at a checkout counter, a small sparkle at the moment of tapping the card, and a sticky note reading "Wait 24 hours" | Metaphor-driven scene with no chart; expressive faces; ledger-paper canvas |
+| 3 | Financial Scams | "Guaranteed 20% a month": a scam envelope in a fake mustache handing over a too-perfect upward chart, while Penny raises a red warning flag | Scam-awareness storytelling; crimson for danger; a clear "this is a warning" visual language |
+
+**2. Three thumbnails, one per layout, on the same three topics**
+- **(A) Big number:** the total-interest figure (for example "$X in interest.", calculated exactly before use; no figure has been verified yet) in Fraunces serif, with the key word on amber highlighter.
+- **(B) Then vs now split:** "Paid $50 a month. Still owe it all." with two mini charts.
+- **(C) Personified object:** the scam envelope character with "Too Good To Be True.".
+
+All three are on ledger paper, with at most three elements, and checked for readability at phone size
+(rendered at 320 px wide).
+
+**3. A 15-second motion test on the minimum-payment-trap scene**
+- A Kokoro narration line or two, with a new visual beat about every 4 seconds (four beats in total).
+- Lines that **draw on** stroke by stroke, then a light boil.
+- The camera glides across one continuous canvas instead of cutting between rooms.
+- The chart draws in sync with the spoken number, and its crimson area fills as interest is mentioned.
+- Placeholder pencil and whoosh sounds, generated in code with no licensing involved, so you can judge
+  the feel. Real music and sound effects come in Phase 5.
+- Every figure comes from exact calculation and is listed next to its formula inputs. Example inputs: a
+  $5,000 balance at 24% APR, paying 2% of the balance (minimum $25).
+
+**4. A short review note** on what changed from the current sample and the measured render speed of the
+new drawing style.
+
+**Not in Phase 1:** no changes to `glivarao/` production modules, the topic bank, compliance, Telegram or
+YouTube code. The test lives in `sandbox/phase1/` and is easy to delete.
+
+**After Phase 1:** you approve, or ask for changes to, the look. Only then do Phases 2–8 (B–H in the table
+above) begin, each with its own approval.
 
 ### Where the art comes from (the main quality question)
 
@@ -146,8 +209,7 @@ style is approved. That is the step that gets closest to "real hand-drawn" quali
 
 ### Decisions needed from you
 
-1. **Content positioning.** Stay with evergreen personal finance, move to macro/crisis news like the
-   reference, or mix them (for example, weekly macro plus how-to Shorts)?
+1. ~~Content positioning~~ **Decided: finance-only, seven categories.**
 2. **Tone.** The reference uses fear-driven hooks ("They're Hiding The Truth."). GLIVARAO's compliance
    currently blocks sensational or misleading framing. Proposed rule: **tension is allowed, claims must be
    sourced**. Approve or adjust.
