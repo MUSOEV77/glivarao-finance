@@ -1,0 +1,46 @@
+{
+  "label": "sim_1vcpu",
+  "cpus_visible": 1,
+  "workers": 1,
+  "stages": {
+    "long_render": {
+      "wall_s": 943.2,
+      "cpu_s": 1095.0,
+      "peak_rss_mb_so_far": 1655
+    },
+    "long_thumbnail": {
+      "wall_s": 0.1,
+      "cpu_s": 0.1,
+      "peak_rss_mb_so_far": 1655
+    },
+    "telegram_review_copy": {
+      "wall_s": 201.7,
+      "cpu_s": 199.6,
+      "peak_rss_mb_so_far": 1655
+    },
+    "short1_render": {
+      "wall_s": 159.0,
+      "cpu_s": 190.4,
+      "peak_rss_mb_so_far": 1655
+    }
+  },
+  "long_words": 537,
+  "long_scenes": 14,
+  "long_video_s": 217.2,
+  "long_files_mb": {
+    "audio_master.wav": 20.9,
+    "audio_master.json": 0.0,
+    "review_copy.mp4": 46.7,
+    "narration_kokoro.wav": 10.4,
+    "video.mp4": 75.9,
+    "captions.ass": 0.0,
+    "thumbnail.jpg": 0.1,
+    "captions.srt": 0.0,
+    "segments.txt": 0.0
+  },
+  "short1_video_s": 42.1,
+  "peak_rss_mb": 1655,
+  "total_wall_s": 1304.0,
+  "total_cpu_s": 1485.1,
+  "disk_mb_total": 169.3
+}
