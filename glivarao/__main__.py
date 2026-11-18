@@ -156,7 +156,19 @@ def cmd_voice_sample(args, s):
     text = Path(args.script).read_text()
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    if args.provider == "google_chirp":
+    if args.provider == "gemini_tts":
+        from .tts.gemini_tts import estimate_usd
+        from .tts.narrator import gemini_narrator
+
+        hi = estimate_usd(" ".join(text.split()), s.gemini_tts_price, s.gemini_tts_tokens_per_sec)
+        lo = estimate_usd(" ".join(text.split()), 9.0, 25)
+        print(f"plan: Gemini TTS {s.gemini_tts_model}, voice {s.gemini_tts_voice}, "
+              f"{len(' '.join(text.split())):,} characters -> about ${lo:.3f}-${hi:.3f}")
+        if not (s.allow_paid_apis and s.gemini_api_key):
+            print("NOT RUN: paid voice needs owner approval (ALLOW_PAID_APIS=true) and GEMINI_API_KEY.")
+            return
+        runs = [(s.gemini_tts_voice, gemini_narrator(s))]
+    elif args.provider == "google_chirp":
         voices = list(CANDIDATE_VOICES) if args.compare else [args.voice or s.google_tts_voice]
         chars = sum(len(x) for x in billable_text(text))
         cost = chars * len(voices) * s.tts_price_per_million / 1e6
@@ -182,10 +194,10 @@ def cmd_voice_sample(args, s):
             subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(stem.with_suffix(".wav")), *codec,
                             str(stem.with_suffix(ext))], check=True)
         words = len(text.replace("*", "").split())
-        billed = getattr(engine, "billed_chars", 0)
+        billed = getattr(engine, "billed_chars", 0) or round(getattr(engine, "spent_usd", 0.0), 4)
         print(f"voice={voice} duration={n.duration:.1f}s pace={words / n.duration * 60:.0f} wpm "
               f"loudness={rep['after']['lufs']} LUFS true_peak={rep['after']['true_peak']} dBTP "
-              f"billed_chars={billed:,}")
+              f"billed={billed}")
         print(f"  files: {stem}.wav / .m4a / .mp3")
 
 
@@ -286,7 +298,7 @@ def main(argv=None):
     vs = sub.add_parser("voice-sample", help="narrated + mixed + mastered audio sample (local only)")
     vs.add_argument("--script", default="config/samples/voice_sample_60s.txt")
     vs.add_argument("--voice", help="voice name (default: KOKORO_VOICE or GOOGLE_TTS_VOICE)")
-    vs.add_argument("--provider", choices=["kokoro", "google_chirp"], default="kokoro")
+    vs.add_argument("--provider", choices=["kokoro", "gemini_tts", "google_chirp"], default="kokoro")
     vs.add_argument("--compare", action="store_true", help="google_chirp: render every candidate voice")
     vs.add_argument("--out", default="output/voice_sample")
     vs.set_defaults(fn=cmd_voice_sample)

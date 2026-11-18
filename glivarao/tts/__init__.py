@@ -109,7 +109,7 @@ def _google(text: str, dst: Path, s: Settings) -> None:
 
 
 PLACEHOLDER_PROVIDERS = {"espeak", "silent"}
-PAID_PROVIDERS = {"elevenlabs", "google", "google_chirp"}
+PAID_PROVIDERS = {"elevenlabs", "google", "google_chirp", "gemini_tts"}
 
 
 def _kokoro(text: str, dst: Path, s: Settings) -> None:

@@ -1,122 +1,132 @@
-# Premium narration voice: comparison and recommendation (2026-11-18)
+# GLIVARAO premium narrator: final selection (2026-11-18)
 
-**Constraint:** at most $20/month for the voice. Nothing has been purchased and no paid API call has been made.
-Prices come from web research on 2026-11-18, mostly third-party pricing summaries, and are linked below.
-**Confirm on each provider's own pricing page before subscribing.**
+## Selected voice
 
-## Our real monthly volume (MEASURED from GLIVARAO scripts)
+**Google Gemini TTS: model `gemini-3.8-flash-tts`, voice `Charon`, with style direction "warm, deep, confident
+American male documentary narrator explaining personal finance".**
 
-| Item | Characters |
-|---|---|
-| Long video, 16.5 min (2,477 words) | 14,657 |
-| Long video, 18 min (2,700 words, upper bound) | ~15,976 |
-| Short (average of 24 generated) | 590 (max 701) |
-| **30 long + 60 Shorts** | **≈475,000–522,000** |
-| Plus 10% for re-renders and edits | **≈575,000** |
+Kokoro `am_michael` stays as the free automatic backup. Nothing has been purchased and no paid call has been made.
 
-## Comparison
+## How it was chosen (quality first, then budget)
 
-| Service | Price | Free allowance | Cost for our ~575k chars | Fits $20? | Notes |
-|---|---|---|---|---|---|
-| **Google Cloud TTS – Chirp 3 HD** | $30 / 1M chars | **1M chars/month reported**¹ | **$0 if the free tier applies; ≤ $17.25 if not** | **Yes, either way** | Pay as you go, no subscription. About 16 US male voices. Speaking rate 0.25–2×. Custom IPA pronunciations. API key. Output usable in media under the Google Cloud terms (no training of competing TTS)² |
-| Azure AI Speech – Neural HD | $22 / 1M | none for HD³ | ≈ $12.65 | Yes | Strong US male HD voices (e.g. the Andrew and Davis families). Pay as you go. Runner-up |
-| Azure AI Speech – standard Neural | $15 / 1M | 500k/month³ | ≈ $1.10 | Yes | Cheapest, but standard rather than HD quality |
-| OpenAI gpt-4o-mini-tts | ≈ $0.015 / audio-min⁴ | none | ≈ $8–9 (≈ 540 min) | Yes | Takes style instructions (for example "documentary narrator"). **Requires clear disclosure that speech is AI-generated.** Commercial terms for preset voices are not clearly confirmed⁵ |
-| Inworld TTS | $15–25 / 1M⁴ | trial | ≈ $9–14 | Yes | Newer provider, high benchmark rankings. Less established |
-| **ElevenLabs** | Creator $22 = 121k credits; Pro $99 = 600k credits⁶ | 10k (no commercial licence) | **$99/month (Pro)** | **No** | Excellent quality, but our volume needs the Pro plan. The $22 Creator plan covers only about 7 long videos |
+I can't listen to audio, so the choice rests on **blind human-preference tests**, where listeners vote without
+knowing the provider. That rules out choosing by popularity or brand.
 
-## Recommendation
+| Model (Artificial Analysis Speech Arena, provider voices; snapshots vary) | Elo | Our 90-video month | Within $20? |
+|---|---|---|---|
+| ElevenLabs Eleven v4 / v4 Turbo | ~1,340 | needs the $99 Pro plan (600k credits) | ✗ |
+| Cartesia Sonic 3.6 | ~1,273–1,282 | needs the $49 plan (1.25M credits) | ✗ |
+| **Google Gemini 3.8 Flash TTS** | **~1,260–1,283** | **$7–$11 now (≤ $22.55 worst case after a reported 2027 price doubling, capped at $20 in code)** | **✓** |
+| Inworld Realtime TTS-2 | ~1,270 | ≈ $13–$14 ($25/1M chars) | ✓ |
+| Speechify Simba 3.2 | ~1,241 | ≈ $4 | ✓ |
+| Google Chirp 3 HD (previous suggestion) | not ranked in any source found | ≈ $0–$17 | ✓, but no blind evidence, so it was replaced |
 
-**Service: Google Cloud Text-to-Speech, Chirp 3 HD.** It's the only top-tier natural voice that covers the
-full 90-video month inside $20 even **without** counting the free tier. Billing is pay as you go, so there's
-no subscription to cancel.
+**Decision between the two in-budget leaders.** Gemini and Inworld are statistically tied on naturalness (an
+independent blind study found the top 8 English voices tied). The deciding factors:
 
-**Voice: `en-US-Chirp3-HD-Charon`** is the default candidate (Google's style label: "informative"). Three
-alternates go into the listening test:
+1. **Style direction in plain English.** Gemini accepts instructions such as "documentary narrator, measured
+   pace, subtle emphasis on figures". That directly targets your brief: warm, confident, natural pauses,
+   expressive but not exaggerated.
+2. **A clearly American, professional male voice.** Charon is Google's "informative" male voice and is listed
+   under VoiceRankings' "male professional" voices. Inworld's deepest male voices are described as "gruff"
+   (Hades), British (Ronald) or unconfirmed as American.
+3. **Price protection without changing the voice.** The same Charon voice exists on the cheaper Gemini 3.8
+   Flash-Lite TTS. Near the cap, GLIVARAO switches model, not narrator.
+4. **Terms.** Under the Gemini API terms, Google claims no ownership of generated content. On the paid tier,
+   prompts aren't used to train models.
 
-| Voice | Google's style label |
-|---|---|
-| `en-US-Chirp3-HD-Charon` | informative |
-| `en-US-Chirp3-HD-Orus` | firm |
-| `en-US-Chirp3-HD-Algenib` | gravelly (likely the deepest) |
-| `en-US-Chirp3-HD-Sadaltager` | knowledgeable |
+**Why Charon among Gemini's male voices:**
+- Google's own labels: Charon "informative", Orus "firm", Algenib "gravelly", Sadaltager "knowledgeable".
+- "Informative" plus warm style direction is the closest fit to a finance documentary narrator.
+- "Gravelly" risks sounding rough over 17 minutes; "firm" risks sounding stern.
+- **No per-voice blind ranking exists** in the sources found, so one listening sample should confirm the choice.
 
-I can't listen to audio. "Deep, natural, documentary" has to be judged by ear from the comparison samples,
-and the default switches to whichever voice you pick.
+## Exact cost and billing (MEASURED volume × published prices)
 
-**Monthly character allowance:**
-- Google reports the first **1,000,000 Chirp 3 HD characters each month as free**¹. Verify this on your
-  billing account.
-- GLIVARAO's own hard cap is set to **666,666 characters/month** ($20 at $30/1M, counting no free tier).
-- If you confirm the free tier, setting `TTS_FREE_CHARS_PER_MONTH=1000000` raises the cap to 1,666,666.
+- **Volume (measured from GLIVARAO scripts):** 475,000–522,000 characters per month, about 540–593 minutes
+  of speech. Our own pauses are inserted as silence and never billed.
+- **Billing basis:** per audio token. Google states 25 tokens per second of audio; one third party measured 32.
 
-**Estimated cost for the 90-video target:**
-- **$0/month** if the free tier applies to your account;
-- **$14.25–$17.25/month** if it doesn't;
-- either way, never more than the $20 cap.
+| Volume | at $9/1M (2026 rate) | at $18/1M (reported 2027 rate) |
+|---|---|---|
+| 475k chars, 25 tok/s | $7.29 | $14.58 |
+| 522k chars, 32 tok/s | $10.25 | $20.50 |
+| 574k chars (+10% edits), 32 tok/s | $11.28 | $22.55 |
 
-## What's built (and tested with a simulated API, no real calls)
+Input text adds about 144k tokens a month, a negligible amount.
 
-- **`TTS_PROVIDER=google_chirp`** uses Chirp 3 HD. It works only when `ALLOW_PAID_APIS=true` and
-  `GOOGLE_TTS_API_KEY` is set.
-- **One narrator per video.** If the paid voice isn't approved, the key is missing, the month's cap would be
-  exceeded, or the API fails part-way, **the whole video uses the Kokoro am_michael backup**. Voices are never
-  mixed within a video, and the reason is recorded in the video's metadata and shown in the Telegram review.
-- **Same pacing system as today:** sentence-by-sentence synthesis with GLIVARAO's pauses (sentence, question,
-  emphasis, paragraph beat). Captions, lip-sync and animation cues stay synchronized.
-- **Cache:** each sentence is stored by voice, rate and text, so re-rendering never bills twice.
-- **Ledger:** `data/tts_usage.json` counts billed characters per month and enforces the cap.
-- **Pronunciation:** IPA overrides for GLIVARAO, HELOC and FINRA. If the API rejects them, the request is
-  retried as plain text.
-- **Security:** the API key goes in a header, never in the URL or in error messages.
+**What the code guarantees:**
+- Defaults use the conservative $18 and 32 tok/s figures.
+- Spending is tracked in USD from Google's own usage metadata.
+- The hard cap is **$20/month**.
+- If a video would cross the cap, it uses **Charon on Flash-Lite** (about half price, same voice). If that
+  can't fit either, the whole video uses Kokoro am_michael.
+- **Monthly spend cannot exceed $20.**
 
-## To produce the comparison sample (needs your explicit approval)
+**Billing requirements:**
+- A Google Cloud project with **billing enabled**. The paid tier is needed so prompts aren't used for
+  training.
+- A **Gemini API key** from Google AI Studio for that project.
+- Pay as you go, with no subscription.
+- Also set a **$20 budget alert** in Google Cloud Billing as a second safety net.
+
+**Prices conflict between Google's own pages ($9 vs $4.50 per 1M audio tokens).** The first approved call's
+usage metadata will confirm real cost per minute, and the config is then set to the real rate.
+
+## Confirmation sample (needs your approval)
 
 ```bash
-python -m glivarao voice-sample --provider google_chirp --compare   # shows plan + cost; refuses without approval
+python -m glivarao voice-sample --provider gemini_tts   # prints plan + cost; refuses without approval
 ```
 
-The plan is 4 voices × 774 characters = **3,096 characters ≈ $0.09** (or $0 inside the free tier). Steps:
-1. Create a Google Cloud project with billing enabled, enable the **Cloud Text-to-Speech API**, and create an
-   API key restricted to that API.
-2. Approve the run. I'll then:
-   - enable `ALLOW_PAID_APIS` for the sample only;
-   - save the key through the secure credential form (host `texttospeech.googleapis.com`, header
-     `X-Goog-Api-Key`);
-   - allow that host in this environment's network;
-   - run the command and send you 4 files to compare with the Kokoro am_michael sample.
+- Script: `config/samples/voice_sample_60s.txt` (792 characters).
+- Cost: **about $0.012–$0.031** (1–3 cents).
+- To run it:
+  1. enable billing and create a Gemini API key;
+  2. approve the run;
+  3. I set `ALLOW_PAID_APIS=true` for the sample, save the key via the secure credential form (host
+     `generativelanguage.googleapis.com`, header `x-goog-api-key`) and allow that host in the environment's
+     network;
+  4. I run the command and measure the result (loudness, pace, timing, clipping), confirm the real cost from
+     usage metadata, and send you the file.
 
-## To switch production after you pick a voice
+## Switching production after the sample is confirmed
 
 ```bash
-TTS_PROVIDER=google_chirp
-GOOGLE_TTS_VOICE=en-US-Chirp3-HD-<your pick>
+TTS_PROVIDER=gemini_tts
+GEMINI_TTS_VOICE=Charon
 ALLOW_PAID_APIS=true
 TTS_MONTHLY_BUDGET_USD=20
 ```
 
-Kokoro am_michael stays the automatic free backup. Uploading to YouTube remains manual and private-only; this
-change doesn't affect that.
+Everything else is unchanged: Telegram review and approval, manual private-only YouTube upload, and no
+automatic publishing or scheduling.
+
+## Implementation notes
+
+- **Whole scenes per request,** for natural cross-sentence rhythm. Sentence timings for captions and animation
+  are recovered from the pauses in the audio, with a proportional fallback.
+- **Brand respelling:** "Gli-VAR-oh", since prompt-based models don't take IPA.
+- **Unverified until the first approved call:** the model IDs `gemini-3.8-flash-tts` and
+  `gemini-3.8-flash-lite-tts`. Sources name them inconsistently, so both are configurable. A wrong ID returns
+  an error (no charge) and the video falls back to Kokoro.
+- Google Chirp 3 HD support stays in the code as an alternative provider (`TTS_PROVIDER=google_chirp`).
 
 ## Sources
 
-1. Google Cloud TTS pricing (Chirp 3 HD $30/1M, first 1M free/month), third-party summaries:
-   [developersdigest](https://www.developersdigest.tech/models/speech/google-cloud),
-   [costbench](https://costbench.com/software/ai-voice-tools/google-cloud-text-to-speech/),
-   [openapipricing](https://openapipricing.com/blog/tts/google-cloud-text-to-speech).
-   Voices and controls: [Google Cloud docs: Chirp 3 HD](https://docs.cloud.google.com/text-to-speech/docs/chirp3-hd),
-   [release notes](https://docs.cloud.google.com/text-to-speech/docs/release-notes).
-2. Usage of generated audio:
-   [Google Developer forum: commercial usage of Cloud TTS](https://discuss.google.dev/t/commercial-usage-of-google-cloud-tts/91316),
-   [Text-to-Speech API licence thread](https://discuss.google.dev/t/text-to-speech-api-license/187973).
-3. Azure: [texttolab](https://texttolab.com/blog/azure-text-to-speech-pricing),
-   [Microsoft Tech Community: Neural HD updates](https://techcommunity.microsoft.com/blog/azure-ai-foundry-blog/azure-speech-%E2%80%93-neural-hd-text-to-speech-recent-voice-updates/4505380),
-   [Cartesia summary](https://www.cartesia.ai/learn/top-microsoft-azure-text-to-speech-alternatives).
-4. Inworld, Cartesia, OpenAI: [texttolab Inworld](https://texttolab.com/blog/inworld-pricing),
-   [texttolab OpenAI](https://texttolab.com/blog/openai-tts-pricing),
-   [vsref Cartesia vs Inworld](https://www.versusref.com/tts/cartesia-vs-inworld-tts/).
-5. OpenAI disclosure requirement: [OpenAI service terms](https://openai.com/policies/service-terms/),
-   [developer forum](https://community.openai.com/t/where-is-the-usage-policy-for-ai-voiceovers/679737).
-6. ElevenLabs plans: [Cartesia: ElevenLabs pricing](https://www.cartesia.ai/learn/elevenlabs-pricing),
-   [flexprice](https://flexprice.io/blog/elevenlabs-pricing-breakdown),
-   [felloai](https://felloai.com/elevenlabs-pricing/).
+- Blind rankings: [Artificial Analysis TTS leaderboard](https://artificialanalysis.ai/text-to-speech/leaderboard),
+  [provider-voice board](https://artificialanalysis.ai/text-to-speech/leaderboard/provider-voice),
+  [benchmarklist snapshot](https://benchmarklist.com/arenas/artificial_analysis_provider_voice/),
+  [Speko blind test: "most natural is an eight-way tie"](https://benchmarks.speko.ai/blog/most-natural-is-a-tie/),
+  [Speechify on AA Elo](https://speechify.ai/blog/artificial-analysis-tts-leaderboard-elo-explained) (vendor).
+- Gemini TTS pricing and voices: [Gemini API pricing](https://ai.google.dev/gemini-api/docs/pricing),
+  [neomanex: 3.8 Flash TTS $9, doubling on 1 January](https://neomanex.com/news/gemini-3-8-flash-tts-flash-lite-tts-api-pricing),
+  [mxchat: measured tokens/second](https://mxchat.ai/gemini-tts-pricing-tokens-per-second/),
+  [Firebase: Gemini speech generation and style](https://firebase.google.com/docs/ai-logic/generate-speech),
+  [Google Cloud: Gemini TTS](https://cloud.google.com/text-to-speech/docs/gemini-tts),
+  [VoiceRankings: male professional voices](https://voicerankings.com/voices/styles/professional/male).
+- Terms: [Gemini API Additional Terms of Service](https://ai.google.dev/gemini-api/terms).
+- Inworld: [pricing](https://inworld.ai/pricing), [voice listings](https://voicerankings.com/voice/inworld-tts-2/male),
+  [Cloudflare model page](https://developers.cloudflare.com/ai/models/inworld/tts-2/).
+- ElevenLabs and Cartesia plans: [Cartesia: ElevenLabs pricing](https://www.cartesia.ai/learn/elevenlabs-pricing),
+  [vsref: Cartesia vs Inworld](https://www.versusref.com/tts/cartesia-vs-inworld-tts/).

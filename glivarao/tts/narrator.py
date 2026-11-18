@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..config import Settings
+from .gemini_tts import GeminiTTSNarrator, SpendLedger
 from .google_chirp import (BudgetExceeded, GoogleChirpNarrator, PaidTTSError, UsageLedger, monthly_char_limit)
 from .kokoro import KokoroEngine
 
@@ -23,7 +24,8 @@ class NarratorChoice:
 
     @property
     def label(self) -> str:
-        base = {"google_chirp": "Google Chirp 3 HD", "kokoro": "Kokoro"}[self.provider]
+        base = {"google_chirp": "Google Chirp 3 HD", "kokoro": "Kokoro",
+                "gemini_tts": f"Gemini TTS ({getattr(self.narrator, 'model', '')})"}[self.provider]
         return f"{base} {self.voice}" + (f" (backup: {self.note})" if self.note else "")
 
 
@@ -40,8 +42,39 @@ def paid_choice(settings: Settings, session=None) -> GoogleChirpNarrator:
                                       settings.tts_free_chars_per_month), session=session)
 
 
+def gemini_narrator(settings: Settings, fallback: bool = False, session=None) -> GeminiTTSNarrator:
+    return GeminiTTSNarrator(
+        settings.gemini_api_key, model=settings.gemini_tts_fallback_model if fallback else settings.gemini_tts_model,
+        voice=settings.gemini_tts_voice,
+        price_per_m_audio=settings.gemini_tts_fallback_price if fallback else settings.gemini_tts_price,
+        tokens_per_sec=settings.gemini_tts_tokens_per_sec, monthly_budget_usd=settings.tts_monthly_budget_usd,
+        cache_dir=Path(settings.tts_cache_dir), ledger=SpendLedger(Path(settings.tts_spend_ledger_path)),
+        session=session)
+
+
+def _gemini_choice(settings: Settings, script_text: str, kokoro_voice: str | None, session) -> NarratorChoice:
+    """Selected voice first; near the monthly cap, the same voice on the cheaper model; else Kokoro."""
+    scenes = [s for s in script_text.split("\n\n") if s.strip()]
+    reasons = []
+    for fallback in (False, True):
+        n = gemini_narrator(settings, fallback, session)
+        try:
+            n.check_budget(n.uncached_estimate_usd(scenes))
+            return NarratorChoice(n, "gemini_tts", settings.gemini_tts_voice,
+                                  "near monthly cap: cheaper model, same voice" if fallback else "")
+        except BudgetExceeded as exc:
+            reasons.append(str(exc))
+    return kokoro_choice(settings, kokoro_voice, reasons[-1])
+
+
 def get_narrator(settings: Settings, script_text: str = "", kokoro_voice: str | None = None,
                  session=None) -> NarratorChoice:
+    if settings.tts_provider == "gemini_tts":
+        if not settings.allow_paid_apis:
+            return kokoro_choice(settings, kokoro_voice, "paid voice not approved (ALLOW_PAID_APIS=false)")
+        if not settings.gemini_api_key:
+            return kokoro_choice(settings, kokoro_voice, "GEMINI_API_KEY not set")
+        return _gemini_choice(settings, script_text, kokoro_voice, session)
     if settings.tts_provider != "google_chirp":
         return kokoro_choice(settings, kokoro_voice)
     if not settings.allow_paid_apis:

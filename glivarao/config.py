@@ -20,6 +20,7 @@ SECRET_FIELDS = {
     "anthropic_api_key",
     "elevenlabs_api_key",
     "google_tts_api_key",
+    "gemini_api_key",
     "fred_api_key",
     "telegram_bot_token",
 }
@@ -59,6 +60,16 @@ class Settings:
     tts_monthly_budget_usd: float = field(default_factory=lambda: float(_env("TTS_MONTHLY_BUDGET_USD", "20")))
     tts_price_per_million: float = field(default_factory=lambda: float(_env("TTS_PRICE_PER_MILLION", "30")))
     tts_free_chars_per_month: int = field(default_factory=lambda: int(_env("TTS_FREE_CHARS_PER_MONTH", "0")))
+    # Gemini TTS (selected premium voice). Prices default to the HIGHER reported rates (conservative cap).
+    gemini_api_key: str = field(default_factory=lambda: _env("GEMINI_API_KEY"))
+    gemini_tts_model: str = field(default_factory=lambda: _env("GEMINI_TTS_MODEL", "gemini-3.8-flash-tts"))
+    gemini_tts_fallback_model: str = field(default_factory=lambda: _env("GEMINI_TTS_FALLBACK_MODEL",
+                                                                        "gemini-3.8-flash-lite-tts"))
+    gemini_tts_voice: str = field(default_factory=lambda: _env("GEMINI_TTS_VOICE", "Charon"))
+    gemini_tts_price: float = field(default_factory=lambda: float(_env("GEMINI_TTS_PRICE_PER_M_AUDIO", "18")))
+    gemini_tts_fallback_price: float = field(default_factory=lambda: float(_env("GEMINI_TTS_FALLBACK_PRICE_PER_M_AUDIO", "12")))
+    gemini_tts_tokens_per_sec: float = field(default_factory=lambda: float(_env("GEMINI_TTS_TOKENS_PER_SEC", "32")))
+    tts_spend_ledger_path: str = field(default_factory=lambda: _env("TTS_SPEND_LEDGER_PATH", "data/tts_spend.json"))
     tts_cache_dir: str = field(default_factory=lambda: _env("TTS_CACHE_DIR", "data/tts_cache"))
     tts_ledger_path: str = field(default_factory=lambda: _env("TTS_LEDGER_PATH", "data/tts_usage.json"))
 
@@ -100,6 +111,7 @@ class Settings:
             "elevenlabs": bool(self.elevenlabs_api_key and self.elevenlabs_voice_id),
             "google": bool(self.google_tts_api_key),
             "google_chirp": bool(self.google_tts_api_key and self.allow_paid_apis),
+            "gemini_tts": bool(self.gemini_api_key and self.allow_paid_apis),
             "espeak": True,
             "silent": True,
         }.get(self.tts_provider, False)
@@ -110,7 +122,7 @@ class Settings:
                 "ELEVENLABS_API_KEY + ELEVENLABS_VOICE_ID or GOOGLE_TTS_API_KEY",
             ),
             "production voice": (
-                self.tts_provider in {"kokoro", "elevenlabs", "google", "google_chirp"} and tts_ready,
+                self.tts_provider in {"kokoro", "elevenlabs", "google", "google_chirp", "gemini_tts"} and tts_ready,
                 "set TTS_PROVIDER=kokoro (local, free) — espeak/silent are refused in production",
             ),
             "market data (FRED)": (bool(self.fred_api_key), "FRED_API_KEY (optional)"),
