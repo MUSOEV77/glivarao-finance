@@ -98,6 +98,17 @@ def check_script(script: Script, enforce_length: bool = True,
         for num in re.findall(r"\b(?:19|20)\d\d\b", s.narration):
             r.fact_check.append(f"Scene {i}: year-specific claim ({num}) — confirm figure is current")
 
+    # A script must not pad itself with repeated narration (also catches offline placeholder filler).
+    seen: dict[str, int] = {}
+    repeats = 0
+    for sc in script.scenes:
+        key = " ".join(sc.narration.lower().split())
+        repeats += key in seen
+        seen[key] = 1
+    if repeats:
+        msg = f"{repeats} scene(s) repeat narration already used earlier in this script"
+        (r.errors if enforce_length else r.warnings).append(msg)
+
     for prev in previous_scripts or []:
         ratio = overlap_ratio(text, prev)
         if ratio > 0.15:

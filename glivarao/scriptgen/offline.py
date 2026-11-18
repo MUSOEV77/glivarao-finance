@@ -80,16 +80,39 @@ def _long_scenes(topic: str, target_words: int) -> list[Scene]:
 
 def _short_scenes(topic: str, angle: str) -> list[Scene]:
     t = topic.rstrip(".").lower()
+    if "mistake" in angle.lower():
+        return [
+            Scene(heading="Stop doing this", character="penny", pose="worry", illustration="warning",
+                  narration=f"The most common mistake with {t}? Waiting until you feel ready."),
+            Scene(heading="Why it hurts", character="max", pose="point", illustration="hourglass",
+                  narration="Every year you wait is a year your money isn't working. And you can't buy "
+                            "those years back later, no matter how much you earn."),
+            Scene(heading="Waiting costs", character="max", pose="talk", illustration="scale",
+                  narration="Starting ten years later can mean ending up with about half as much, even if "
+                            "you save the exact same amount each month.",
+                  chart=ChartSpec(kind="bar_compare", title="$200/month to age 65, hypothetical 7%", unit="$",
+                                  labels=["Start at 25", "Start at 35"], values=[525_000, 244_000],
+                                  source="Illustrative example")),
+            Scene(heading="The fix", character="duo", pose="cheer", illustration="target",
+                  narration="The fix is boring and it works. Pick a small amount you won't miss, automate it "
+                            "today, and raise it a little every time you get a raise."),
+            Scene(heading="Takeaway", character="max", pose="talk", illustration="lightbulb",
+                  narration=f"Ready comes after you start, not before. {DISCLAIMER}"),
+        ]
     return [
-        Scene(heading="Wait for it", character="penny", pose="cheer", illustration="hourglass",
-              narration=f"Here's the thirty second version of {t}."),
+        Scene(heading="One number", character="penny", pose="cheer", illustration="hourglass",
+              narration=f"Here's one number that makes {t} finally click."),
         Scene(heading="The math", character="max", pose="point", illustration="growth_arrow",
               narration="A hundred dollars a month at a hypothetical seven percent grows to over a hundred "
-                        "thousand dollars in thirty years.",
+                        "and twenty thousand dollars in thirty years.",
               chart=ChartSpec(kind="compound_growth", title="$100/month, hypothetical 7%", unit="$",
                               params={"principal": 0, "rate": 0.07, "years": 30, "monthly": 100})),
-        Scene(heading="The catch", character="penny", pose="worry", illustration="warning",
-              narration="Most of that growth shows up in the last ten years, so starting late costs the most."),
+        Scene(heading="The surprise", character="penny", pose="think", illustration="coin_stack",
+              narration="You only put in thirty six thousand of that. The rest is growth earning growth, "
+                        "and most of it shows up in the last ten years."),
+        Scene(heading="Why it matters", character="max", pose="talk", illustration="calendar",
+              narration="That's why time matters more than timing. The early years feel slow, but they set "
+                        "up everything that comes later."),
         Scene(heading="Takeaway", character="max", pose="talk", illustration="target",
               narration=f"Start small, start now, and keep it automatic. {DISCLAIMER}"),
     ]
@@ -102,13 +125,14 @@ def generate_offline(topic: str, fmt: str, minutes: float | None = None, angle: 
         title = f"{topic}: A Plain-English Guide"
     else:
         scenes = _short_scenes(topic, angle)
-        title = f"{topic} in 30 seconds"
+        title = (f"The #1 mistake with {topic.lower()}" if "mistake" in angle.lower()
+                 else f"{topic}: one number that explains it")
     return Script(
         format=fmt, topic=topic, title=title[:90],
         description=(f"{topic}, explained simply with original animation.\n\n{DISCLAIMER}\n"
                      "Charts marked 'Illustrative example' use hypothetical numbers."),
         tags=["personal finance", "money", "investing basics", "GLIVARAO Finance"],
-        thumbnail_text=" ".join(topic.split(":")[0].split()[:5]),
+        thumbnail_text=" ".join(topic.split(":")[0].split()[:7]),
         hook=scenes[0].narration.split(".")[0],
         scenes=scenes,
     )

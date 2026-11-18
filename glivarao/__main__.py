@@ -6,7 +6,7 @@
   python -m glivarao list
   python -m glivarao poll-approvals             # read Telegram Approve/Reject presses
   python -m glivarao decide JOB --approve       # operator override (recorded in the audit log)
-  python -m glivarao publish JOB                # upload an APPROVED job (needs kill-switch off)
+  python -m glivarao publish JOB                # MANUAL, interactive, private-only upload of an APPROVED job
   python -m glivarao youtube-auth               # one-time OAuth consent
   python -m glivarao analytics
 """
@@ -71,10 +71,7 @@ def cmd_poll(args, s):
 
     decisions = poll_decisions(_store(s), s)
     print(decisions or "no new decisions")
-    if args.auto_publish:
-        for job_id, decision in decisions:
-            if decision == "approved":
-                _publish(job_id, s, None)
+    # Approval never triggers an upload. Uploading is a separate, manual, interactive step.
 
 
 def cmd_decide(args, s):
@@ -87,20 +84,21 @@ def cmd_decide(args, s):
     print(f"{job.id}: {to.value}")
 
 
-def _publish(job_id, s, privacy):
+def cmd_publish(args, s):
+    """Manual upload only: requires a human at an interactive terminal to retype the job id."""
     from .pipeline import load_script
     from .publish.telegram import notify
-    from .publish.youtube import upload
+    from .publish.youtube import PublishBlocked, upload
 
+    if not sys.stdin.isatty():
+        raise PublishBlocked("publish must be run by a person in an interactive terminal (no cron/automation)")
     store = _store(s)
-    job = store.get(job_id)
-    vid = upload(job, load_script(job), store, s, privacy=privacy)
-    notify(s, f"{job_id} uploaded to YouTube as {privacy or s.youtube_default_privacy}: https://youtu.be/{vid}")
-    print(f"uploaded: https://youtu.be/{vid}")
-
-
-def cmd_publish(args, s):
-    _publish(args.job_id, s, args.privacy)
+    job = store.get(args.job_id)
+    print(f"About to upload {job.id} as PRIVATE to YouTube: {job.topic}")
+    typed = input("Type the job id to confirm: ").strip()
+    vid = upload(job, load_script(job), store, s, operator_confirmation=typed)
+    notify(s, f"{job.id} uploaded to YouTube as PRIVATE (not published): https://youtu.be/{vid}")
+    print(f"uploaded (private): https://youtu.be/{vid} — make it public yourself in YouTube Studio")
 
 
 def cmd_auth(args, s):
@@ -144,7 +142,6 @@ def main(argv=None):
     ls.add_argument("--limit", type=int, default=30)
     ls.set_defaults(fn=cmd_list)
     po = sub.add_parser("poll-approvals")
-    po.add_argument("--auto-publish", action="store_true", help="upload approved jobs immediately (private)")
     po.set_defaults(fn=cmd_poll)
     de = sub.add_parser("decide")
     de.add_argument("job_id")
@@ -155,7 +152,6 @@ def main(argv=None):
     de.set_defaults(fn=cmd_decide)
     pu = sub.add_parser("publish")
     pu.add_argument("job_id")
-    pu.add_argument("--privacy", choices=["private", "unlisted", "public"])
     pu.set_defaults(fn=cmd_publish)
     sub.add_parser("youtube-auth").set_defaults(fn=cmd_auth)
     an = sub.add_parser("analytics")

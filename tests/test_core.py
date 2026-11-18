@@ -57,7 +57,8 @@ def test_offline_scripts_pass_compliance():
 def test_offline_long_hits_production_length():
     script = generate_offline("Index funds explained", "long", minutes=16.5)
     assert 2200 <= script.word_count <= 2800
-    assert check_script(script, enforce_length=True).ok
+    report = check_script(script, enforce_length=True)
+    assert not any("Word count" in e for e in report.errors)  # length OK; repetition is flagged separately
 
 
 def test_compliance_flags_guarantees_and_missing_disclaimer():
@@ -84,3 +85,9 @@ def test_subtitle_chunking_and_srt(tmp_path):
     assert cues[0].start == 1.0 and abs(cues[-1].end - 5.0) < 1e-6
     srt = write_srt(cues, tmp_path / "c.srt").read_text()
     assert srt.startswith("1\n00:00:01,000 --> ")
+
+
+def test_compliance_flags_self_repeating_script():
+    script = generate_offline("Index funds explained", "long", minutes=16.5)  # offline pads with filler
+    assert any("repeat narration" in e for e in check_script(script, enforce_length=True).errors)
+    assert any("repeat narration" in w for w in check_script(script, enforce_length=False).warnings)

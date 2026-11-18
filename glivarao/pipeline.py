@@ -93,7 +93,7 @@ def produce(settings: Settings, store: JobStore, fmt: str, topic: str | None = N
             from .publish.telegram import request_approval
 
             preview = preview_clip(result.video, out / "preview.mp4") if fmt == "long" else result.video
-            request_approval(job, store, settings, script.title, report.summary(), preview=preview)
+            request_approval(job, store, settings, script, report.summary(), preview=preview)
         return ProduceResult(job, script, report)
     except Exception as exc:
         job = store.get(job.id)

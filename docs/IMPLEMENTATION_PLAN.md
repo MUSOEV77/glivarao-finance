@@ -34,8 +34,8 @@ The repository `musoev77/glivarao-finance` was empty: no commits, no code. Every
 | 12 | Subtitles: SRT for YouTube captions, ASS burned into the video | `glivarao/render/subtitles.py` | Done, tested |
 | 13 | ffmpeg assembly: H.264/AAC, −14 LUFS loudness, 30 fps | `glivarao/render/video.py` | Done, tested |
 | 14 | Thumbnails (1280×720) and vertical covers | `glivarao/render/thumbnail.py` | Done |
-| 15 | Telegram approval: Approve/Reject buttons, approver allow-list, audit log | `glivarao/publish/telegram.py` | Tested with a mocked Bot API; needs a bot token |
-| 16 | YouTube upload (private by default, kill-switch, captions, thumbnail, synthetic-media disclosure) | `glivarao/publish/youtube.py` | Tested with a mocked client; needs OAuth |
+| 15 | Telegram review package (thumbnail, title/description, preview, finished MP4, captions, checks) and Approve/Reject with approver allow-list and audit log | `glivarao/publish/telegram.py` | Tested with a mocked Bot API; needs a bot token |
+| 16 | Manual-only YouTube upload: interactive terminal, typed confirmation, kill-switch, always private, never scheduled. Includes captions, thumbnail and synthetic-media disclosure | `glivarao/publish/youtube.py` | Tested with a mocked client; needs OAuth |
 | 17 | YouTube Analytics pull into SQLite | `glivarao/publish/youtube.py` | Tested with a mocked client |
 | 18 | CLI and daily orchestration (1 long video + 2 Shorts) | `glivarao/__main__.py`, `glivarao/pipeline.py` | Done |
 
@@ -46,9 +46,9 @@ The repository `musoev77/glivarao-finance` was empty: no commits, no code. Every
    same script with each, and choose one. Then set `TTS_PROVIDER=elevenlabs` or `google`.
 3. Run `python -m glivarao produce --format long` in `GLIVARAO_MODE=production` with Telegram configured.
    Review the output end to end. Tune `SYSTEM_PROMPT` in `scriptgen/prompts.py` until the scripts read well.
-4. Run `python -m glivarao youtube-auth` once. Keep `YOUTUBE_PUBLISH_ENABLED=false` until you have reviewed
-   several videos. Then switch it on, keeping uploads `private`, and make videos public by hand at first.
-5. Schedule the daily run. See "Scheduling" in `docs/OPERATIONS.md`.
+4. Only when you decide to: run `python -m glivarao youtube-auth` once and set `YOUTUBE_PUBLISH_ENABLED=true`.
+   Uploads remain manual (`publish <job_id>` in a terminal) and always private. You publish in YouTube Studio.
+5. Optionally schedule daily rendering (renders and Telegram only). See `docs/OPERATIONS.md`.
 
 ## Phase 2 — Quality upgrades (recommended order)
 
@@ -72,6 +72,8 @@ The repository `musoev77/glivarao-finance` was empty: no commits, no code. Every
 - Run on a small VM or a GitHub Actions runner with a persistent disk. Render cost is CPU only.
 - Back up `data/` (SQLite) and `output/` to object storage. Prune rendered files 30 days after publishing.
 - Use a Telegram webhook instead of polling (needs an HTTPS endpoint).
+- Optionally run a self-hosted Telegram Bot API server so the full master MP4 (not only the review copy)
+  can be sent. See `docs/DEPLOYMENT.md`.
 - Alert in Telegram when a run fails. `notify()` already exists; the scheduler should call it on failure.
 - Watch the YouTube Data API quota. An upload costs about 1,600 units of the default 10,000 per day, so
   3 uploads a day plus captions and thumbnails fits. Request more quota before adding more videos.
@@ -107,4 +109,4 @@ states are `rejected_compliance`, `rejected` and `failed`. Moves between states 
 | Repetitive or "mass-produced" content (YouTube monetization policy) | Topics are de-duplicated. An 8-word overlap check compares each script with earlier ones. Every video is reviewed by a human. Phase 2 adds visual variety. |
 | Synthetic voice disclosure | `containsSyntheticMedia: true` is set on upload. |
 | Credential leaks | `.env` and `secrets/` are git-ignored. Secrets are redacted in `doctor`. The Telegram token never appears in error messages. The OAuth token file is chmod 600. |
-| Accidental publishing | Three independent gates (human approval, kill-switch, OAuth), and uploads are private by default. |
+| Accidental publishing | No automatic path exists. Upload needs human approval, the kill-switch on, OAuth, an interactive terminal and the job ID retyped. It is always private and never scheduled. Publishing happens only in YouTube Studio. |

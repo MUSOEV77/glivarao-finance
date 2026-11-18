@@ -1,10 +1,15 @@
 """YouTube Data API v3 upload + YouTube Analytics API v2 reporting.
 
+AUTOMATIC UPLOADING, PUBLISHING AND SCHEDULING ARE DISABLED BY DESIGN.
+
 Safety gates (all must pass before any upload):
   1. job.status == APPROVED (only reachable through a human decision),
-  2. YOUTUBE_PUBLISH_ENABLED=true,
-  3. an OAuth token created interactively by the channel owner (`python -m glivarao youtube-auth`).
-Uploads default to `private`; flipping to public is a deliberate setting.
+  2. YOUTUBE_PUBLISH_ENABLED=true (default false),
+  3. an OAuth token created interactively by the channel owner (`python -m glivarao youtube-auth`),
+  4. `operator_confirmation` equal to the job id, which the CLI only collects by a human typing it
+     into an interactive terminal (no flag, env var or cron job can supply it).
+Uploads are ALWAYS `private` and never carry `publishAt`, so YouTube can neither show nor schedule
+them. Making a video public is done by the owner in YouTube Studio.
 """
 from __future__ import annotations
 
@@ -55,7 +60,10 @@ def _credentials(settings: Settings):
     return creds
 
 
-def build_metadata(script: Script, settings: Settings, privacy: str | None = None) -> dict:
+UPLOAD_PRIVACY = "private"  # hard-coded on purpose; no setting or flag changes it
+
+
+def build_metadata(script: Script, settings: Settings) -> dict:
     title = script.title
     description = script.description
     tags = list(dict.fromkeys(script.tags))[:30]
@@ -67,7 +75,7 @@ def build_metadata(script: Script, settings: Settings, privacy: str | None = Non
         "snippet": {"title": title[:100], "description": description[:5000], "tags": tags,
                     "categoryId": settings.youtube_category_id, "defaultLanguage": "en-US",
                     "defaultAudioLanguage": "en-US"},
-        "status": {"privacyStatus": privacy or settings.youtube_default_privacy,
+        "status": {"privacyStatus": UPLOAD_PRIVACY,  # never public, never scheduled (no publishAt)
                    "selfDeclaredMadeForKids": False,
                    # synthetic narration voice -> disclose as altered/synthetic content
                    "containsSyntheticMedia": True,
@@ -75,7 +83,9 @@ def build_metadata(script: Script, settings: Settings, privacy: str | None = Non
     }
 
 
-def check_gates(job: Job, settings: Settings) -> None:
+def check_gates(job: Job, settings: Settings, operator_confirmation: str = "") -> None:
+    if operator_confirmation != job.id:
+        raise PublishBlocked("Manual operator confirmation missing: uploads are manual-only")
     if job.status != JobStatus.APPROVED:
         raise PublishBlocked(f"Job {job.id} is '{job.status.value}', not 'approved'")
     if not settings.youtube_publish_enabled:
@@ -84,16 +94,18 @@ def check_gates(job: Job, settings: Settings) -> None:
         raise PublishBlocked("Rendered video file is missing")
 
 
-def upload(job: Job, script: Script, store: JobStore, settings: Settings, privacy: str | None = None,
+def upload(job: Job, script: Script, store: JobStore, settings: Settings, operator_confirmation: str = "",
            youtube=None) -> str:
-    check_gates(job, settings)
+    check_gates(job, settings, operator_confirmation)
     from googleapiclient.http import MediaFileUpload
 
     if youtube is None:
         from googleapiclient.discovery import build
 
         youtube = build("youtube", "v3", credentials=_credentials(settings), cache_discovery=False)
-    body = build_metadata(script, settings, privacy)
+    body = build_metadata(script, settings)
+    if body["status"]["privacyStatus"] != "private" or "publishAt" in body["status"]:
+        raise PublishBlocked("Refusing upload: metadata is not private-only")
     media = MediaFileUpload(job.video_path, mimetype="video/mp4", chunksize=8 * 1024 * 1024, resumable=True)
     request = youtube.videos().insert(part="snippet,status", body=body, media_body=media)
     response = None
@@ -112,7 +124,7 @@ def upload(job: Job, script: Script, store: JobStore, settings: Settings, privac
             media_body=MediaFileUpload(job.subtitles_path, mimetype="application/octet-stream"),
         ).execute()
     job.youtube_video_id = video_id
-    store.transition(job, JobStatus.PUBLISHED, f"youtube {video_id} ({body['status']['privacyStatus']})")
+    store.transition(job, JobStatus.PUBLISHED, f"youtube {video_id} (private, manual upload)")
     return video_id
 
 

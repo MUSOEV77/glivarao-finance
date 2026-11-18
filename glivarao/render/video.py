@@ -125,7 +125,25 @@ def probe(path: Path) -> dict:
             "audio_codec": a["codec_name"] if a else None, "duration": float(data["format"]["duration"])}
 
 
-def preview_clip(src: Path, dst: Path, seconds: int = 45, height: int = 480) -> Path:
+def fit_to_size(src: Path, dst: Path, max_bytes: int, height: int = 720) -> Path:
+    """Re-encode `src` so the file fits under `max_bytes` (for Telegram uploads of long videos)."""
+    duration = probe(src)["duration"]
+    budget = 0.90
+    for _ in range(4):
+        total_kbps = max_bytes * 8 * budget / duration / 1000
+        audio_kbps = 64
+        video_kbps = max(120, int(total_kbps - audio_kbps))
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(src), "-vf", f"scale=-2:{height}",
+                        "-c:v", "libx264", "-preset", "medium", "-b:v", f"{video_kbps}k",
+                        "-maxrate", f"{int(video_kbps * 1.3)}k", "-bufsize", f"{video_kbps * 2}k",
+                        "-c:a", "aac", "-b:a", f"{audio_kbps}k", "-movflags", "+faststart", str(dst)], check=True)
+        if dst.stat().st_size <= max_bytes:
+            return dst
+        budget *= 0.85
+    raise RuntimeError(f"Could not fit {src.name} under {max_bytes} bytes")
+
+
+def preview_clip(src: Path, dst: Path, seconds: int = 60, height: int = 480) -> Path:
     """Small low-res clip for Telegram review (bot uploads are limited to 50 MB)."""
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(src), "-t", str(seconds),
                     "-vf", f"scale=-2:{height}", "-c:v", "libx264", "-crf", "28", "-preset", "veryfast",
@@ -133,4 +151,4 @@ def preview_clip(src: Path, dst: Path, seconds: int = 45, height: int = 480) -> 
     return dst
 
 
-__all__ = ["render_video", "probe", "preview_clip", "RenderResult"]
+__all__ = ["render_video", "probe", "preview_clip", "fit_to_size", "RenderResult"]

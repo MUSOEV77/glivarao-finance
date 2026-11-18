@@ -32,9 +32,13 @@ def fetch_yearly(series_id: str, api_key: str, start_year: int = 2000, session=N
     if not api_key:
         raise MarketDataError("FRED_API_KEY is not set")
     http = session or requests
-    resp = http.get("https://api.stlouisfed.org/fred/series/observations",
-                    params={"series_id": series_id, "api_key": api_key, "file_type": "json",
-                            "observation_start": f"{start_year - 1}-01-01"}, timeout=30)
+    try:
+        resp = http.get("https://api.stlouisfed.org/fred/series/observations",
+                        params={"series_id": series_id, "api_key": api_key, "file_type": "json",
+                                "observation_start": f"{start_year - 1}-01-01"}, timeout=30)
+    except requests.RequestException as exc:
+        # FRED only accepts the key as a query parameter; drop the URL from the error message
+        raise MarketDataError(f"FRED request failed: {type(exc).__name__}") from None
     if resp.status_code != 200:
         raise MarketDataError(f"FRED HTTP {resp.status_code}")
     by_year: dict[int, list[float]] = defaultdict(list)

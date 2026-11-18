@@ -110,10 +110,16 @@ class Ink:
         self.d.text(xy, s, font=font(size), fill=c(color), anchor=anchor)
 
     def hatch(self, box, color="ink", spacing: int = 18, width: int = 2):
-        """Diagonal pencil hatching inside a box (used for shading)."""
-        x0, y0, x1, y1 = box
-        for k in range(int(x0 - (y1 - y0)), int(x1), spacing):
-            self.line([(k, y1), (k + (y1 - y0), y0)], color=color, width=width, wobble=0.8)
+        """Diagonal pencil hatching clipped to a box (used for shading)."""
+        x0, y0, x1, y1 = (int(v) for v in box)
+        w, h = x1 - x0, y1 - y0
+        if w <= 2 or h <= 2:
+            return
+        layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        sub = Ink(layer, seed=self.seed + 1, wobble=0.8, width=width)
+        for k in range(-h, w, spacing):
+            sub.line([(k, h), (k + h, 0)], color=color, width=width, wobble=0.8)
+        self.img.paste(layer, (x0, y0), layer)
 
 
 def c(color):

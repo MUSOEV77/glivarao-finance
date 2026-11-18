@@ -63,7 +63,7 @@ def write_srt(cues: list[Cue], path: Path) -> Path:
 
 def write_ass(cues: list[Cue], path: Path, w: int, h: int, portrait: bool) -> Path:
     size = 76 if portrait else 62
-    margin_v = int(h * 0.40) if portrait else 40  # Shorts: keep captions above the UI overlay
+    margin_v = int(h * 0.355) if portrait else 40  # Shorts: between chart and character, above the UI overlay
     header = f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: {w}

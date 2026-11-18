@@ -47,7 +47,10 @@ def _ease(t: float) -> float:
 
 def _frame(ink: Ink, w, h, title, source, pad):
     ink.rect((10, 10, w - 10, h - 10), fill="white", width=6)
-    ink.text((pad, 28), title, 46)
+    size = 46
+    while size > 26 and font(size).getlength(title) > w - 2 * pad:
+        size -= 2
+    ink.text((pad, 28 + (46 - size) // 2), title, size)
     if source:
         ink.text((w - pad, h - 30), f"Source: {source}", 26, color="grey", anchor="rb")
 

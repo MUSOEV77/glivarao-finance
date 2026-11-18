@@ -90,9 +90,9 @@ def _elevenlabs(text: str, dst: Path, s: Settings) -> None:
 def _google(text: str, dst: Path, s: Settings) -> None:
     if not s.google_tts_api_key:
         raise TTSError("GOOGLE_TTS_API_KEY is required")
-    resp = requests.post(
+    resp = requests.post(  # key in a header, not the URL, so it can't leak via exception messages
         "https://texttospeech.googleapis.com/v1/text:synthesize",
-        params={"key": s.google_tts_api_key},
+        headers={"X-Goog-Api-Key": s.google_tts_api_key},
         json={"input": {"text": text},
               "voice": {"languageCode": "en-US", "name": s.google_tts_voice},
               "audioConfig": {"audioEncoding": "LINEAR16", "sampleRateHertz": SAMPLE_RATE, "speakingRate": 1.0}},

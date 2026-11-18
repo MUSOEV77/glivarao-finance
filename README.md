@@ -9,8 +9,9 @@ Automated production of original US personal-finance videos:
 - Telegram approval before anything is published
 - YouTube upload and analytics
 
-> **Safe by default.** The pipeline runs in `dry-run` mode with no network calls. A video can be published
-> only after a human approves it in Telegram **and** `YOUTUBE_PUBLISH_ENABLED=true`. Uploads are private
+> **Nothing is uploaded, published or scheduled automatically, ever.** Telegram approval only marks a
+> job approved. Uploading is a separate manual command that needs an interactive terminal and the job ID
+> typed back, and it always uploads as **private**. The pipeline runs in `dry-run` mode (no network calls)
 > by default.
 
 ## Quick start
@@ -22,7 +23,7 @@ cp .env.example .env               # fill in credentials later — see docs/CRED
 python -m glivarao doctor          # shows what's configured
 python -m glivarao produce --format short              # dry-run Short, ~30 s
 python -m glivarao produce --format long --minutes 2   # dry-run 2-minute long-form sample
-python -m pytest -q                # 19 tests, ~1 minute
+python -m pytest -q                # full suite, ~1 minute
 ```
 
 Output goes to `output/<job_id>/`: `video.mp4`, `thumbnail.jpg`, `captions.srt`, `script.json` and `compliance.txt`.
@@ -32,15 +33,17 @@ Output goes to `output/<job_id>/`: `video.mp4`, `thumbnail.jpg`, `captions.srt`,
 Set `GLIVARAO_MODE=production`, add the keys from `docs/CREDENTIALS.md`, then run:
 
 ```bash
-python -m glivarao daily                       # 1 long + 2 Shorts → Telegram for approval
-python -m glivarao poll-approvals --auto-publish
+python -m glivarao daily              # 1 long + 2 Shorts → full review package in Telegram
+python -m glivarao poll-approvals     # records Approve/Reject; never uploads
+python -m glivarao publish <job_id>   # optional, manual, interactive, private-only upload
 python -m glivarao analytics
 ```
 
 ## Docs
 - `docs/IMPLEMENTATION_PLAN.md`: architecture, phases and risks
 - `docs/CREDENTIALS.md`: every credential and service needed, and where to get it
-- `docs/OPERATIONS.md`: daily runbook and scheduling
+- `docs/OPERATIONS.md`: daily runbook and publishing policy
+- `docs/DEPLOYMENT.md`: step-by-step VPS deployment
 - `docs/TEST_REPORT.md`: what was tested, what works, what's incomplete
 
 ## Layout

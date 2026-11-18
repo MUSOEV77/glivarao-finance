@@ -55,13 +55,16 @@ class Settings:
 
     telegram_bot_token: str = field(default_factory=lambda: _env("TELEGRAM_BOT_TOKEN"))
     telegram_approver_chat_id: str = field(default_factory=lambda: _env("TELEGRAM_APPROVER_CHAT_ID"))
+    # Cloud Bot API accepts uploads up to 50 MB. A self-hosted Bot API server
+    # (github.com/tdlib/telegram-bot-api) raises this to 2000 MB so the full master MP4 can be sent.
+    telegram_api_base: str = field(default_factory=lambda: _env("TELEGRAM_API_BASE", "https://api.telegram.org"))
+    telegram_max_upload_mb: int = field(default_factory=lambda: int(_env("TELEGRAM_MAX_UPLOAD_MB", "50")))
 
     youtube_client_secrets_file: Path = field(
         default_factory=lambda: Path(_env("YOUTUBE_CLIENT_SECRETS_FILE", "secrets/client_secret.json"))
     )
     youtube_token_file: Path = field(default_factory=lambda: Path(_env("YOUTUBE_TOKEN_FILE", "secrets/youtube_token.json")))
     youtube_publish_enabled: bool = field(default_factory=lambda: _bool("YOUTUBE_PUBLISH_ENABLED", False))
-    youtube_default_privacy: str = field(default_factory=lambda: _env("YOUTUBE_DEFAULT_PRIVACY", "private"))
     youtube_category_id: str = field(default_factory=lambda: _env("YOUTUBE_CATEGORY_ID", "27"))
 
     @property
