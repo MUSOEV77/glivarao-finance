@@ -140,9 +140,42 @@ def cmd_daily_v2(args, s):
     if res is None:
         print("skipped: today's daily set was already produced (use --force to produce again)")
         return
-    print(f"topic: {res.topic}\nwriter: {res.writer}")
+    if not res.jobs:
+        print(f"nothing produced today: {res.note}")
+        return
+    print(f"topic: {res.topic}\nformat: {res.style}\nwriter: {res.writer}")
     for job_id, fmt, status, video, note in res.jobs:
         print(f"  {job_id:28s} {fmt:5s} {status:20s} {video or ''} {note}")
+
+
+def cmd_propose(args, s):
+    """Send this week's 5-7 topic ideas to Telegram (you pick which ones get made)."""
+    from datetime import date
+
+    from .studio.proposals import propose_topics
+
+    day = date.fromisoformat(args.date) if args.date else None
+    items = propose_topics(s, _store(s), today=day, send=not args.no_telegram)
+    for it in items:
+        print(f"  [{it.id}] {it.topic} ({it.category})")
+    print(f"{len(items)} new ideas" + ("" if args.no_telegram else " sent to Telegram"))
+
+
+def cmd_queue(args, s):
+    from .studio.queue import TopicQueue
+
+    print(TopicQueue(_store(s)).status_text())
+
+
+def cmd_add_input(args, s):
+    """Add your take to a topic from the server (alternative to Telegram)."""
+    from .studio.queue import TopicQueue
+
+    q = TopicQueue(_store(s))
+    if q.get(args.item_id) is None:
+        raise SystemExit(f"unknown topic id {args.item_id}; see: python -m glivarao queue")
+    it = q.add_input(args.item_id, args.text)
+    print(f"saved your take for \"{it.topic}\"; status: {it.status}")
 
 
 def cmd_voice_sample(args, s):
@@ -305,6 +338,15 @@ def main(argv=None):
     d2.add_argument("--force", action="store_true", help="produce again even if today already completed")
     d2.add_argument("--retries", type=int, default=1, help="whole-run retries before alerting (default 1)")
     d2.set_defaults(fn=cmd_daily_v2)
+    pp = sub.add_parser("propose-topics", help="send this week's 5-7 topic ideas to Telegram for you to pick")
+    pp.add_argument("--date", help="YYYY-MM-DD (default today)")
+    pp.add_argument("--no-telegram", action="store_true")
+    pp.set_defaults(fn=cmd_propose)
+    sub.add_parser("queue", help="show your topic queue").set_defaults(fn=cmd_queue)
+    ai = sub.add_parser("add-input", help="add your own take to a picked topic")
+    ai.add_argument("item_id")
+    ai.add_argument("text")
+    ai.set_defaults(fn=cmd_add_input)
     vs = sub.add_parser("voice-sample", help="narrated + mixed + mastered audio sample (local only)")
     vs.add_argument("--script", default="config/samples/voice_sample_60s.txt")
     vs.add_argument("--voice", help="voice name (default: KOKORO_VOICE or GOOGLE_TTS_VOICE)")

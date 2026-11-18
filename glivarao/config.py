@@ -59,6 +59,15 @@ class Settings:
     renderer: str = field(default_factory=lambda: _env("GLIVARAO_RENDERER", "v1"))
     # Visual theme of the animated (v2) renderer: "editorial" (premium documentary, default) or "cartoon".
     theme: str = field(default_factory=lambda: _env("GLIVARAO_THEME", "editorial"))
+    # Human-in-the-loop production (YouTube "inauthentic content" safety). See docs/AUTHENTICITY.md.
+    topic_mode: str = field(default_factory=lambda: _env("TOPIC_MODE", "queue"))  # queue = only topics you pick
+    require_creator_input: bool = field(default_factory=lambda: _bool("REQUIRE_CREATOR_INPUT", True))
+    long_videos_per_week: int = field(default_factory=lambda: int(_env("LONG_VIDEOS_PER_WEEK", "3")))
+    shorts_per_long: int = field(default_factory=lambda: int(_env("SHORTS_PER_LONG", "2")))
+    min_days_between_long: int = field(default_factory=lambda: int(_env("MIN_DAYS_BETWEEN_LONG", "2")))
+    topic_ideas_per_week: int = field(default_factory=lambda: int(_env("TOPIC_IDEAS_PER_WEEK", "6")))
+    similarity_max_phrase: float = field(default_factory=lambda: float(_env("SIMILARITY_MAX_PHRASE", "0.25")))
+    similarity_max_structure: float = field(default_factory=lambda: float(_env("SIMILARITY_MAX_STRUCTURE", "0.85")))
     elevenlabs_api_key: str = field(default_factory=lambda: _env("ELEVENLABS_API_KEY"))
     elevenlabs_voice_id: str = field(default_factory=lambda: _env("ELEVENLABS_VOICE_ID"))
     elevenlabs_model_id: str = field(default_factory=lambda: _env("ELEVENLABS_MODEL_ID", "eleven_multilingual_v2"))

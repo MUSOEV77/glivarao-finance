@@ -29,6 +29,10 @@ PW, PH = 1080, 1920
 MIN_BEAT = 2.8
 FADE = 0.45
 CHAPTER_SEC = 2.6
+CARD_BEATS = {"myth": ("MYTH", "crimson"), "fact": ("FACT", "green"), "question": ("YOU ASKED", "amber"),
+              "case": ("CASE FILE · HYPOTHETICAL", "green"), "option_a": ("OPTION A", "navy"),
+              "option_b": ("OPTION B", "crimson"), "verdict": ("THE VERDICT", "navy"),
+              "update": ("WHAT CHANGED", "crimson"), "creator": ("MY TAKE", "amber")}
 QUOTE_MAX_WORDS = 26
 PORTRAIT_PANEL = (230, 680)      # (top, height) of the Shorts visual panel
 PORTRAIT_WORDS = (940, 560)      # (top, height) of the Shorts words band
@@ -63,7 +67,10 @@ def plan_beats(scene, sentences, plan: ScenePlan, long_form: bool) -> list[Beat]
     """sentences: [(start, end, text)]. Deterministic, so the main process (SFX) and workers agree."""
     dur = plan.duration
     beats: list[Beat] = []
-    if long_form:
+    role = getattr(scene, "beat", None)
+    if role in CARD_BEATS:  # format-specific card: MYTH / FACT / Q / CASE FILE / A / B / VERDICT / WHAT CHANGED
+        beats.append(Beat("chapter", 0.0, min(CHAPTER_SEC if long_form else 1.8, dur), label=role))
+    elif long_form:
         beats.append(Beat("chapter", 0.0, min(CHAPTER_SEC, dur)))
     note_times = [nt for _, nt in plan.notes]
     sticky = None
@@ -82,8 +89,9 @@ def plan_beats(scene, sentences, plan: ScenePlan, long_form: bool) -> list[Beat]
             fig = find_figure(text)
             if fig:
                 cand = Beat("figure", st, dur, fig, tone(text), _label_for(scene, fig))
-            elif len(text.split()) <= QUOTE_MAX_WORDS and (not beats or beats[-1].kind != "chapter"
-                                                          or not long_form or len(sentences) == 1):
+            elif role == "creator" or (len(text.split()) <= QUOTE_MAX_WORDS and (
+                    not beats or beats[-1].kind != "chapter" or not long_form or len(sentences) == 1)):
+                # the host's own words are always shown on screen, sentence by sentence
                 cand = Beat("quote", st, dur, text=text, span=(st, en))
             else:
                 cand = Beat("plate", st, dur)
@@ -132,11 +140,78 @@ class EditorialFrames:
         self._cache: dict = {}
 
     # ------------------------------------------------------------ beat content (RGBA, content-box size)
-    def _chapter(self, w, h, tb, portrait):
+    def _role_card(self, role, w, h, tb, portrait):
+        """Format-specific card: a stamp-like label in the format colour, then the scene's statement."""
+        img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        d = ImageDraw.Draw(img, "RGBA")
+        label, colour = CARD_BEATS[role]
+        a = int(255 * ease_out(progress(tb, 0.0, 0.35)))
+        size = 150 if role in ("myth", "fact") and not portrait else (96 if not portrait else 84)
+        if role in ("myth", "fact", "verdict"):  # rubber-stamp look: boxed, slightly rotated
+            f = face("sans_xbold", size)
+            tw = f.getlength(label) + size * 0.6
+            stamp = Image.new("RGBA", (int(tw), int(size * 1.5)), (0, 0, 0, 0))
+            sd = ImageDraw.Draw(stamp, "RGBA")
+            sd.rectangle((4, 4, stamp.width - 5, stamp.height - 5), outline=(*PAL[colour], a), width=8)
+            draw_text(sd, (stamp.width / 2, stamp.height / 2), label, "sans_xbold", size, colour, anchor="mm",
+                      alpha=a)
+            pop = 1 + 0.25 * (1 - ease_out(progress(tb, 0.0, 0.3)))
+            stamp = stamp.rotate(-6 if role != "fact" else 4, expand=True, resample=Image.BICUBIC)
+            stamp = stamp.resize((int(stamp.width / pop), int(stamp.height / pop)), Image.BILINEAR)
+            img.alpha_composite(stamp, (int(w / 2 - stamp.width / 2), int(h * 0.30 - stamp.height / 2)))
+            ty = h * 0.62
+        elif role in ("option_a", "option_b"):
+            r = 110 if not portrait else 90
+            cx, cy = w / 2, h * 0.32
+            d.ellipse((cx - r, cy - r, cx + r, cy + r), fill=(*PAL[colour], a))
+            draw_text(d, (cx, cy), label[-1], "sans_xbold", int(r * 1.2), "white", anchor="mm", alpha=a)
+            draw_text(d, (cx, cy + r + 46), label, "sans_bold", 30, colour, anchor="mm", tracking=6, alpha=a)
+            ty = h * 0.70
+        else:  # question / case / update / creator: banner kicker with a rule
+            draw_text(d, (w / 2, h * 0.22), label, "sans_bold", 40 if not portrait else 34, colour, anchor="mm",
+                      tracking=8, alpha=a)
+            full = face("sans_bold", 40).getlength(label) + 8 * len(label)
+            lw = full * ease_out(progress(tb, 0.1, 0.5))
+            d.line([(w / 2 - lw / 2, h * 0.22 + 36), (w / 2 + lw / 2, h * 0.22 + 36)], fill=(*PAL[colour], a), width=4)
+            ty = h * 0.52
+        body = self.scene.narration.replace("*", "")
+        body = re.sub(r"^(Myth number \w+|The fact|The myth|Option (one|two) for \w+)[:.]\s*", "", body)
+        sents = re.split(r"(?<=[.!?])\s+", body)
+        if role == "question" and ":" in body:  # the question itself, not the intro around it
+            first = re.split(r"(?<=\?)\s", body.split(":", 1)[1].strip())[0]
+        elif role == "creator" and len(sents) > 1 and len(sents[0].split()) <= 8:
+            first = sents[1]  # skip the lead-in ("Here's my own take.")
+        elif role == "update":
+            first = next((x for x in sents if re.search(r"\d", x)), sents[0])
+        else:
+            first = sents[0]
+        first = re.sub(r"^(Here's my own take|Let me add my own view here|Speaking for myself|"
+                       r"From my own experience)[.:]?\s*", "", first)
+        first = first[:1].upper() + first[1:]
+        if role in ("question", "creator"):
+            first = "\u201c" + first + "\u201d"
+        words = first.split()
+        if len(words) > 22:
+            first = " ".join(words[:22]) + "…"
+        lines, fs = fit_lines(first if role not in ("case", "option_a", "option_b", "verdict")
+                              else self.scene.heading, "serif" if role != "creator" else "serif_it",
+                              84 if not portrait else 70, w * 0.84, 3, 44)
+        ra = int(255 * ease_out(progress(tb, 0.25, 0.5)))
+        for k, ln in enumerate(lines):
+            draw_text(d, (w / 2, ty + k * fs * 1.1), ln, "serif" if role != "creator" else "serif_it", fs, "ink",
+                      anchor="mm", alpha=ra)
+        return img
+
+    def _chapter(self, w, h, tb, portrait, label=""):
+        if label in CARD_BEATS:
+            return self._role_card(label, w, h, tb, portrait)
         img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
         d = ImageDraw.Draw(img, "RGBA")
         a = int(255 * ease_out(progress(tb, 0.0, 0.5)))
-        kicker = "GLIVARAO FINANCE" if self.idx == 0 else f"CHAPTER {self.idx:02d}"
+        from ..studio.formats import FORMATS
+
+        fmt = FORMATS.get(getattr(self.script, "style", None) or "")
+        kicker = (fmt.kicker if fmt else "GLIVARAO FINANCE") if self.idx == 0 else f"CHAPTER {self.idx:02d}"
         lines, size = fit_lines(self.scene.heading, "serif", 124 if not portrait else 104, w * 0.86, 2, 60)
         cy = h * 0.46
         y = cy - (len(lines) - 1) * size * 0.54
@@ -317,7 +392,7 @@ class EditorialFrames:
     def _beat_img(self, b: Beat, w, h, t, portrait):
         tb = t - b.t0
         if b.kind == "chapter":
-            return self._chapter(w, h, tb, portrait)
+            return self._chapter(w, h, tb, portrait, b.label)
         if b.kind == "figure":
             return self._figure(b, w, h, tb, portrait)
         if b.kind == "chart":
@@ -408,7 +483,7 @@ class EditorialFrames:
         cw, ch = PW - 120, PORTRAIT_PANEL[1]
         i = max(k for k, b in enumerate(self.beats) if b.t0 <= t + 1e-6)
         b = self.beats[i]
-        if b.kind in ("quote", "plate", "chapter"):
+        if b.kind in ("quote", "plate") or (b.kind == "chapter" and b.label not in CARD_BEATS):
             panel = Image.new("RGBA", (cw, ch), (0, 0, 0, 0))
             size = int(min(cw * 0.72, ch * 0.96))
             self._plate(panel, (cw - size) // 2, (ch - size) // 2, size, t)

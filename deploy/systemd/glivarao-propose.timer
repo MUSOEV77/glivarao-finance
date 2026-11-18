@@ -1,0 +1,9 @@
+[Unit]
+Description=Send weekly topic ideas every Sunday morning (America/New_York)
+
+[Timer]
+OnCalendar=Sun *-*-* 10:07:00 America/New_York
+Persistent=true
+
+[Install]
+WantedBy=timers.target

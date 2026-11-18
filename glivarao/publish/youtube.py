@@ -13,6 +13,8 @@ them. Making a video public is done by the owner in YouTube Studio.
 """
 from __future__ import annotations
 
+import json
+
 import logging
 from datetime import date, timedelta
 from pathlib import Path
@@ -63,7 +65,7 @@ def _credentials(settings: Settings):
 UPLOAD_PRIVACY = "private"  # hard-coded on purpose; no setting or flag changes it
 
 
-def build_metadata(script: Script, settings: Settings) -> dict:
+def build_metadata(script: Script, settings: Settings, altered_content: bool = True) -> dict:
     title = script.title
     description = script.description
     tags = list(dict.fromkeys(script.tags))[:30]
@@ -77,8 +79,9 @@ def build_metadata(script: Script, settings: Settings) -> dict:
                     "defaultAudioLanguage": "en-US"},
         "status": {"privacyStatus": UPLOAD_PRIVACY,  # never public, never scheduled (no publishAt)
                    "selfDeclaredMadeForKids": False,
-                   # synthetic narration voice -> disclose as altered/synthetic content
-                   "containsSyntheticMedia": True,
+                   # YouTube "altered or synthetic content" flag, decided per video by studio/disclosure.py
+                   # (metadata.json "youtube_altered_content"); True unless explicitly known to be False
+                   "containsSyntheticMedia": bool(altered_content),
                    "embeddable": True},
     }
 
@@ -94,6 +97,15 @@ def check_gates(job: Job, settings: Settings, operator_confirmation: str = "") -
         raise PublishBlocked("Rendered video file is missing")
 
 
+def _altered_flag(job: Job) -> bool:
+    """The per-video disclosure decision saved at render time; defaults to disclosing when unknown."""
+    try:
+        meta = json.loads((Path(job.video_path).parent / "metadata.json").read_text())
+        return bool(meta.get("youtube_altered_content", True))
+    except (OSError, ValueError, TypeError):
+        return True
+
+
 def upload(job: Job, script: Script, store: JobStore, settings: Settings, operator_confirmation: str = "",
            youtube=None) -> str:
     check_gates(job, settings, operator_confirmation)
@@ -103,7 +115,7 @@ def upload(job: Job, script: Script, store: JobStore, settings: Settings, operat
         from googleapiclient.discovery import build
 
         youtube = build("youtube", "v3", credentials=_credentials(settings), cache_discovery=False)
-    body = build_metadata(script, settings)
+    body = build_metadata(script, settings, altered_content=_altered_flag(job))
     if body["status"]["privacyStatus"] != "private" or "publishAt" in body["status"]:
         raise PublishBlocked("Refusing upload: metadata is not private-only")
     media = MediaFileUpload(job.video_path, mimetype="video/mp4", chunksize=8 * 1024 * 1024, resumable=True)

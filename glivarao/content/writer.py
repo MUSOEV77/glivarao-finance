@@ -206,11 +206,11 @@ def _sentences(text: str) -> list[str]:
     return [x.strip() for x in re.split(r"(?<=[.!?])\s+", text) if x.strip()]
 
 
-def _fit_short(scenes: list[Scene], lib: dict, prefer: str = "how") -> list[Scene]:
+def _fit_short(scenes: list[Scene], lib: dict, prefer: str = "how", avoid: str = "") -> list[Scene]:
     """Bring a Short into the 95-150 word range by adding explanation sentences from the reviewed library
-    (never filler), inserted before the final call-to-action scene."""
+    (never filler), inserted before the final call-to-action scene. `avoid`: text already used by other Shorts."""
     words = sum(len(s.narration.split()) for s in scenes)
-    used = " ".join(s.narration for s in scenes)
+    used = " ".join(s.narration for s in scenes) + " " + avoid
     pool = []
     for group in ([prefer, "how", "mistakes"] if prefer != "how" else ["how", "mistakes"]):
         for h, n, illo, st in lib[group]:
@@ -238,17 +238,30 @@ def _wrap(b: Brief, fmt: str, scenes: list[Scene], suffix: str = "") -> Script:
 
 
 # ------------------------------------------------------------------ Claude writer (paid; approval required)
-def write_with_claude(b: Brief, fmt: str, settings: Settings, angle: str = "") -> Script:
-    """Grounded generation: the model may only use facts from the brief's fact sheet."""
+def write_with_claude(b: Brief, fmt: str, settings: Settings, angle: str = "", style: str | None = None,
+                      creator_text: str = "", avoid_lines: list[str] | None = None) -> Script:
+    """Grounded generation: the model may only use facts from the brief's fact sheet; the format sets the
+    structure; the host's own input is woven in as a 'creator' scene; recent openings are off limits."""
     from ..scriptgen.claude import generate_with_claude
+    from ..studio.formats import FORMATS
 
     facts = "\n".join(f"- [{f.kind}] {f.text}" for f in b.facts)
     grounding = (f"{angle or b.angle}\n\nUse ONLY these facts and numbers; do not introduce any other statistic, "
                  f"rate, limit or date:\n{facts}\n\nReal viewer questions to address:\n" +
                  "\n".join(f"- {q['title']}" for q in b.viewer_questions) +
                  f"\nAudience: the United States and Canada. Category: {b.category}. Finance only.")
+    if style and style in FORMATS:
+        grounding += f"\n\nFORMAT: {FORMATS[style].label}. {FORMATS[style].claude_structure}"
+    if creator_text.strip():
+        grounding += ("\n\nTHE HOST'S OWN INPUT (their real opinion or experience, in their words):\n\"\"\""
+                      f"{creator_text.strip()}\"\"\"\nInclude exactly one scene with beat 'creator' that presents this "
+                      "faithfully in first person ('In my experience...'). You may tidy grammar, never add facts, "
+                      "numbers or claims to it. Let the rest of the script connect to it naturally.")
+    if avoid_lines:
+        grounding += "\n\nDo NOT open or close with any of these lines used in recent videos:\n" + \
+                     "\n".join(f"- {x}" for x in avoid_lines[:20])
     script = generate_with_claude(b.topic, fmt, settings, angle=grounding)
-    return with_house_description(b, script)
+    return with_house_description(b, script).model_copy(update={"style": style})
 
 
 def with_house_description(b: Brief, script: Script) -> Script:

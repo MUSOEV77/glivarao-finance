@@ -84,12 +84,22 @@ def revise_prompt(draft_json: str, fmt: str, words: int, target: int, lo: int, h
             f"{draft_json}\n\nReturn only the revised JSON object.")
 
 
-DIRECTION_FIELDS = ("set", "entrance", "transition", "money_fx")
+DIRECTION_FIELDS = ("set", "entrance", "transition", "money_fx", "beat")
 
 
 def normalize_direction(scene: dict) -> dict:
     """Schema uses "auto" (structured outputs need every field); the renderer expects None for automatic."""
-    return {k: (None if k in DIRECTION_FIELDS and v == "auto" else v) for k, v in scene.items()}
+    return {k: (None if k in DIRECTION_FIELDS and v in ("auto", "none") else v) for k, v in scene.items()}
+
+
+def originality_prompt(draft_json: str, reasons: list[str], phrases: list[str], fmt: str) -> str:
+    """Rewrite request when a draft is too similar to earlier videos."""
+    rep = "\n".join(f"- \"{p}\"" for p in phrases[:12])
+    return (f"This {fmt} script is too similar to earlier GLIVARAO videos: " + "; ".join(reasons) + ".\n"
+            "Rewrite it with genuinely new wording and a different flow (new opening, new examples, new transitions,"
+            " a different closing), keeping every fact, number, source, the format's beats, the host's 'creator' "
+            f"scene (unchanged in meaning) and the education-only sentence. Do not reuse these phrases:\n{rep}\n\n"
+            f"DRAFT:\n{draft_json}\n\nReturn only the revised JSON object.")
 
 
 def _obj(props: dict, required: list[str] | None = None) -> dict:
@@ -120,6 +130,8 @@ SCENE_SCHEMA = _obj({
     "entrance": {"type": "string", "enum": ["auto", "walk_in", "hop_in", "none"]},
     "transition": {"type": "string", "enum": ["auto", "push", "iris", "fade", "wipe", "cut"]},
     "money_fx": {"type": "string", "enum": ["auto", "coins", "bills", "none"]},
+    "beat": {"type": "string", "enum": ["none", "myth", "fact", "question", "case", "option_a", "option_b",
+                                        "verdict", "update", "creator"]},
 })
 SCRIPT_SCHEMA = _obj({
     "title": _STR,

@@ -34,6 +34,9 @@ sudo -u glivarao .venv/bin/pip install -q -r requirements.txt
 sudo -u glivarao .venv/bin/pip install -q \
   https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
 
+echo "==> voice-note transcription (optional, local and free; model downloads on first use)"
+sudo -u glivarao .venv/bin/pip install -q faster-whisper || echo "   faster-whisper not installed: send your input as text"
+
 echo "==> voice model (Kokoro-82M, Apache-2.0, ~350 MB)"
 B=https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0
 [ -f models/kokoro/kokoro-v1.0.onnx ] || sudo -u glivarao curl -fsSL -o models/kokoro/kokoro-v1.0.onnx "$B/kokoro-v1.0.onnx"
@@ -55,7 +58,7 @@ if [ "$SKIP_SYSTEMD" != "1" ]; then
   cp deploy/systemd/*.service deploy/systemd/*.timer /etc/systemd/system/
   cp deploy/logrotate-glivarao /etc/logrotate.d/glivarao
   systemctl daemon-reload
-  systemctl enable --now glivarao-daily.timer glivarao-poll.timer glivarao-backup.timer
+  systemctl enable --now glivarao-daily.timer glivarao-poll.timer glivarao-backup.timer glivarao-propose.timer
   systemctl list-timers 'glivarao-*' --no-pager
 fi
 echo "Done. Nothing is ever uploaded automatically. Manual upload: sudo -u glivarao $APP_DIR/.venv/bin/python -m glivarao publish <job_id>"

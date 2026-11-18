@@ -42,6 +42,9 @@ class Scene(BaseModel):
     entrance: Optional[Literal["walk_in", "hop_in", "none"]] = None
     transition: Optional[Literal["push", "iris", "fade", "wipe", "cut"]] = None
     money_fx: Optional[Literal["coins", "bills", "none"]] = None
+    # Format beat for the editorial renderer: myth, fact, question, case, option_a, option_b, verdict, update,
+    # creator (the host's own take). None = ordinary scene.
+    beat: Optional[str] = None
 
 
 class Script(BaseModel):
@@ -53,6 +56,7 @@ class Script(BaseModel):
     thumbnail_text: str = Field(description="2-5 punchy words for the thumbnail")
     hook: str = ""
     scenes: list[Scene]
+    style: Optional[str] = None  # video format: explainer, myth_vs_fact, case_study, viewer_question, comparison, ...
 
     @property
     def full_narration(self) -> str:

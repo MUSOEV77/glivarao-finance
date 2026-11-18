@@ -30,6 +30,8 @@ class DailyResult:
     topic: str
     writer: str
     jobs: list = field(default_factory=list)  # (job_id, format, status, video_path, note)
+    style: str = ""
+    note: str = ""            # why nothing was produced (pace, waiting for your input)
 
 
 def _used_topics(store: JobStore, today: date) -> set[str]:
@@ -56,70 +58,195 @@ def finance_only_check(script: Script) -> tuple[bool, str]:
     return gate(text)
 
 
+def pace_check(store: JobStore, today: date, settings: Settings) -> tuple[bool, str]:
+    """Quality over quantity: at most LONG_VIDEOS_PER_WEEK long videos per ISO week, spaced
+    MIN_DAYS_BETWEEN_LONG days apart."""
+    dates = [date.fromisoformat(d) for d in json.loads(store.kv_get("long_dates", "[]"))]
+    week = today.isocalendar()[:2]
+    this_week = [d for d in dates if d.isocalendar()[:2] == week]
+    if len(this_week) >= settings.long_videos_per_week:
+        return False, f"weekly pace reached ({len(this_week)}/{settings.long_videos_per_week} long videos this week)"
+    if dates and (today - max(dates)).days < settings.min_days_between_long:
+        return False, f"last long video was {(today - max(dates)).days} day(s) ago (minimum gap " \
+                      f"{settings.min_days_between_long})"
+    return True, ""
+
+
+def _remind(settings: Settings, store: JobStore, send: bool) -> str:
+    from .studio.queue import TopicQueue
+
+    q = TopicQueue(store)
+    waiting, proposed = q.awaiting_input(), [i for i in q.items() if i.status == "proposed"]
+    if waiting:
+        note = "Waiting for your take on: " + "; ".join(f"\"{i.topic}\"" for i in waiting[:5]) + \
+               ". Reply to my question in Telegram (text or voice note) and I'll make it on the next run."
+    elif proposed:
+        note = f"{len(proposed)} topic ideas are waiting for you to pick. Tap ✅ on the ones you want."
+    else:
+        note = "Your topic queue is empty. New ideas arrive on Sunday (or run: python -m glivarao propose-topics)."
+    if send:
+        _notify(settings, "GLIVARAO: nothing to produce today. " + note)
+    return note
+
+
+def _write_long(brief, style, creator, used, paid, settings, variant=0):
+    from .content.format_writer import write_long_format
+
+    if paid:
+        return write_with_claude(brief, "long", settings, style=style, creator_text=creator, avoid_lines=used)
+    return write_long_format(brief, style, creator, used, variant=variant)
+
+
+def _write_shorts(brief, style, n, used, paid, settings):
+    from .content.format_writer import write_shorts_format
+
+    if not paid:
+        return write_shorts_format(brief, style, n=n, used_lines=used)
+    angles = ("ONE surprising number from the fact sheet, with its own hook in the first two seconds",
+              "ONE common myth and the fact that corrects it, with its own hook",
+              "ONE mistake people make and what to do instead, with its own hook")
+    return [write_with_claude(brief, "short", settings, angle=a + ". Not a cut-down of the long video.",
+                              avoid_lines=used).model_copy(update={"style": f"short_{i}"})
+            for i, a in enumerate(angles[:n])]
+
+
+def _originality_gate(script, brief, today, history, settings, paid, used, regen):
+    """Check against earlier scripts; rewrite up to twice; returns (script, Similarity)."""
+    from .studio import originality
+
+    sim = originality.check(script, brief.topic_key, history, today, settings.similarity_max_phrase,
+                            settings.similarity_max_structure)
+    for attempt in range(2):
+        if sim.ok:
+            break
+        log.info("originality: %s; rewriting (attempt %d)", "; ".join(sim.reasons), attempt + 1)
+        if paid:
+            from .scriptgen.claude import rewrite_for_originality
+
+            script = rewrite_for_originality(script, sim.reasons, sim.repeated_phrases, settings)
+        else:
+            script = regen(attempt + 1)
+        sim = originality.check(script, brief.topic_key, history, today, settings.similarity_max_phrase,
+                                settings.similarity_max_structure)
+    return script, sim
+
+
 def run_daily_v2(settings: Settings, store: JobStore, today: date | None = None, research_dir: Path | None = None,
-                 send: bool = True, workers: int | None = None, shorts: int = 2) -> DailyResult:
+                 send: bool = True, workers: int | None = None, shorts: int | None = None) -> DailyResult:
     from .render.animated import render_animated
     from .render.thumbnail_editorial import make_thumbnail
     from .research.run import run_research
+    from .studio import disclosure, factcheck, originality
+    from .studio.bot import format_history, push_format
+    from .studio.formats import FORMATS, choose_format
+    from .studio.queue import TopicQueue
 
     today = today or date.today()
+    shorts = settings.shorts_per_long if shorts is None else shorts
     research_dir = research_dir or Path("reports/research")
     cached = research_dir / f"{today.isoformat()}.json"
-    report = json.loads(cached.read_text()) if cached.exists() else run_research(today, research_dir, store)
-
     paid = paid_writer_allowed(settings)
-    card = pick_card(report, _used_topics(store, today), free_writer=not paid,
-                     recent_categories=_recent_categories(store, today))
-    if card is None:
-        raise RuntimeError("No eligible finance topic found in today's research")
+    item, creator, style = None, "", None
+    if settings.topic_mode == "queue":  # only topics YOU picked, with YOUR input
+        ok, why = pace_check(store, today, settings)
+        if not ok:
+            return DailyResult("", "skipped", note=why)
+        ready = [i for i in TopicQueue(store).ready()
+                 if i.creator_input.strip() or not settings.require_creator_input]
+        if not ready:
+            return DailyResult("", "waiting", note=_remind(settings, store, send))
+        item = ready[0]
+        card, creator, style = item.card, item.creator_input, item.format
+        report = json.loads(cached.read_text()) if cached.exists() else {"ranked": []}
+    else:  # TOPIC_MODE=auto (development / backtests only)
+        report = json.loads(cached.read_text()) if cached.exists() else run_research(today, research_dir, store)
+        card = pick_card(report, _used_topics(store, today), free_writer=not paid,
+                         recent_categories=_recent_categories(store, today))
+        if card is None:
+            raise RuntimeError("No eligible finance topic found in today's research")
     brief = build_brief(card, today)
-    if paid:
-        scripts = [write_with_claude(brief, "long", settings)] + \
-                  [write_with_claude(brief, "short", settings, angle=a) for a in
-                   ("one surprising number from the fact sheet", "the most common mistake")][:shorts]
-        writer = "claude"
-    else:
-        scripts = [write_long_free(brief)] + write_shorts_free(brief)[:shorts]
-        writer = "free (template + research data + exact math)"
-    result = DailyResult(brief.topic, writer)
+    if not style:
+        style = choose_format(brief, format_history(store))
+        push_format(store, style)
+    used = originality.used_lines(store)
+    writer = "claude" if paid else "free (format templates + research data + exact math)"
+    history = originality.load_history(store)
+    long_script, long_sim = _originality_gate(
+        _write_long(brief, style, creator, used, paid, settings), brief, today, history, settings, paid, used,
+        lambda k: _write_long(brief, style if k < 2 else choose_format(brief, [style]), creator, used, paid,
+                              settings, variant=k))
+    drafts = [(long_script, long_sim)]
+    # Shorts are checked against past videos and each other. Sharing a line with their own companion long video
+    # is normal (they point to it); their own hook and point are enforced below and by the writer.
+    session = list(history)
+    for sh in _write_shorts(brief, long_script.style or style, shorts, used + [long_script.hook], paid, settings):
+        alternates: list = []
+
+        def regen(k, sh=sh, alternates=alternates):  # free writer only (paid drafts are rewritten by Claude)
+            if not alternates:
+                taken = {d[0].style for d in drafts}
+                alternates += [x for x in _write_shorts(brief, long_script.style or style, 5, used + [sh.hook],
+                                                        False, settings) if x.style not in taken]
+            return alternates.pop(0) if alternates else sh
+
+        sh, sim = _originality_gate(sh, brief, today, session, settings, paid, used, regen)
+        if sh.hook and sh.hook.strip().lower() == (long_script.hook or "").strip().lower():
+            sim.ok = False
+            sim.reasons.append("the Short reuses the long video's opening line")
+        drafts.append((sh, sim))
+        session.append(originality.entry(sh, brief.topic_key, today))
+    result = DailyResult(brief.topic, writer, style=FORMATS.get(long_script.style or style, FORMATS["explainer"]).label)
     _mark_used(store, today, brief.topic_key, brief.category)
 
-    for script in scripts:
+    for script, sim in drafts:
         job = store.create(script.format, brief.topic)
         out = settings.output_dir / job.id
         out.mkdir(parents=True, exist_ok=True)
         (out / "brief.json").write_text(brief.to_json())
         (out / "fact_sheet.md").write_text(brief.fact_sheet_md())
+        claims = factcheck.check_claims(script, brief, creator)
+        (out / "fact_check.md").write_text("# " + factcheck.report(claims, limit=500).replace("\n", "\n\n") + "\n")
         job.script_path = str(out / "script.json")
         Path(job.script_path).write_text(script.model_dump_json(indent=2))
-        store.transition(job, JobStatus.SCRIPTED, f"{writer}; {script.word_count} words")
+        store.transition(job, JobStatus.SCRIPTED, f"{writer}; {script.style}; {script.word_count} words")
 
         ok, why = finance_only_check(script)
         report_c = check_script(script, enforce_length=paid)
         if not ok:
             report_c.errors.append(f"Finance-only gate failed: {why}")
-        (out / "compliance.txt").write_text(report_c.summary())
+        if not sim.ok:
+            report_c.errors.append("Too similar to earlier videos even after rewriting: " + "; ".join(sim.reasons))
+        (out / "compliance.txt").write_text(report_c.summary() + "\n\n" + sim.summary())
         if not report_c.ok:
             store.transition(job, JobStatus.REJECTED_COMPLIANCE, report_c.summary()[:500])
             result.jobs.append((job.id, script.format, "rejected_compliance", None, report_c.errors[0]))
             continue
         try:
             res = _render_with_retry(render_animated, script, out, settings, workers)
-            starts = res.scene_starts or []
+            disc = disclosure.disclosure_for(res.voice)
+            desc = factcheck.add_sources_to_description(script.description, claims)
+            desc = disclosure.add_note(desc, disc)
             script = script.model_copy(update={"description": finalize_description(
-                script.description, [s.heading for s in script.scenes], starts, script.format == "long")})
+                desc, [s.heading for s in script.scenes], res.scene_starts or [], script.format == "long")})
             Path(job.script_path).write_text(script.model_dump_json(indent=2))
             thumb = make_thumbnail(script, out / "thumbnail.jpg", portrait=script.format == "short",
                                    theme=getattr(settings, "theme", "editorial"))
             (out / "metadata.json").write_text(json.dumps(
                 {"title": script.title, "description": script.description, "tags": script.tags,
                  "topic_key": brief.topic_key, "category": brief.category, "market": brief.market,
+                 "format": script.style, "creator_input": creator, "picked_by_you": item is not None,
                  "research_score": brief.score, "confidence": brief.confidence, "writer": writer,
                  "voice": res.voice, "render_seconds": round(res.render_seconds, 1),
+                 "youtube_altered_content": disc.youtube_altered_content, "disclosure": disc.reasons,
+                 "fact_check": {s: sum(c.status == s for c in claims)
+                                for s in ("source", "calculation", "reference", "creator", "UNSOURCED")},
+                 "originality": {"phrase_overlap": round(sim.phrase_overlap, 3),
+                                 "structure_similarity": round(sim.structure_ratio, 3)},
                  "pronunciation_misses": res.unknown_words}, indent=2))
             job.video_path, job.subtitles_path = str(res.video), str(res.srt)
             job.thumbnail_path, job.duration_sec = str(thumb), round(res.duration, 2)
             store.transition(job, JobStatus.RENDERED, f"{res.duration:.1f}s in {res.render_seconds:.0f}s")
+            originality.record(store, script, brief.topic_key, today)
         except Exception as exc:  # one failed render must not stop the other videos
             log.exception("render failed for %s", job.id)
             job = store.get(job.id)
@@ -133,20 +260,31 @@ def run_daily_v2(settings: Settings, store: JobStore, today: date | None = None,
             from .publish.telegram import request_approval
 
             why_md = out / "why_this_topic.md"
-            why_md.write_text(_why_card(brief, report))
+            why_md.write_text(_why_card(brief, report, item))
             preview = None
             if script.format == "long":
                 from .render.video import preview_clip
 
                 preview = preview_clip(res.video, out / "preview.mp4")
-            request_approval(job, store, settings, script, report_c.summary(), preview=preview,
+            checks = "\n\n".join([report_c.summary(), sim.summary(), factcheck.report(claims),
+                                   disc.review_text()])
+            request_approval(job, store, settings, script, checks, preview=preview,
                              attachments=[(why_md, "Why this topic (research evidence)"),
+                                          (out / "fact_check.md", "Fact check: every number and its source"),
                                           (out / "fact_sheet.md", "Fact sheet (sources and calculations)")])
             note = "sent to Telegram"
         elif send:
             note = "Telegram not configured: review files in the output folder"
         job = store.get(job.id)
         result.jobs.append((job.id, script.format, job.status.value, job.video_path, note))
+
+    produced = [j for j in result.jobs if j[2] in ("rendered", "pending_approval")]
+    if any(j[1] == "long" for j in produced):
+        dates = json.loads(store.kv_get("long_dates", "[]")) + [today.isoformat()]
+        store.kv_set("long_dates", json.dumps(dates[-200:]))
+    if item is not None and produced:
+        TopicQueue(store).update(item.id, status="produced", produced_on=today.isoformat(),
+                                 jobs=[j[0] for j in result.jobs])
     return result
 
 
@@ -208,7 +346,8 @@ def supervised_daily(settings: Settings, store: JobStore, today: date | None = N
             notifier(settings, f"GLIVARAO daily run FAILED for {today} after {retries + 1} attempts: "
                                f"{type(last).__name__}: {str(last)[:300]}\nSee logs/daily.log on the server.")
             raise last
-        store.kv_set(done_key, json.dumps([j[0] for j in res.jobs]))
+        if res.jobs:  # nothing produced (pace / waiting for your input) -> a later run today may still produce
+            store.kv_set(done_key, json.dumps([j[0] for j in res.jobs]))
         bad = [j for j in res.jobs if j[2] in ("failed", "rejected_compliance")]
         if bad:
             notifier(settings, f"GLIVARAO {today}: {len(bad)} of {len(res.jobs)} videos need attention:\n" +
@@ -228,9 +367,11 @@ def _notify(settings: Settings, text: str) -> None:
         log.exception("could not send Telegram alert")
 
 
-def _why_card(brief, report: dict) -> str:
-    runners = [t for t in report["ranked"][:4] if t["key"] != brief.topic_key][:2]
-    lines = [f"# Why \"{brief.topic}\" was chosen ({brief.date})", "",
+def _why_card(brief, report: dict, item=None) -> str:
+    runners = [t for t in report.get("ranked", [])[:4] if t["key"] != brief.topic_key][:2]
+    picked = (f"Picked by you on {item.picked_at[:10]} from the weekly ideas. Your take: \"{item.creator_input}\""
+              if item is not None else "Chosen automatically (TOPIC_MODE=auto).")
+    lines = [f"# Why \"{brief.topic}\" was chosen ({brief.date})", "", picked, "",
              f"Research score {brief.score}/100 · {brief.confidence} confidence · {brief.category} · {brief.market}",
              "", "## Evidence"] + [f"- {w}" for w in brief.why]
     lines += ["", f"**Angle:** {brief.angle}", "", "## Runner-up topics"]

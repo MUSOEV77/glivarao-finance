@@ -180,3 +180,90 @@ LIB = {
                     "Ask questions before you sign anything"],
     },
 }
+
+
+# Reviewed myth / fact pairs for the Myth vs Fact format: (myth stated fairly, the fact, illustration).
+# Same rules as above: durable, general, no statistics, accurate for the US and Canada.
+MYTHS = {
+    "card": [
+        ("Paying the minimum keeps you on track.",
+         "It keeps the account in good standing, but most of the payment goes to interest, so the balance can take "
+         "years to shrink. Paying a fixed amount above the minimum is what actually gets you out.", "credit_card"),
+        ("Carrying a small balance helps your credit score.",
+         "Paying your statement balance in full is what builds a good history. Carrying a balance doesn't help the "
+         "score, and it costs you interest.", "warning"),
+        ("You can't do anything about a wrong charge.",
+         "Card issuers have formal dispute processes for billing errors. Acting quickly, in writing, with your "
+         "receipts, matters a lot.", "paycheck"),
+    ],
+    "loan": [
+        ("A lower monthly payment means a cheaper loan.",
+         "A longer term can shrink the payment while making the total cost much bigger. Compare the total cost, not "
+         "just the payment.", "scale"),
+        ("All lenders offer about the same rate.",
+         "Rates and fees can differ a lot between lenders for the same borrower. Getting several quotes is one of "
+         "the easiest ways to save.", "bank"),
+        ("If money gets tight, it's better to wait and hope.",
+         "Lenders usually have more options before an account falls behind than after. Calling early is almost "
+         "always better.", "calendar"),
+    ],
+    "credit_file": [
+        ("Credit report errors are rare.",
+         "Errors happen more than people think: mixed-up files, old debts shown as unpaid, or accounts opened by "
+         "identity thieves.", "warning"),
+        ("Checking your own credit report hurts your score.",
+         "Looking at your own report is a soft inquiry and doesn't affect your score.", "paycheck"),
+        ("Disputing an error is pointless.",
+         "Bureaus must investigate disputes. A clear dispute with documents is often the fastest way to fix a "
+         "wrong entry.", "shield"),
+    ],
+    "scam": [
+        ("Scams only fool careless people.",
+         "Scams are designed by professionals to create urgency and trust. Smart, careful people get targeted every "
+         "day. Slowing down is the best defense.", "warning"),
+        ("If caller ID shows my bank, it's my bank.",
+         "Caller ID and logos can be faked. Hang up and call the number on your card or the official website.",
+         "shield"),
+        ("Once you've paid a scammer, nothing can be done.",
+         "Acting fast matters. Tell your bank immediately and report it. Some payments can be stopped or "
+         "recovered, especially when you move quickly.", "bank"),
+    ],
+    "grow": [
+        ("You need a lot of money to start investing.",
+         "Time matters more than the starting amount. Small, regular contributions started early can grow into "
+         "real money.", "growth_arrow"),
+        ("Saving is only for people with high incomes.",
+         "A set amount moved automatically on payday works at almost any income. The habit matters more than the "
+         "amount.", "piggy_bank"),
+        ("An emergency fund is wasted money.",
+         "A cash cushion keeps a surprise bill from turning into high-interest debt, which protects your progress.",
+         "shield"),
+    ],
+    "invest": [
+        ("A one percent fee is too small to matter.",
+         "It's charged every year on your whole balance, so over decades it can take a large share of your "
+         "growth.", "warning"),
+        ("Picking winning stocks is the way to grow wealth.",
+         "Most investors, and many professionals, struggle to beat the market consistently. Broad, low-cost funds "
+         "spread the risk.", "growth_arrow"),
+        ("When the market drops, you should get out.",
+         "Selling after big drops often means locking in losses and missing the recovery. Match your risk to when "
+         "you'll need the money.", "scale"),
+    ],
+    "bank": [
+        ("All my money is protected, whatever the amount.",
+         "Deposit insurance has limits and rules by account type, through the FDIC in the US and CDIC in Canada. "
+         "Know where your coverage ends.", "shield"),
+        ("Bank fees are unavoidable.",
+         "Many fees can be avoided by meeting simple account rules or switching accounts. Ask your bank.", "bank"),
+        ("A payment app works just like a bank account.",
+         "Payments sent to the wrong person can be very hard to reverse. Double-check every recipient.", "warning"),
+    ],
+    "generic": [
+        ("Good money habits take a lot of willpower.",
+         "The best habits are automatic. Decide once, then let automation do the work.", "calendar"),
+        ("Asking for help with money is a sign of failure.",
+         "Many banks, lenders and nonprofit credit counselors offer free guidance. Asking early saves money.",
+         "lightbulb"),
+    ],
+}

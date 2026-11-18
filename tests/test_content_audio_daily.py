@@ -122,6 +122,12 @@ def test_daily_v2_orchestration_with_stubbed_render(settings, store, tmp_path, m
 
     monkeypatch.setattr(anim, "render_animated", fake_render)
     monkeypatch.setattr(th, "make_thumbnail_v3", lambda sc, dst, portrait=False: (dst.write_bytes(b"jpg"), dst)[1])
+    import glivarao.render.thumbnail_editorial as te
+
+    monkeypatch.setattr(te, "make_thumbnail", lambda sc, dst, portrait=False, theme="": (dst.write_bytes(b"jpg"), dst)[1])
+    from dataclasses import replace
+
+    settings = replace(settings, topic_mode="auto", min_days_between_long=0)  # development mode: research picks
     res = run_daily_v2(settings, store, today=TODAY, research_dir=rdir)
     assert res.topic == "Credit cards, interest and fees" and res.writer.startswith("free")
     assert [j[1] for j in res.jobs] == ["long", "short", "short"]

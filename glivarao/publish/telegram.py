@@ -60,6 +60,18 @@ class TelegramClient:
         return body["result"]
 
 
+    def download(self, file_path: str, dst: Path) -> Path:
+        """Download a file sent to the bot (e.g. a voice note). Errors never include the URL/token."""
+        try:
+            resp = self.http.get(f"{self._base}/file/bot{self._token}/{file_path}", timeout=120)
+        except requests.RequestException as exc:
+            raise TelegramError(f"download failed: {type(exc).__name__}") from None
+        if resp.status_code != 200:
+            raise TelegramError(f"download failed: HTTP {resp.status_code}")
+        Path(dst).write_bytes(resp.content)
+        return Path(dst)
+
+
 def _keyboard(job_id: str) -> dict:
     return {"inline_keyboard": [[{"text": "✅ Approve", "callback_data": f"approve:{job_id}"},
                                  {"text": "❌ Reject", "callback_data": f"reject:{job_id}"}]]}
@@ -136,10 +148,24 @@ def poll_decisions(store: JobStore, settings: Settings, client: TelegramClient |
     """Process pending button presses. Returns [(job_id, decision)]."""
     client = _client(settings, client)
     offset = int(store.kv_get("telegram_offset", "0"))
-    updates = client.call("getUpdates", offset=offset, timeout=0, allowed_updates=["callback_query"])
+    updates = client.call("getUpdates", offset=offset, timeout=0, allowed_updates=["callback_query", "message"])
     decisions = []
+    from ..studio import bot
+
     for upd in updates:
         store.kv_set("telegram_offset", str(upd["update_id"] + 1))
+        msg = upd.get("message")
+        if msg:  # your topic input (text / voice note) or /queue
+            sender = str((msg.get("from") or {}).get("id"))
+            chat_id = str((msg.get("chat") or {}).get("id"))
+            if settings.telegram_approver_chat_id not in {sender, chat_id}:
+                log.warning("Ignoring message from unauthorized Telegram user %s", sender)
+                continue
+            try:
+                bot.handle_message(msg, store, settings, client)
+            except Exception as exc:  # noqa: BLE001  one bad message must not block the others
+                log.warning("could not handle message: %s", exc)
+            continue
         cq = upd.get("callback_query")
         if not cq:
             continue
@@ -150,6 +176,12 @@ def poll_decisions(store: JobStore, settings: Settings, client: TelegramClient |
             client.call("answerCallbackQuery", callback_query_id=cq["id"], text="Not authorized")
             continue
         action, _, job_id = cq.get("data", "").partition(":")
+        if action in bot.PREFIXES:  # topic picks, drops and format changes
+            try:
+                decisions.append((job_id, "topic:" + bot.handle_callback(cq, store, settings, client)))
+            except Exception as exc:  # noqa: BLE001
+                log.warning("could not handle topic button: %s", exc)
+            continue
         try:
             job = store.get(job_id)
         except KeyError:

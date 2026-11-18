@@ -1,0 +1,15 @@
+[Unit]
+Description=GLIVARAO weekly topic ideas -> Telegram (you pick which ones get made). Never uploads.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=glivarao
+WorkingDirectory=/opt/glivarao/app
+ExecStart=/opt/glivarao/app/.venv/bin/python -m glivarao -v propose-topics
+StandardOutput=append:/opt/glivarao/app/logs/propose.log
+StandardError=append:/opt/glivarao/app/logs/propose.log
+TimeoutStartSec=30min
+NoNewPrivileges=true
+PrivateTmp=true
