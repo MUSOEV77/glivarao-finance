@@ -61,6 +61,32 @@ def _print_result(res):
     print("  " + res.report.summary().replace("\n", "\n  "))
 
 
+def cmd_sample(args, s):
+    """Render a hand-written sample script with the v2 animated renderer. Local only: never sent anywhere."""
+    from datetime import datetime
+    from pathlib import Path
+
+    from .compliance import check_script
+    from .models import Script
+    from .render.animated import render_animated
+    from .render.thumbnail import make_thumbnail
+    from .render.video import probe
+
+    script = Script.model_validate_json(Path(args.script).read_text())
+    report = check_script(script, enforce_length=False)
+    if not report.ok:
+        raise RuntimeError(report.summary())
+    out = s.output_dir / f"sample-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    res = render_animated(script, out, s, voice=args.voice)
+    thumb = make_thumbnail(script, out / "thumbnail.jpg")
+    (out / "script.json").write_text(script.model_dump_json(indent=2))
+    info = probe(res.video)
+    print(f"video={res.video}\nthumbnail={thumb}\ncaptions={res.srt}\nvoice=Kokoro {res.voice}")
+    print(f"duration={info['duration']:.2f}s {info['width']}x{info['height']} render={res.render_seconds:.1f}s")
+    print(f"pronunciation dictionary misses: {res.unknown_words or 'none'}")
+    print(report.summary())
+
+
 def cmd_list(args, s):
     for j in _store(s).list(JobStatus(args.status) if args.status else None, limit=args.limit):
         print(f"{j.id:28s} {j.status.value:20s} {j.format:5s} {j.duration_sec or 0:7.1f}s  {j.topic}")
@@ -137,6 +163,10 @@ def main(argv=None):
     d.add_argument("--long-minutes", type=float)
     d.add_argument("--tts", choices=["elevenlabs", "google", "espeak", "silent"])
     d.set_defaults(fn=cmd_daily)
+    sm = sub.add_parser("sample", help="render the v2 animated sample (local only)")
+    sm.add_argument("--script", default="config/samples/sample_60s.json")
+    sm.add_argument("--voice", default="am_michael")
+    sm.set_defaults(fn=cmd_sample)
     ls = sub.add_parser("list")
     ls.add_argument("--status", choices=[x.value for x in JobStatus])
     ls.add_argument("--limit", type=int, default=30)

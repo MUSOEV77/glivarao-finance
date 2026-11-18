@@ -3,8 +3,10 @@
 Providers
 - elevenlabs : production. Requires ELEVENLABS_API_KEY and a US-English male ELEVENLABS_VOICE_ID.
 - google     : production. Google Cloud Text-to-Speech, default voice en-US-Neural2-D (male).
-- espeak     : DEV PLACEHOLDER ONLY (robotic). Never publish with it.
-- silent     : silence sized to the text (~150 wpm). For CI/tests.
+- kokoro     : production. Local Kokoro-82M neural voice (default am_michael, US-English male),
+               Apache-2.0, no API key. See tts/kokoro.py.
+- espeak     : DEV PLACEHOLDER ONLY (robotic). Refused in production mode.
+- silent     : silence sized to the text (~150 wpm). For CI/tests. Refused in production mode.
 
 Every provider returns a 48 kHz mono 16-bit WAV so downstream timing is uniform.
 """
@@ -106,11 +108,31 @@ def _google(text: str, dst: Path, s: Settings) -> None:
     raw.unlink(missing_ok=True)
 
 
+PLACEHOLDER_PROVIDERS = {"espeak", "silent"}
+
+
+def _kokoro(text: str, dst: Path, s: Settings) -> None:
+    import soundfile as sf
+
+    from .kokoro import KOKORO_SR, KokoroEngine
+
+    narration = KokoroEngine.get(s.kokoro_voice).narrate(text)
+    raw = dst.with_suffix(".raw.wav")
+    sf.write(raw, narration.audio, KOKORO_SR, subtype="PCM_16")
+    _normalize(raw, dst, pad_sec=0.0)
+    raw.unlink(missing_ok=True)
+
+
 def synthesize(text: str, dst: Path, settings: Settings, provider: str | None = None) -> float:
     """Synthesize `text` to `dst` (WAV). Returns duration in seconds."""
     provider = provider or settings.tts_provider
+    if not settings.dry_run and provider in PLACEHOLDER_PROVIDERS:
+        raise TTSError(f"TTS provider '{provider}' is a development placeholder and is never allowed in "
+                       "production. Use kokoro, elevenlabs or google.")
     dst.parent.mkdir(parents=True, exist_ok=True)
-    if provider == "silent":
+    if provider == "kokoro":
+        _kokoro(text, dst, settings)
+    elif provider == "silent":
         _silent(text, dst)
     elif provider == "espeak":
         _espeak(text, dst)

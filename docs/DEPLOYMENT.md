@@ -27,6 +27,23 @@ sudo -u glivarao python3 -m venv /opt/glivarao/.venv
 sudo -u glivarao /opt/glivarao/.venv/bin/pip install -r requirements.txt
 ```
 
+## 2b. Voice model (Kokoro-82M, Apache-2.0, about 350 MB, not stored in git)
+
+```bash
+cd /opt/glivarao/app
+sudo -u glivarao mkdir -p models/kokoro
+B=https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0
+sudo -u glivarao curl -fL -o models/kokoro/kokoro-v1.0.onnx $B/kokoro-v1.0.onnx
+sudo -u glivarao curl -fL -o models/kokoro/voices-v1.0.bin  $B/voices-v1.0.bin
+sudo -u glivarao /opt/glivarao/.venv/bin/pip install \
+  https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
+# render the 60-second v2 sample (local only, nothing is sent anywhere):
+sudo -u glivarao /opt/glivarao/.venv/bin/python -m glivarao sample
+```
+
+Set `TTS_PROVIDER=kokoro` and `KOKORO_VOICE=am_michael` in `.env`. espeak and silent narration are
+refused when `GLIVARAO_MODE=production`.
+
 ## 3. Secrets (never commit them)
 
 ```bash

@@ -1,0 +1,93 @@
+{
+  "format": "long",
+  "topic": "The five-dollar habit: how compound interest works",
+  "title": "The $5-a-Day Habit That Can Grow Past $180,000 (Compound Interest, Explained)",
+  "description": "A one-minute look at how a small daily habit becomes real money through compound interest, and why starting early matters more than starting big.\n\nAll returns shown are hypothetical (7% per year, monthly compounding) and are not guaranteed.\nThis video is for education only and isn't financial advice.",
+  "tags": [
+    "compound interest",
+    "investing for beginners",
+    "personal finance",
+    "saving money"
+  ],
+  "thumbnail_text": "$5 a day = $180K?",
+  "hook": "Meet Max.",
+  "scenes": [
+    {
+      "heading": "The five-dollar habit",
+      "character": "max",
+      "illustration": "piggy_bank",
+      "set": "studio",
+      "entrance": "walk_in",
+      "narration": "Meet Max. Like a lot of Americans, he figures investing is something you do later, once you're rich. But here's a secret worth knowing."
+    },
+    {
+      "heading": "Small money, every day",
+      "character": "max",
+      "illustration": "piggy_bank",
+      "set": "home",
+      "money_fx": "coins",
+      "key_points": [
+        "$5 a day = about $150 a month"
+      ],
+      "narration": "Say Max sets aside just five dollars a day. That's about a hundred and fifty dollars a month. Skip a couple of takeout lunches, and he's there."
+    },
+    {
+      "heading": "Let it grow",
+      "character": "max",
+      "set": "board",
+      "illustration": "growth_arrow",
+      "chart": {
+        "kind": "compound_growth",
+        "title": "$150/month at a hypothetical 7% a year",
+        "params": {
+          "principal": 0,
+          "rate": 0.07,
+          "years": 30,
+          "monthly": 150
+        }
+      },
+      "narration": "Now he invests it, at a hypothetical seven percent a year. After ten years, he has about twenty-six thousand dollars. After thirty? *Over a hundred and eighty thousand.*"
+    },
+    {
+      "heading": "Where it came from",
+      "character": "duo",
+      "illustration": "coin_stack",
+      "set": "bank",
+      "key_points": [
+        "Max put in: $54,000",
+        "Growth: about $129,000"
+      ],
+      "narration": "Penny, how much of that did Max actually put in? Just fifty-four thousand. The rest is growth, earning more growth."
+    },
+    {
+      "heading": "The catch",
+      "character": "max",
+      "set": "board",
+      "illustration": "hourglass",
+      "pose": "worry",
+      "chart": {
+        "kind": "bar_compare",
+        "title": "$150/month, hypothetical 7%, at year 30",
+        "unit": "$",
+        "labels": [
+          "Start today",
+          "Wait 10 years"
+        ],
+        "values": [
+          182996,
+          78139
+        ],
+        "source": "Illustrative example"
+      },
+      "narration": "The catch? Time does the heavy lifting. Wait ten years to start, and the same habit only reaches about seventy-eight thousand."
+    },
+    {
+      "heading": "Your move",
+      "character": "max",
+      "illustration": "target",
+      "set": "city",
+      "pose": "cheer",
+      "narration": "So start small, and start today. This video is for education only and isn't financial advice."
+    }
+  ]
+}

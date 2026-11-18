@@ -9,6 +9,16 @@ PyYAML>=6.0
 # Script generation (Claude API)
 anthropic>=2.0
 
+# Narration: local Kokoro-82M neural TTS (Apache-2.0) + misaki G2P (no espeak needed)
+kokoro-onnx>=0.4
+onnxruntime>=1.18
+soundfile>=0.12
+misaki==0.7.4
+num2words>=0.5
+spacy>=3.8
+# spaCy English model (installed from its GitHub release):
+# en_core_web_sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
+
 # YouTube upload + analytics
 google-api-python-client>=2.120
 google-auth-oauthlib>=1.2
@@ -18,4 +28,5 @@ google-auth>=2.28
 pytest>=8.0
 
 # System dependencies (not pip): ffmpeg (with libx264 + libass).
-# Optional dev-only placeholder voice: espeak-ng (apt-get install espeak-ng).
+# Optional dev-only placeholder voice: espeak-ng (apt-get install espeak-ng). Never used in production.
+# Kokoro model files (not in git): see docs/DEPLOYMENT.md "Voice model".

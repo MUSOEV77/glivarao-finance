@@ -45,6 +45,8 @@ class Settings:
     script_model: str = field(default_factory=lambda: _env("GLIVARAO_SCRIPT_MODEL", "claude-opus-5-5"))
 
     tts_provider: str = field(default_factory=lambda: _env("TTS_PROVIDER", "espeak"))
+    kokoro_voice: str = field(default_factory=lambda: _env("KOKORO_VOICE", "am_michael"))
+    renderer: str = field(default_factory=lambda: _env("GLIVARAO_RENDERER", "v1"))
     elevenlabs_api_key: str = field(default_factory=lambda: _env("ELEVENLABS_API_KEY"))
     elevenlabs_voice_id: str = field(default_factory=lambda: _env("ELEVENLABS_VOICE_ID"))
     elevenlabs_model_id: str = field(default_factory=lambda: _env("ELEVENLABS_MODEL_ID", "eleven_multilingual_v2"))
@@ -83,7 +85,9 @@ class Settings:
 
     def readiness(self) -> dict[str, tuple[bool, str]]:
         """Which integrations are configured. Values: (ready, explanation)."""
+        kokoro_ready = (Path(__file__).resolve().parents[1] / "models/kokoro/kokoro-v1.0.onnx").exists()
         tts_ready = {
+            "kokoro": kokoro_ready,
             "elevenlabs": bool(self.elevenlabs_api_key and self.elevenlabs_voice_id),
             "google": bool(self.google_tts_api_key),
             "espeak": True,
@@ -96,8 +100,8 @@ class Settings:
                 "ELEVENLABS_API_KEY + ELEVENLABS_VOICE_ID or GOOGLE_TTS_API_KEY",
             ),
             "production voice": (
-                self.tts_provider in {"elevenlabs", "google"} and tts_ready,
-                "espeak/silent are dev placeholders only",
+                self.tts_provider in {"kokoro", "elevenlabs", "google"} and tts_ready,
+                "set TTS_PROVIDER=kokoro (local, free) — espeak/silent are refused in production",
             ),
             "market data (FRED)": (bool(self.fred_api_key), "FRED_API_KEY (optional)"),
             "telegram approval": (

@@ -37,6 +37,11 @@ class Scene(BaseModel):
     illustration: str = "coin_stack"
     chart: ChartSpec = Field(default_factory=ChartSpec)
     key_points: list[str] = Field(default_factory=list, description="0-3 short bullet callouts")
+    # Optional direction for the animated (v2) renderer; the director chooses automatically when unset.
+    set: Optional[Literal["studio", "home", "city", "bank", "board"]] = None
+    entrance: Optional[Literal["walk_in", "hop_in", "none"]] = None
+    transition: Optional[Literal["push", "iris", "fade", "wipe", "cut"]] = None
+    money_fx: Optional[Literal["coins", "bills", "none"]] = None
 
 
 class Script(BaseModel):
