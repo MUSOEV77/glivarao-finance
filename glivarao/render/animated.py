@@ -197,6 +197,16 @@ def _transition(kind: str, prev: Image.Image, cur: Image.Image, f: int) -> Image
     e = ease_in_out((f + 1) / TRANSITION_FRAMES)
     if kind == "fade":
         return Image.blend(prev, cur, e)
+    if kind == "slide":  # editorial: the new page slides over the old one with a soft shadow edge
+        out = prev.copy()
+        off = int((1 - e) * W)
+        out.paste(cur, (off, 0))
+        if off > 0:
+            shade = Image.new("L", (24, H), 0)
+            for k in range(24):
+                shade.paste(int(70 * (1 - k / 24)), (k, 0, k + 1, H))
+            out.paste((20, 18, 16), (max(0, off - 24), 0, off, H), shade.crop((0, 0, min(24, off), H)))
+        return out
     if kind == "push":
         out = Image.new("RGB", (W, H))
         off = int(e * W)
@@ -228,17 +238,34 @@ def _init_worker(job: dict) -> None:
     _JOB.update(job)
 
 
+def _frames(i: int):
+    """Frame source for scene i in the configured theme (both expose frame(f, portrait))."""
+    script, plans, envs = _JOB["script"], _JOB["plans"], _JOB["envs"]
+    if _JOB.get("theme") == "editorial":
+        from .editorial import EditorialFrames
+
+        return EditorialFrames(script, i, plans[i], envs[i], _JOB["sentences"][i], _JOB["starts_sec"][i],
+                               _JOB["total_sec"], len(script.scenes))
+    return SceneFrames(script, i, plans[i], envs[i])
+
+
+def _transition_kind(kind: str) -> str:
+    if _JOB.get("theme") == "editorial":  # documentary grammar: dissolves and clean slides only
+        return {"iris": "fade", "wipe": "fade", "push": "slide"}.get(kind, kind)
+    return kind
+
+
 def _render_segment(i: int) -> str:
-    script, plans, envs, starts, workdir = (_JOB[k] for k in ("script", "plans", "envs", "starts", "workdir"))
+    script, plans, starts, workdir = (_JOB[k] for k in ("script", "plans", "starts", "workdir"))
     portrait = script.format == "short"
     fw, fh = (PW, PH) if portrait else (W, H)
     n_frames = starts[i + 1] - starts[i]
     seg = workdir / f"seg_{i:03d}.mp4"
-    sf_ = SceneFrames(script, i, plans[i], envs[i])
+    sf_ = _frames(i)
+    kind = _transition_kind(plans[i].transition)
     prev_last = None
-    if i > 0 and plans[i].transition != "cut":
-        prev_last = SceneFrames(script, i - 1, plans[i - 1], envs[i - 1]).frame(starts[i] - starts[i - 1] - 1,
-                                                                             portrait)
+    if i > 0 and kind != "cut":
+        prev_last = _frames(i - 1).frame(starts[i] - starts[i - 1] - 1, portrait)
     cmd = ["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{fw}x{fh}",
            "-r", str(FPS), "-i", "-", "-c:v", "libx264", "-preset", "veryfast", "-crf", "16", "-threads", "2",
            "-pix_fmt", "yuv420p", str(seg)]
@@ -246,7 +273,7 @@ def _render_segment(i: int) -> str:
     for f in range(n_frames):
         img = sf_.frame(f, portrait)
         if prev_last is not None and f < TRANSITION_FRAMES:
-            img = _transition(plans[i].transition, prev_last, img, f)
+            img = _transition(kind, prev_last, img, f)
         proc.stdin.write(np.asarray(img, dtype=np.uint8).tobytes())
     proc.stdin.close()
     if proc.wait() != 0:
@@ -294,9 +321,8 @@ def render_animated(script: Script, workdir: Path, settings: Settings, voice: st
                 tt += d
         offset += n.duration
     starts_sec.append(offset)
-    srt = write_srt(cues, workdir / "captions.srt")
-    ass = write_ass(cues, workdir / "captions.ass", fw, fh, portrait=portrait,
-                    margin_v=(PH - 1010) if portrait else None)
+    srt = write_srt(cues, workdir / "captions.srt")  # full captions file (for YouTube CC) in every theme
+    theme = getattr(settings, "theme", "cartoon")
 
     plans, prev_sets = [], []
     for i, (scene, n) in enumerate(zip(script.scenes, narrations)):
@@ -304,11 +330,31 @@ def render_animated(script: Script, workdir: Path, settings: Settings, voice: st
         plans.append(p)
         prev_sets.append(p.set)
     envs = [envelope(n.audio, KOKORO_SR, FPS) for n in narrations]
+    sentences = beats = None
+    burn = cues
+    if theme == "editorial":
+        from .editorial import PORTRAIT_CAPTION_MARGIN_V, plan_beats, quote_windows, sentence_tuples
+
+        sentences = [sentence_tuples(n) for n in narrations]
+        beats = [plan_beats(sc, st, p, script.format == "long") for sc, st, p in zip(script.scenes, sentences, plans)]
+        muted = quote_windows(beats, starts_sec[:-1])
+        burn = [c for c in cues if not any(a <= (c.start + c.end) / 2 <= b for a, b in muted)]
+        ass = write_ass(burn, workdir / "captions.ass", fw, fh, portrait=portrait,
+                        margin_v=PORTRAIT_CAPTION_MARGIN_V if portrait else 46, theme="editorial")
+    else:
+        ass = write_ass(cues, workdir / "captions.ass", fw, fh, portrait=portrait,
+                        margin_v=(PH - 1010) if portrait else None)
     if with_audio_mix:  # music bed + SFX at animation cues, music ducked under the narration
         from ..anim.audio import cue_list, mix
 
-        sfx_cues = cue_list(plans, starts_sec[:-1])
-        mixed = mix(audio, sfx_cues, seed=zlib.crc32(script.title.encode()) % 1000)  # stable per title
+        if beats is not None:
+            from .editorial import editorial_cues
+
+            sfx_cues = editorial_cues(beats, plans, starts_sec[:-1])
+        else:
+            sfx_cues = cue_list(plans, starts_sec[:-1])
+        mixed = mix(audio, sfx_cues, seed=zlib.crc32(script.title.encode()) % 1000,
+                    sfx_level=0.3 if beats is not None else 0.45)  # stable per title
         sf.write(raw_wav, mixed, KOKORO_SR, subtype="PCM_16")
     else:
         from ..anim.audio import master_voice
@@ -323,7 +369,9 @@ def render_animated(script: Script, workdir: Path, settings: Settings, voice: st
     (workdir / "audio_master.json").write_text(json.dumps(audio_report, indent=2))
     frame_starts = [int(round(s * FPS)) for s in starts_sec]
 
-    job = dict(script=script, plans=plans, envs=envs, starts=frame_starts, workdir=workdir)
+    job = dict(script=script, plans=plans, envs=envs if theme != "editorial" else [None] * len(plans),
+               starts=frame_starts, workdir=workdir, theme=theme, sentences=sentences,
+               starts_sec=starts_sec[:-1], total_sec=total)
     from ..sysres import safe_workers
 
     workers = safe_workers(workers)  # capped by free RAM (about 1 GB per worker), not just CPU count

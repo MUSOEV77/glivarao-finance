@@ -83,6 +83,36 @@ systemctl list-timers 'glivarao-*'
    `sudo -u glivarao /opt/glivarao/app/.venv/bin/python -m glivarao publish <job_id>`. This is interactive
    and always private. You publish it in YouTube Studio.
 
+### Reliability (what happens automatically)
+
+- **One run per day, never overlapping.**
+  - A file lock (`data/daily.lock`) prevents two runs at once.
+  - A day that completed is skipped. Run with `daily-v2 --force` to produce it again.
+- **Retries.**
+  - A failed run is retried once, after 2 minutes.
+  - A failed render is retried once with 1 worker, since memory pressure is the usual cause.
+- **Alerts.** You get a Telegram alert:
+  - if the run still fails after the retry;
+  - if any video failed, or was rejected by the compliance check.
+- **Disk.** The run refuses to start with less than 1.5 GB free, and says so.
+- **Memory.**
+  - Render workers are capped by free RAM (about 1 GB each). Override with `RENDER_WORKERS`.
+  - The voice model is released before frames render.
+  - Intermediate WAVs are deleted.
+- **Logs.**
+  - Timestamped logs go to `logs/daily.log` and `logs/poll.log`, rotated weekly by logrotate.
+  - `journalctl -u glivarao-daily` has the exit status.
+- **Backups** run daily at 03:40 into `backups/glivarao-YYYY-MM-DD.tar.gz`, kept for 30 days.
+  - They contain the job database, which is integrity-checked, plus the spend ledgers.
+  - They never contain `.env` or `secrets/`.
+  - Restore: `sudo bash deploy/restore.sh backups/glivarao-YYYY-MM-DD.tar.gz`. It stops the timers, keeps the
+    current files as `*.before-restore`, then restarts the timers.
+- **Spending caps (enforced in code):**
+  - Claude scripts: `CLAUDE_MONTHLY_BUDGET_USD` (default $30).
+  - Gemini voice: `TTS_MONTHLY_BUDGET_USD` (default $20).
+  - With the VPS (about $5), worst case is about $55 a month, well under $100. Paid APIs are only used when
+    `ALLOW_PAID_APIS=true`.
+
 ## 5. Updating
 
 ```bash
@@ -97,3 +127,6 @@ cd /tmp/glivarao-src && git pull && sudo bash deploy/install.sh   # re-runs safe
   - api.telegram.org.
   - No inbound ports are needed (Telegram uses polling): `sudo ufw allow OpenSSH && sudo ufw enable`.
 - To roll back to the code before today's integration: `git checkout backup/pre-integration-2026-11-18`.
+  The code before the production hardening and editorial design is at
+  `backup/pre-production-hardening-2026-11-18`. The previous cartoon look is still available with
+  `GLIVARAO_THEME=cartoon`.

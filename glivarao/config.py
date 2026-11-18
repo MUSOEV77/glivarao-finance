@@ -57,6 +57,8 @@ class Settings:
     tts_provider: str = field(default_factory=lambda: _env("TTS_PROVIDER", "kokoro"))
     kokoro_voice: str = field(default_factory=lambda: _env("KOKORO_VOICE", "am_michael"))
     renderer: str = field(default_factory=lambda: _env("GLIVARAO_RENDERER", "v1"))
+    # Visual theme of the animated (v2) renderer: "editorial" (premium documentary, default) or "cartoon".
+    theme: str = field(default_factory=lambda: _env("GLIVARAO_THEME", "editorial"))
     elevenlabs_api_key: str = field(default_factory=lambda: _env("ELEVENLABS_API_KEY"))
     elevenlabs_voice_id: str = field(default_factory=lambda: _env("ELEVENLABS_VOICE_ID"))
     elevenlabs_model_id: str = field(default_factory=lambda: _env("ELEVENLABS_MODEL_ID", "eleven_multilingual_v2"))

@@ -36,7 +36,7 @@ def _nice_max(v: float) -> float:
 
 
 def _header(d, w, spec_title, s, compact):
-    tsize = (40 if compact else 46) * s
+    tsize = (44 if compact else 56) * s
     lines, size = fit_lines(spec_title, "serif", tsize, w - 20 * s, 2, 26 * s)
     y = 0
     for ln in lines:
@@ -51,7 +51,7 @@ def _grid(d, box, ymax, unit, s, ticks=4):
         y = y1 - (y1 - y0) * i / ticks
         d.line([(x0, y), (x1, y)], fill=(*PAL["rule"], 255 if i == 0 else 150), width=(2 if i == 0 else 1) * s)
         if i:
-            draw_text(d, (x0 - 14 * s, y), fmt_value(ymax * i / ticks, unit), "sans_med", 22 * s, "sub", anchor="rm")
+            draw_text(d, (x0 - 14 * s, y), fmt_value(ymax * i / ticks, unit), "sans_med", 26 * s, "sub", anchor="rm")
 
 
 def _callout(d, x, y, label, color, s, side="left", sub=None):
@@ -84,7 +84,7 @@ def _compound(d, spec: ChartSpec, box, t, s):
     d.line(pts_b, fill=PAL["green"], width=6 * s, joint="curve")
     step = 5 if n > 12 else (2 if n > 6 else 1)
     for i in range(0, n + 1, step):
-        draw_text(d, (X(i), y1 + 16 * s), f"Year {yrs[i]}" if i == 0 else str(yrs[i]), "sans_med", 22 * s, "sub",
+        draw_text(d, (X(i), y1 + 16 * s), f"Year {yrs[i]}" if i == 0 else str(yrs[i]), "sans_med", 26 * s, "sub",
                   anchor="ma")
     # legend
     lx, ly = x0 + 10 * s, y0 + 6 * s
@@ -120,7 +120,7 @@ def _bars(d, spec: ChartSpec, box, t, s):
         if pr > 0.05:
             draw_text(d, (cx, top - 14 * s), fmt_value(v * pr, spec.unit), "sans_xbold", 40 * s,
                       accent if i == hi else "ink", anchor="md")
-        lines, size = fit_lines(labels[i], "sans_semi", 26 * s, slot - 16 * s, 2, 18 * s)
+        lines, size = fit_lines(labels[i], "sans_semi", 30 * s, slot - 16 * s, 2, 18 * s)
         for k, ln in enumerate(lines):
             draw_text(d, (cx, y1 + 16 * s + k * size * 1.15), ln, "sans_semi", size, "ink", anchor="ma")
 
@@ -146,7 +146,7 @@ def _lines(d, spec: ChartSpec, box, t, s):
         d.polygon(pts + [(pts[-1][0], y1), (x0, y1)], fill=(*PAL[col + "_l"], 120))
         d.line(pts, fill=PAL[col], width=6 * s, joint="curve")
     for i in sorted({0, n // 2, n}):
-        draw_text(d, (X(i), y1 + 16 * s), labels[i], "sans_med", 22 * s, "sub", anchor="ma")
+        draw_text(d, (X(i), y1 + 16 * s), labels[i], "sans_med", 26 * s, "sub", anchor="ma")
     if t >= 0.85 and pts:
         _callout(d, *pts[-1], fmt_value(vals[-1], spec.unit), col, s)
 
@@ -191,12 +191,12 @@ def draw_editorial_chart(spec: ChartSpec, w: int, h: int, progress: float = 1.0,
     d = ImageDraw.Draw(img, "RGBA")
     top = _header(d, w * s, spec.title, s, compact)
     src = source_line(spec)
-    bottom_pad = (40 + (34 if src else 0)) * s + (40 * s if spec.kind in ("bar_compare",) else 0)
+    bottom_pad = (44 + (40 if src else 0)) * s + (44 * s if spec.kind in ("bar_compare",) else 0)
     left = 120 * s if spec.kind != "pie_split" else 0
     box = (left, top + 40 * s, w * s - 30 * s, h * s - bottom_pad)
     DRAW.get(spec.kind, _bars)(d, spec, box, progress, s)
     if src:
-        lines, size = fit_lines(src, "sans", 21 * s, w * s, 1, 14 * s)
+        lines, size = fit_lines(src, "sans", 24 * s, w * s, 1, 14 * s)
         draw_text(d, (0, h * s - 8 * s), lines[0], "sans", size, "sub", anchor="ld")
     return img.resize((w, h), Image.LANCZOS)
 

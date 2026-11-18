@@ -59,7 +59,7 @@ def finance_only_check(script: Script) -> tuple[bool, str]:
 def run_daily_v2(settings: Settings, store: JobStore, today: date | None = None, research_dir: Path | None = None,
                  send: bool = True, workers: int | None = None, shorts: int = 2) -> DailyResult:
     from .render.animated import render_animated
-    from .render.thumbnail_v3 import make_thumbnail_v3
+    from .render.thumbnail_editorial import make_thumbnail
     from .research.run import run_research
 
     today = today or date.today()
@@ -109,7 +109,8 @@ def run_daily_v2(settings: Settings, store: JobStore, today: date | None = None,
             script = script.model_copy(update={"description": finalize_description(
                 script.description, [s.heading for s in script.scenes], starts, script.format == "long")})
             Path(job.script_path).write_text(script.model_dump_json(indent=2))
-            thumb = make_thumbnail_v3(script, out / "thumbnail.jpg", portrait=script.format == "short")
+            thumb = make_thumbnail(script, out / "thumbnail.jpg", portrait=script.format == "short",
+                                   theme=getattr(settings, "theme", "editorial"))
             (out / "metadata.json").write_text(json.dumps(
                 {"title": script.title, "description": script.description, "tags": script.tags,
                  "topic_key": brief.topic_key, "category": brief.category, "market": brief.market,

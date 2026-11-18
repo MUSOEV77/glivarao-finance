@@ -156,14 +156,52 @@ def soft_shadow(size: tuple[int, int], radius: int = 18, alpha: int = 60) -> Ima
 
 NUM_RE = re.compile(r"(\$\s?\d[\d,]*(?:\.\d+)?(?:\s?(?:K|M|B|k)\b|\s(?:thousand|million|billion)\b)?|"
                     r"\b\d[\d,]*(?:\.\d+)?\s?(?:%|percent\b)|"
-                    r"\b\d[\d,]*(?:\.\d+)?\s(?:years?|months?|days?|points?|times)\b)")
+                    r"\b\d[\d,]*(?:\.\d+)?\s(?:years?|months?|days?|points?|times)\b|"
+                    r"\b\d{1,3}(?:,\d{3})+\b)")
+_UNITS = {w: i for i, w in enumerate("zero one two three four five six seven eight nine ten eleven twelve thirteen "
+                                     "fourteen fifteen sixteen seventeen eighteen nineteen".split())}
+_TENS = {w: 10 * i for i, w in enumerate("_ _ twenty thirty forty fifty sixty seventy eighty ninety".split()) if i > 1}
+_SCALE = {"hundred": 100, "thousand": 1_000, "million": 1_000_000, "billion": 1_000_000_000}
+_WORD = "|".join(list(_UNITS) + list(_TENS) + list(_SCALE) + ["and", "a"])
+SPELLED_RE = re.compile(rf"\b((?:(?:{_WORD})[ -])*(?:{_WORD}))\s(dollars|percent)\b", re.I)
+
+
+def words_to_number(words: str) -> float | None:
+    total, cur, seen = 0, 0, False
+    for w in re.split(r"[ -]+", words.lower()):
+        if w in ("and",):
+            continue
+        if w == "a":
+            cur = cur or 1
+            continue
+        if w in _UNITS:
+            cur += _UNITS[w]
+        elif w in _TENS:
+            cur += _TENS[w]
+        elif w == "hundred":
+            cur = (cur or 1) * 100
+        elif w in _SCALE:
+            total += (cur or 1) * _SCALE[w]
+            cur = 0
+        else:
+            return None
+        seen = True
+    return float(total + cur) if seen else None
+
+
+def _spelled_figure(text: str) -> str | None:
+    for m in SPELLED_RE.finditer(text):
+        v = words_to_number(m.group(1).strip())
+        if v and v >= 2:
+            return f"${v:,.0f}" if m.group(2).lower() == "dollars" else f"{v:g}%"
+    return None
 
 
 def find_figure(text: str) -> str | None:
     """The most prominent figure in a sentence ($ amounts first, then %, then counts with units)."""
     found = [m.group(0).strip() for m in NUM_RE.finditer(text)]
     if not found:
-        return None
+        return _spelled_figure(text)
     for pref in ("$", "%", "percent"):
         for f in found:
             if pref in f:

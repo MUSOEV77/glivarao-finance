@@ -61,10 +61,17 @@ def write_srt(cues: list[Cue], path: Path) -> Path:
     return path
 
 
-def write_ass(cues: list[Cue], path: Path, w: int, h: int, portrait: bool, margin_v: int | None = None) -> Path:
+def write_ass(cues: list[Cue], path: Path, w: int, h: int, portrait: bool, margin_v: int | None = None,
+              theme: str = "cartoon") -> Path:
     size = 76 if portrait else 62
     if margin_v is None:
         margin_v = int(h * 0.355) if portrait else 40  # Shorts: between chart and character, above the UI overlay
+    style = (f"Style: Default,Patrick Hand,{size},&H00FFFFFF,&H000000FF,&H402E2226,&H402E2226,0,0,0,0,100,100,2,0,3,10,0,"
+             f"2,80,80,{margin_v},1")
+    if theme == "editorial":  # documentary lower captions: Inter Bold, white on a soft ink box
+        size = 62 if portrait else 50
+        style = (f"Style: Default,Inter,{size},&H00FFFFFF,&H000000FF,&H301D1816,&H301D1816,-1,0,0,0,100,100,0.5,0,3,"
+                 f"14,0,2,90,90,{margin_v},1")
     header = f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: {w}
@@ -73,7 +80,7 @@ WrapStyle: 0
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,Patrick Hand,{size},&H00FFFFFF,&H000000FF,&H402E2226,&H402E2226,0,0,0,0,100,100,2,0,3,10,0,2,80,80,{margin_v},1
+{style}
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text

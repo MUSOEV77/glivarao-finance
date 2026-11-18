@@ -337,7 +337,8 @@ def main(argv=None):
     ev.set_defaults(fn=cmd_events)
 
     args = p.parse_args(argv)
-    logging.basicConfig(level=logging.INFO if args.verbose else logging.WARNING, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    logging.basicConfig(level=logging.INFO if args.verbose else logging.WARNING, format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+                        force=True)
     try:
         args.fn(args, get_settings())
     except Exception as exc:  # concise operator-facing errors

@@ -114,8 +114,18 @@ def _question_scene(b: Brief) -> Scene | None:
     q = b.viewer_questions[0]["title"].rstrip("?")
     lib = LIB.get(b.family, LIB["generic"])
     return _s("What people are asking", f"One question keeps coming up online: {q}? The honest answer is that it "
-              f"depends on your situation. But the same principles apply: {lib['actions'][0].lower()}, and "
-              f"{lib['actions'][1].lower()}.", "lightbulb", "studio", character="duo")
+              f"depends on your situation. But the same principles apply: {_lc(lib['actions'][0])}, and "
+              f"{_lc(lib['actions'][1])}.", "lightbulb", "studio", character="duo")
+
+
+def _lc(text: str) -> str:
+    """Lower-case the first letter for mid-sentence use, keeping acronyms and names (APR, FICO, US, CFPB)."""
+    if not text:
+        return text
+    first = text.split()[0]
+    if len(first) > 1 and first[1:2].isupper():  # acronym-led
+        return text
+    return text[0].lower() + text[1:]
 
 
 def write_long_free(b: Brief) -> Script:
@@ -145,8 +155,8 @@ def write_long_free(b: Brief) -> Script:
     for h, n, illo, st in lib["mistakes"]:
         scenes.append(_s(h, n, illo, st))
     acts = lib["actions"]
-    scenes.append(_s("Your action plan", f"So here's your plan. One: {acts[0].lower()}. Two: {acts[1].lower()}. "
-                     f"And three: {acts[2].lower()}.", "target", "studio", key_points=acts))
+    scenes.append(_s("Your action plan", f"So here's your plan. One: {_lc(acts[0])}. Two: {_lc(acts[1])}. "
+                     f"And three: {_lc(acts[2])}.", "target", "studio", key_points=acts))
     scenes.append(_s("Recap", f"That's {topic_phrase(b.topic)}, without the jargon. Small, consistent steps beat perfect "
                      f"plans. Thanks for watching GLIVARAO Finance. {DISCLAIMER}", "lightbulb",
                      rng.choice(["city", "studio"])))
@@ -169,8 +179,8 @@ def write_shorts_free(b: Brief) -> list[Script]:
     elif hook:
         a = [_s("This is growing fast", hook[0], "warning", "city", key_points=hook[1][:1], entrance="walk_in"),
              _s("Why it matters", lib["how"][0][1].split(". ")[0] + ".", lib["how"][0][2], "studio"),
-             _s("What to do", f"Here's what to do: {lib['actions'][0].lower()}, and "
-                f"{lib['actions'][1].lower()}. {DISCLAIMER}", "target", "studio")]
+             _s("What to do", f"Here's what to do: {_lc(lib['actions'][0])}, and "
+                f"{_lc(lib['actions'][1])}. {DISCLAIMER}", "target", "studio")]
     else:
         a = [_s(b.topic[:40], lib["how"][0][1], lib["how"][0][2], "studio", entrance="walk_in"),
              _s("What to do", f"{lib['actions'][0]}. {DISCLAIMER}", "target", "studio")]
@@ -181,7 +191,7 @@ def write_shorts_free(b: Brief) -> list[Script]:
           _s(mh.replace("Mistake: ", "").capitalize(), mn, mi, ms),
           _s("Why it matters", lib["how"][0][1].split(". ")[0] + ". " + lib["how"][0][1].split(". ")[1] + ".",
              lib["how"][0][2], "studio"),
-          _s("Do this instead", f"Instead, {lib['actions'][1].lower()}. And {lib['actions'][2].lower()}. "
+          _s("Do this instead", f"Instead, {_lc(lib['actions'][1])}. And {_lc(lib['actions'][2])}. "
              f"{DISCLAIMER}", "target", "studio")]
     shorts.append(_wrap(b, "short", _fit_short(bq, lib, prefer="mistakes"), suffix="the mistake"))
     return shorts
