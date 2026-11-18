@@ -26,14 +26,36 @@ MODEL = ROOT / "models/kokoro/kokoro-v1.0.onnx"
 VOICES = ROOT / "models/kokoro/voices-v1.0.bin"
 KOKORO_SR = 24_000
 
+# Owner-approved voices (2026-11-18): am_michael is the GLIVARAO narrator; the others are backups only.
 DEFAULT_VOICE = "am_michael"
-AMERICAN_MALE_VOICES = ["am_michael", "am_fenrir", "am_puck", "am_echo", "am_eric", "am_liam", "am_onyx",
-                        "am_adam", "am_santa"]
+APPROVED_VOICES = {"am_michael": "primary", "am_fenrir": "backup", "am_puck": "backup"}
+AMERICAN_MALE_VOICES = list(APPROVED_VOICES)
+DEFAULT_SPEED = 0.98  # confident documentary pace (~145-150 wpm with natural pauses)
+
+
+class VoiceNotApproved(ValueError):
+    pass
 
 # Explicit pronunciations (misaki phoneme alphabet) for finance words its dictionary misses or misreads.
 LEXICON = {
+    # Brand name: "gli-VAR-oh" (pending owner confirmation)
+    "glivarao": "ɡlɪvˈɑɹO",
     "roth": "ɹˈɔθ",
     "fico": "fˈIkO",
+    "heloc": "hˈilɑk",
+    "helocs": "hˈilɑks",
+    "finra": "fˈɪnɹə",
+    "equifax": "ˈɛkwəfˌæks",
+    "experian": "ɪkspˈɪɹiən",
+    "zelle": "zˈɛl",
+    "venmo": "vˈɛnmO",
+    "interac": "ˈɪntəɹˌæk",
+    "klarna": "klˈɑɹnə",
+    "afterpay": "ˈæftəɹpˌA",
+    "schwab": "ʃwˈɑb",
+    "wealthsimple": "wˈɛlθsˌɪmpᵊl",
+    "questrade": "kwˈɛstɹˌAd",
+    "robinhood": "ɹˈɑbɪnhˌʊd",
     "nasdaq": "nˈæzdæk",
     "vanguard": "vˈæŋɡɑɹd",
     "annuity": "ənˈuɪɾi",
@@ -55,6 +77,10 @@ TEXT_RULES = [  # applied in order before G2P
     (r"(\d)\s*-\s*(\d)", r"\1 to \2"),            # 5-10 years -> 5 to 10 years
     (r"\$(\d+(?:\.\d+)?)\s*([KkMmBb])\b",          # $5K / $2.5M / $1B
      lambda m: f"{m.group(1)} {dict(k='thousand', m='million', b='billion')[m.group(2).lower()]} dollars"),
+    (r"\bYoY\b", "year over year"),
+    (r"\b1/2\b", "one half"), (r"\b1/3\b", "one third"), (r"\b1/4\b", "one quarter"),
+    (r"\b1/12\b", "one twelfth"), (r"\b3/4\b", "three quarters"),
+    (r"\bU\.S\.(?=\s|$)", "US"),
     (r"&", " and "),
 ]
 
@@ -95,7 +121,9 @@ class KokoroEngine:
     _lock = threading.Lock()
     _instance: "KokoroEngine | None" = None
 
-    def __init__(self, voice: str = DEFAULT_VOICE, speed: float = 0.94):
+    def __init__(self, voice: str = DEFAULT_VOICE, speed: float = DEFAULT_SPEED):
+        if voice not in APPROVED_VOICES:
+            raise VoiceNotApproved(f"Voice {voice!r} is not owner-approved; allowed: {', '.join(APPROVED_VOICES)}")
         if not MODEL.exists() or not VOICES.exists():
             raise FileNotFoundError(f"Kokoro model files missing in {MODEL.parent} (see docs/DEPLOYMENT.md)")
         from kokoro_onnx import Kokoro
@@ -110,6 +138,8 @@ class KokoroEngine:
     @classmethod
     def get(cls, voice: str = DEFAULT_VOICE) -> "KokoroEngine":
         with cls._lock:
+            if voice not in APPROVED_VOICES:
+                raise VoiceNotApproved(f"Voice {voice!r} is not owner-approved; allowed: {', '.join(APPROVED_VOICES)}")
             if cls._instance is None:
                 cls._instance = cls(voice)
             cls._instance.voice = voice
@@ -153,7 +183,12 @@ class KokoroEngine:
         """Synthesize a scene. *word* marks emphasis (slight pause + slower delivery)."""
         self.unknown = []
         chunks, sentences, t = [_silence(lead_in)], [], lead_in
-        for raw in split_sentences(text):
+        paragraph_ends = set()
+        flat: list[str] = []
+        for para in [p for p in re.split(r"\n\s*\n", text.strip()) if p.strip()]:
+            flat += split_sentences(" ".join(para.split()))
+            paragraph_ends.add(len(flat) - 1)
+        for idx, raw in enumerate(flat):
             emph = "*" in raw
             display = raw.replace("*", "")
             question = display.rstrip().endswith("?")
@@ -166,6 +201,8 @@ class KokoroEngine:
             pause = 0.55 if question else (0.42 if display.endswith((".", "!")) else 0.3)
             if emph:
                 pause += 0.12
+            if idx in paragraph_ends:
+                pause += 0.3  # paragraph beat
             chunks.append(_silence(pause))
             t += pause
         chunks[-1] = _silence(tail)

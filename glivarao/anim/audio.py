@@ -181,6 +181,67 @@ def cue_list(plans, scene_starts: list[float]) -> list[tuple[float, str]]:
     return sorted(cues)
 
 
+# Narrator voice chain (applied to the dry voice before mixing):
+# rumble cut -> warmth -> de-box -> presence -> de-ess -> gentle compression.
+VOICE_CHAIN = ",".join([
+    "highpass=f=75",
+    "equalizer=f=160:t=q:w=1.0:g=1.5",     # warmth / chest
+    "equalizer=f=380:t=q:w=1.2:g=-1.5",    # reduce boxiness
+    "equalizer=f=3200:t=q:w=1.4:g=1.8",    # presence / intelligibility
+    "deesser=i=0.35:f=0.5",
+    "acompressor=threshold=0.12:ratio=2.5:attack=8:release=140:makeup=1.6:knee=4",
+])
+
+
+def master_voice(voice: np.ndarray, sr: int = SR) -> np.ndarray:
+    """Run the narrator through the voice chain with ffmpeg (float32 in/out, same length)."""
+    import subprocess
+
+    proc = subprocess.run(
+        ["ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "f32le", "-ar", str(sr), "-ac", "1", "-i", "pipe:0",
+         "-af", VOICE_CHAIN, "-f", "f32le", "-ar", str(sr), "-ac", "1", "pipe:1"],
+        input=voice.astype(np.float32).tobytes(), capture_output=True, check=True)
+    out = np.frombuffer(proc.stdout, dtype=np.float32)
+    if len(out) < len(voice):
+        out = np.pad(out, (0, len(voice) - len(out)))
+    return out[: len(voice)].copy()
+
+
+def measure_loudness(path) -> dict:
+    """EBU R128 integrated loudness (LUFS) and true peak (dBTP) via ffmpeg."""
+    import json
+    import subprocess
+
+    err = subprocess.run(["ffmpeg", "-hide_banner", "-i", str(path), "-af",
+                          "loudnorm=I=-14:TP=-1.5:LRA=11:print_format=json", "-f", "null", "-"],
+                         capture_output=True, text=True).stderr
+    m = json.loads(err[err.rindex("{"):err.rindex("}") + 1])
+    return {"lufs": float(m["input_i"]), "true_peak": float(m["input_tp"]), "lra": float(m["input_lra"])}
+
+
+def master_to_lufs(src, dst, target: float = -14.0, ceiling_db: float = -1.5) -> dict:
+    """Final master: exact make-up gain to the target loudness, then a fast true-peak limiter at the ceiling.
+    Returns the measured result (re-measured after processing)."""
+    import subprocess
+
+    before = measure_loudness(src)
+    gain = target - before["lufs"]
+    limit = 10 ** (ceiling_db / 20)
+    for _ in range(3):  # limiting lowers loudness slightly; nudge until within 0.3 LU
+        subprocess.run(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(src), "-af",
+                        # float processing (no integer clipping before the limiter); limit 0.5 dB under the
+                        # ceiling and oversample 4x so inter-sample (true) peaks also stay below it
+                        f"aformat=sample_fmts=fltp,aresample=192000,volume={gain:.2f}dB,"
+                        f"alimiter=limit={limit * 10 ** (-0.5 / 20):.4f}:attack=1:release=60:level=false,"
+                        f"aresample=48000",
+                        "-ar", "48000", "-c:a", "pcm_s16le", str(dst)], check=True)
+        after = measure_loudness(dst)
+        if abs(after["lufs"] - target) <= 0.3 and after["true_peak"] <= ceiling_db + 0.05:
+            break
+        gain += target - after["lufs"]
+    return {"before": before, "after": after, "gain_db": round(gain, 2)}
+
+
 def duck_gain(voice: np.ndarray, music_level: float = 0.16, duck_to: float = 0.35) -> np.ndarray:
     """Music gain per sample: full level in pauses, `duck_to` x level while the narrator speaks."""
     win = int(0.05 * SR)
@@ -192,9 +253,10 @@ def duck_gain(voice: np.ndarray, music_level: float = 0.16, duck_to: float = 0.3
     return (music_level * (1 - (1 - duck_to) * np.clip(speaking, 0, 1))).astype(np.float32)
 
 
-def mix(voice: np.ndarray, cues: list[tuple[float, str]], seed: int = 0, music_level: float = 0.16,
-        duck_to: float = 0.35, sfx_level: float = 0.5) -> np.ndarray:
+def mix(voice: np.ndarray, cues: list[tuple[float, str]], seed: int = 0, music_level: float = 0.09,
+        duck_to: float = 0.4, sfx_level: float = 0.45) -> np.ndarray:
     """voice: float32 mono at SR. Returns the mixed track (same length)."""
+    voice = master_voice(voice)
     n = len(voice)
     music = music_bed(n / SR, seed=seed)[:n]
     if len(music) < n:

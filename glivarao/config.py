@@ -46,7 +46,7 @@ class Settings:
     anthropic_api_key: str = field(default_factory=lambda: _env("ANTHROPIC_API_KEY"))
     script_model: str = field(default_factory=lambda: _env("GLIVARAO_SCRIPT_MODEL", "claude-opus-5-5"))
 
-    tts_provider: str = field(default_factory=lambda: _env("TTS_PROVIDER", "espeak"))
+    tts_provider: str = field(default_factory=lambda: _env("TTS_PROVIDER", "kokoro"))
     kokoro_voice: str = field(default_factory=lambda: _env("KOKORO_VOICE", "am_michael"))
     renderer: str = field(default_factory=lambda: _env("GLIVARAO_RENDERER", "v1"))
     elevenlabs_api_key: str = field(default_factory=lambda: _env("ELEVENLABS_API_KEY"))

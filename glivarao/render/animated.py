@@ -12,6 +12,7 @@ import multiprocessing as mp
 import os
 import subprocess
 import time
+import zlib
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -253,16 +254,6 @@ def _render_segment(i: int) -> str:
     return str(seg)
 
 
-def _loudnorm_args(wav: Path) -> str:
-    """Two-pass EBU R128 normalization to -14 LUFS (YouTube reference level)."""
-    base = "loudnorm=I=-14:TP=-1.5:LRA=11"
-    out = subprocess.run(["ffmpeg", "-hide_banner", "-i", str(wav), "-af", base + ":print_format=json",
-                          "-f", "null", "-"], capture_output=True, text=True).stderr
-    m = json.loads(out[out.rindex("{"):out.rindex("}") + 1])
-    return (f"{base}:measured_I={m['input_i']}:measured_TP={m['input_tp']}:measured_LRA={m['input_lra']}"
-            f":measured_thresh={m['input_thresh']}:offset={m['target_offset']}:linear=true")
-
-
 def render_animated(script: Script, workdir: Path, settings: Settings, voice: str = "am_michael",
                     workers: int | None = None, with_audio_mix: bool = True) -> AnimatedResult:
     t0 = time.time()
@@ -308,8 +299,17 @@ def render_animated(script: Script, workdir: Path, settings: Settings, voice: st
         from ..anim.audio import cue_list, mix
 
         sfx_cues = cue_list(plans, starts_sec[:-1])
-        mixed = mix(audio, sfx_cues, seed=abs(hash(script.title)) % 1000)
+        mixed = mix(audio, sfx_cues, seed=zlib.crc32(script.title.encode()) % 1000)  # stable per title
         sf.write(raw_wav, mixed, KOKORO_SR, subtype="PCM_16")
+    else:
+        from ..anim.audio import master_voice
+
+        sf.write(raw_wav, master_voice(audio, KOKORO_SR), KOKORO_SR, subtype="PCM_16")
+    from ..anim.audio import master_to_lufs
+
+    mastered_wav = workdir / "audio_master.wav"
+    audio_report = master_to_lufs(raw_wav, mastered_wav)  # -14 LUFS, -1.5 dBTP ceiling
+    (workdir / "audio_master.json").write_text(json.dumps(audio_report, indent=2))
     frame_starts = [int(round(s * FPS)) for s in starts_sec]
 
     job = dict(script=script, plans=plans, envs=envs, starts=frame_starts, workdir=workdir)
@@ -334,9 +334,9 @@ def render_animated(script: Script, workdir: Path, settings: Settings, voice: st
     fonts_dir = Path(__file__).resolve().parents[2] / "assets" / "fonts"
     video = workdir / "video.mp4"
     subprocess.run([
-        "ffmpeg", "-y", "-loglevel", "error", "-i", str(joined), "-i", str(raw_wav),
+        "ffmpeg", "-y", "-loglevel", "error", "-i", str(joined), "-i", str(mastered_wav),
         "-vf", f"ass='{_ffmpeg_filter_path(ass)}':fontsdir='{_ffmpeg_filter_path(fonts_dir)}'",
-        "-af", _loudnorm_args(raw_wav), "-ar", "48000",
+        "-ar", "48000",
         "-c:v", "libx264", "-preset", "medium", "-crf", "18" if not portrait else "20", "-pix_fmt", "yuv420p",
         "-r", str(FPS),
         "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", "-shortest", str(video)], check=True)

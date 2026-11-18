@@ -109,6 +109,7 @@ def _google(text: str, dst: Path, s: Settings) -> None:
 
 
 PLACEHOLDER_PROVIDERS = {"espeak", "silent"}
+PAID_PROVIDERS = {"elevenlabs", "google"}
 
 
 def _kokoro(text: str, dst: Path, s: Settings) -> None:
@@ -116,9 +117,11 @@ def _kokoro(text: str, dst: Path, s: Settings) -> None:
 
     from .kokoro import KOKORO_SR, KokoroEngine
 
+    from ..anim.audio import master_voice
+
     narration = KokoroEngine.get(s.kokoro_voice).narrate(text)
     raw = dst.with_suffix(".raw.wav")
-    sf.write(raw, narration.audio, KOKORO_SR, subtype="PCM_16")
+    sf.write(raw, master_voice(narration.audio, KOKORO_SR), KOKORO_SR, subtype="PCM_16")
     _normalize(raw, dst, pad_sec=0.0)
     raw.unlink(missing_ok=True)
 
@@ -126,6 +129,8 @@ def _kokoro(text: str, dst: Path, s: Settings) -> None:
 def synthesize(text: str, dst: Path, settings: Settings, provider: str | None = None) -> float:
     """Synthesize `text` to `dst` (WAV). Returns duration in seconds."""
     provider = provider or settings.tts_provider
+    if provider in PAID_PROVIDERS and not settings.allow_paid_apis:
+        raise TTSError(f"TTS provider '{provider}' is a paid service; it needs owner approval (ALLOW_PAID_APIS=true)")
     if not settings.dry_run and provider in PLACEHOLDER_PROVIDERS:
         raise TTSError(f"TTS provider '{provider}' is a development placeholder and is never allowed in "
                        "production. Use kokoro, elevenlabs or google.")

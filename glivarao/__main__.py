@@ -77,7 +77,7 @@ def cmd_sample(args, s):
     if not report.ok:
         raise RuntimeError(report.summary())
     out = s.output_dir / f"sample-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
-    res = render_animated(script, out, s, voice=args.voice)
+    res = render_animated(script, out, s, voice=args.voice or s.kokoro_voice)
     thumb = make_thumbnail(script, out / "thumbnail.jpg")
     (out / "script.json").write_text(script.model_dump_json(indent=2))
     info = probe(res.video)
@@ -135,6 +135,36 @@ def cmd_daily_v2(args, s):
     print(f"topic: {res.topic}\nwriter: {res.writer}")
     for job_id, fmt, status, video, note in res.jobs:
         print(f"  {job_id:28s} {fmt:5s} {status:20s} {video or ''} {note}")
+
+
+def cmd_voice_sample(args, s):
+    """Narrate a script with the configured voice, add the music bed, and master to -14 LUFS (audio only)."""
+    import subprocess
+    from pathlib import Path
+
+    import soundfile as sf
+
+    from .anim.audio import master_to_lufs, mix
+    from .tts.kokoro import KOKORO_SR, KokoroEngine
+
+    voice = args.voice or s.kokoro_voice
+    text = Path(args.script).read_text()
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    n = KokoroEngine.get(voice).narrate(text)
+    stem = out / f"voice_sample_{voice}"
+    raw = stem.with_suffix(".mix.wav")
+    sf.write(raw, mix(n.audio, [(n.duration - 1.6, "chime")], seed=7), KOKORO_SR, subtype="PCM_16")
+    rep = master_to_lufs(raw, stem.with_suffix(".wav"))
+    raw.unlink()
+    for ext, codec in ((".m4a", ["-c:a", "aac", "-b:a", "192k"]), (".mp3", ["-c:a", "libmp3lame", "-b:a", "192k"])):
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(stem.with_suffix(".wav")), *codec,
+                        str(stem.with_suffix(ext))], check=True)
+    words = len(text.replace("*", "").split())
+    print(f"voice={voice} duration={n.duration:.1f}s words={words} pace={words / n.duration * 60:.0f} wpm")
+    print(f"loudness={rep['after']['lufs']} LUFS true_peak={rep['after']['true_peak']} dBTP")
+    print(f"pronunciation dictionary misses: {n.unknown_words or 'none'}")
+    print(f"files: {stem}.wav / .m4a / .mp3")
 
 
 def cmd_list(args, s):
@@ -215,7 +245,7 @@ def main(argv=None):
     d.set_defaults(fn=cmd_daily)
     sm = sub.add_parser("sample", help="render the v2 animated sample (local only)")
     sm.add_argument("--script", default="config/samples/sample_60s.json")
-    sm.add_argument("--voice", default="am_michael")
+    sm.add_argument("--voice", help="default: KOKORO_VOICE (am_michael)")
     sm.set_defaults(fn=cmd_sample)
     rs = sub.add_parser("research", help="R1: research and rank finance topics (report only)")
     rs.add_argument("--date", help="YYYY-MM-DD (default today)")
@@ -231,6 +261,11 @@ def main(argv=None):
     d2.add_argument("--workers", type=int)
     d2.add_argument("--shorts", type=int, default=2)
     d2.set_defaults(fn=cmd_daily_v2)
+    vs = sub.add_parser("voice-sample", help="narrated + mixed + mastered audio sample (local only)")
+    vs.add_argument("--script", default="config/samples/voice_sample_60s.txt")
+    vs.add_argument("--voice", help="default: KOKORO_VOICE (am_michael)")
+    vs.add_argument("--out", default="output/voice_sample")
+    vs.set_defaults(fn=cmd_voice_sample)
     ls = sub.add_parser("list")
     ls.add_argument("--status", choices=[x.value for x in JobStatus])
     ls.add_argument("--limit", type=int, default=30)
