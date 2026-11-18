@@ -31,7 +31,7 @@ from ..art.charts import draw_chart
 from ..art.style import Ink, font, paper
 from ..config import Settings
 from ..models import Script
-from ..tts.kokoro import KOKORO_SR, KokoroEngine, Narration
+from ..tts.kokoro import KOKORO_SR, Narration
 from .subtitles import Cue, chunk_text, write_ass, write_srt
 from .video import _ffmpeg_filter_path
 
@@ -254,14 +254,19 @@ def _render_segment(i: int) -> str:
     return str(seg)
 
 
-def render_animated(script: Script, workdir: Path, settings: Settings, voice: str = "am_michael",
+def render_animated(script: Script, workdir: Path, settings: Settings, voice: str | None = None,
                     workers: int | None = None, with_audio_mix: bool = True) -> AnimatedResult:
     t0 = time.time()
     portrait = script.format == "short"
     fw, fh = (PW, PH) if portrait else (W, H)
     workdir.mkdir(parents=True, exist_ok=True)
-    engine = KokoroEngine.get(voice)
-    narrations: list[Narration] = [engine.narrate(s.narration) for s in script.scenes]
+    from ..tts.narrator import get_narrator, narrate_all
+
+    # one narrator for the whole video: approved paid voice if allowed and within budget, else Kokoro backup
+    texts = [s.narration for s in script.scenes]
+    choice = get_narrator(settings, "\n\n".join(texts), kokoro_voice=voice)
+    narrations, choice = narrate_all(choice, texts, settings, kokoro_voice=voice)
+    log.info("narrator: %s", choice.label)
     unknown = sorted({w for n in narrations for w in n.unknown_words})
     log.info("narration synthesized in %.1fs", time.time() - t0)
 
@@ -343,7 +348,7 @@ def render_animated(script: Script, workdir: Path, settings: Settings, voice: st
     for s in segs:
         Path(s).unlink(missing_ok=True)
     joined.unlink(missing_ok=True)
-    return AnimatedResult(video, srt, total, time.time() - t0, unknown, voice, starts_sec[:-1])
+    return AnimatedResult(video, srt, total, time.time() - t0, unknown, choice.label, starts_sec[:-1])
 
 
 __all__ = ["render_animated", "SceneFrames", "AnimatedResult"]

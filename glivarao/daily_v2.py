@@ -104,7 +104,7 @@ def run_daily_v2(settings: Settings, store: JobStore, today: date | None = None,
             result.jobs.append((job.id, script.format, "rejected_compliance", None, report_c.errors[0]))
             continue
         try:
-            res = render_animated(script, out, settings, voice=settings.kokoro_voice, workers=workers)
+            res = render_animated(script, out, settings, workers=workers)
             starts = res.scene_starts or []
             script = script.model_copy(update={"description": finalize_description(
                 script.description, [s.heading for s in script.scenes], starts, script.format == "long")})
@@ -114,7 +114,7 @@ def run_daily_v2(settings: Settings, store: JobStore, today: date | None = None,
                 {"title": script.title, "description": script.description, "tags": script.tags,
                  "topic_key": brief.topic_key, "category": brief.category, "market": brief.market,
                  "research_score": brief.score, "confidence": brief.confidence, "writer": writer,
-                 "voice": f"Kokoro {res.voice}", "render_seconds": round(res.render_seconds, 1),
+                 "voice": res.voice, "render_seconds": round(res.render_seconds, 1),
                  "pronunciation_misses": res.unknown_words}, indent=2))
             job.video_path, job.subtitles_path = str(res.video), str(res.srt)
             job.thumbnail_path, job.duration_sec = str(thumb), round(res.duration, 2)

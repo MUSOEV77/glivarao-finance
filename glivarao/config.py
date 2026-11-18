@@ -53,7 +53,14 @@ class Settings:
     elevenlabs_voice_id: str = field(default_factory=lambda: _env("ELEVENLABS_VOICE_ID"))
     elevenlabs_model_id: str = field(default_factory=lambda: _env("ELEVENLABS_MODEL_ID", "eleven_multilingual_v2"))
     google_tts_api_key: str = field(default_factory=lambda: _env("GOOGLE_TTS_API_KEY"))
-    google_tts_voice: str = field(default_factory=lambda: _env("GOOGLE_TTS_VOICE", "en-US-Neural2-D"))
+    google_tts_voice: str = field(default_factory=lambda: _env("GOOGLE_TTS_VOICE", "en-US-Chirp3-HD-Charon"))
+    google_tts_rate: float = field(default_factory=lambda: float(_env("GOOGLE_TTS_RATE", "1.0")))
+    # Paid-TTS spending cap: hard monthly character limit = free allowance + budget / price
+    tts_monthly_budget_usd: float = field(default_factory=lambda: float(_env("TTS_MONTHLY_BUDGET_USD", "20")))
+    tts_price_per_million: float = field(default_factory=lambda: float(_env("TTS_PRICE_PER_MILLION", "30")))
+    tts_free_chars_per_month: int = field(default_factory=lambda: int(_env("TTS_FREE_CHARS_PER_MONTH", "0")))
+    tts_cache_dir: str = field(default_factory=lambda: _env("TTS_CACHE_DIR", "data/tts_cache"))
+    tts_ledger_path: str = field(default_factory=lambda: _env("TTS_LEDGER_PATH", "data/tts_usage.json"))
 
     fred_api_key: str = field(default_factory=lambda: _env("FRED_API_KEY"))
 
@@ -92,6 +99,7 @@ class Settings:
             "kokoro": kokoro_ready,
             "elevenlabs": bool(self.elevenlabs_api_key and self.elevenlabs_voice_id),
             "google": bool(self.google_tts_api_key),
+            "google_chirp": bool(self.google_tts_api_key and self.allow_paid_apis),
             "espeak": True,
             "silent": True,
         }.get(self.tts_provider, False)
@@ -102,7 +110,7 @@ class Settings:
                 "ELEVENLABS_API_KEY + ELEVENLABS_VOICE_ID or GOOGLE_TTS_API_KEY",
             ),
             "production voice": (
-                self.tts_provider in {"kokoro", "elevenlabs", "google"} and tts_ready,
+                self.tts_provider in {"kokoro", "elevenlabs", "google", "google_chirp"} and tts_ready,
                 "set TTS_PROVIDER=kokoro (local, free) — espeak/silent are refused in production",
             ),
             "market data (FRED)": (bool(self.fred_api_key), "FRED_API_KEY (optional)"),

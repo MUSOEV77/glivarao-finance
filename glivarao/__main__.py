@@ -138,33 +138,55 @@ def cmd_daily_v2(args, s):
 
 
 def cmd_voice_sample(args, s):
-    """Narrate a script with the configured voice, add the music bed, and master to -14 LUFS (audio only)."""
+    """Narrate a script, add the music bed, and master to -14 LUFS (audio only).
+
+    --provider kokoro (free, default) or google_chirp (paid: needs ALLOW_PAID_APIS=true + GOOGLE_TTS_API_KEY).
+    Without approval the paid path only prints the plan and exact cost; it never calls the API."""
     import subprocess
+    from dataclasses import replace
     from pathlib import Path
 
     import soundfile as sf
 
     from .anim.audio import master_to_lufs, mix
+    from .tts.google_chirp import CANDIDATE_VOICES, billable_text
     from .tts.kokoro import KOKORO_SR, KokoroEngine
+    from .tts.narrator import paid_choice
 
-    voice = args.voice or s.kokoro_voice
     text = Path(args.script).read_text()
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    n = KokoroEngine.get(voice).narrate(text)
-    stem = out / f"voice_sample_{voice}"
-    raw = stem.with_suffix(".mix.wav")
-    sf.write(raw, mix(n.audio, [(n.duration - 1.6, "chime")], seed=7), KOKORO_SR, subtype="PCM_16")
-    rep = master_to_lufs(raw, stem.with_suffix(".wav"))
-    raw.unlink()
-    for ext, codec in ((".m4a", ["-c:a", "aac", "-b:a", "192k"]), (".mp3", ["-c:a", "libmp3lame", "-b:a", "192k"])):
-        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(stem.with_suffix(".wav")), *codec,
-                        str(stem.with_suffix(ext))], check=True)
-    words = len(text.replace("*", "").split())
-    print(f"voice={voice} duration={n.duration:.1f}s words={words} pace={words / n.duration * 60:.0f} wpm")
-    print(f"loudness={rep['after']['lufs']} LUFS true_peak={rep['after']['true_peak']} dBTP")
-    print(f"pronunciation dictionary misses: {n.unknown_words or 'none'}")
-    print(f"files: {stem}.wav / .m4a / .mp3")
+    if args.provider == "google_chirp":
+        voices = list(CANDIDATE_VOICES) if args.compare else [args.voice or s.google_tts_voice]
+        chars = sum(len(x) for x in billable_text(text))
+        cost = chars * len(voices) * s.tts_price_per_million / 1e6
+        print(f"plan: {len(voices)} voice(s) x {chars:,} characters = {chars * len(voices):,} characters, "
+              f"about ${cost:.2f} at ${s.tts_price_per_million:g}/1M (or $0 inside a free monthly allowance)")
+        for v in voices:
+            print(f"  - {v} ({CANDIDATE_VOICES.get(v, 'custom')})")
+        if not (s.allow_paid_apis and s.google_tts_api_key):
+            print("NOT RUN: paid voice needs owner approval (ALLOW_PAID_APIS=true) and GOOGLE_TTS_API_KEY.")
+            return
+        runs = [(v, paid_choice(replace(s, google_tts_voice=v))) for v in voices]
+    else:
+        v = args.voice or s.kokoro_voice
+        runs = [(v, KokoroEngine.get(v))]
+    for voice, engine in runs:
+        n = engine.narrate(text)
+        stem = out / f"voice_sample_{voice}"
+        raw = stem.with_suffix(".mix.wav")
+        sf.write(raw, mix(n.audio, [(n.duration - 1.6, "chime")], seed=7), KOKORO_SR, subtype="PCM_16")
+        rep = master_to_lufs(raw, stem.with_suffix(".wav"))
+        raw.unlink()
+        for ext, codec in ((".m4a", ["-c:a", "aac", "-b:a", "192k"]), (".mp3", ["-c:a", "libmp3lame", "-b:a", "192k"])):
+            subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(stem.with_suffix(".wav")), *codec,
+                            str(stem.with_suffix(ext))], check=True)
+        words = len(text.replace("*", "").split())
+        billed = getattr(engine, "billed_chars", 0)
+        print(f"voice={voice} duration={n.duration:.1f}s pace={words / n.duration * 60:.0f} wpm "
+              f"loudness={rep['after']['lufs']} LUFS true_peak={rep['after']['true_peak']} dBTP "
+              f"billed_chars={billed:,}")
+        print(f"  files: {stem}.wav / .m4a / .mp3")
 
 
 def cmd_list(args, s):
@@ -263,7 +285,9 @@ def main(argv=None):
     d2.set_defaults(fn=cmd_daily_v2)
     vs = sub.add_parser("voice-sample", help="narrated + mixed + mastered audio sample (local only)")
     vs.add_argument("--script", default="config/samples/voice_sample_60s.txt")
-    vs.add_argument("--voice", help="default: KOKORO_VOICE (am_michael)")
+    vs.add_argument("--voice", help="voice name (default: KOKORO_VOICE or GOOGLE_TTS_VOICE)")
+    vs.add_argument("--provider", choices=["kokoro", "google_chirp"], default="kokoro")
+    vs.add_argument("--compare", action="store_true", help="google_chirp: render every candidate voice")
     vs.add_argument("--out", default="output/voice_sample")
     vs.set_defaults(fn=cmd_voice_sample)
     ls = sub.add_parser("list")
