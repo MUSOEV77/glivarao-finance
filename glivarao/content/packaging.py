@@ -100,4 +100,8 @@ def finalize_description(description: str, scene_headings: list[str], scene_star
             lines = ["Chapters:"] + lines + [""]
         else:
             lines = []
-    return description.replace("{CHAPTERS}", "\n".join(lines) if lines else "").replace("\n\n\n", "\n\n")
+    block = "\n".join(lines) if lines else ""
+    if "{CHAPTERS}" not in description and block:  # e.g. a hand-written description: chapters after paragraph 1
+        head, _, rest = description.partition("\n\n")
+        description = f"{head}\n\n{{CHAPTERS}}{rest}" if rest else f"{head}\n\n{{CHAPTERS}}"
+    return description.replace("{CHAPTERS}", block).replace("\n\n\n", "\n\n").rstrip() + "\n"

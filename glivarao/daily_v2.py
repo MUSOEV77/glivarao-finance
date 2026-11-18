@@ -104,7 +104,7 @@ def run_daily_v2(settings: Settings, store: JobStore, today: date | None = None,
             result.jobs.append((job.id, script.format, "rejected_compliance", None, report_c.errors[0]))
             continue
         try:
-            res = render_animated(script, out, settings, workers=workers)
+            res = _render_with_retry(render_animated, script, out, settings, workers)
             starts = res.scene_starts or []
             script = script.model_copy(update={"description": finalize_description(
                 script.description, [s.heading for s in script.scenes], starts, script.format == "long")})
@@ -147,6 +147,84 @@ def run_daily_v2(settings: Settings, store: JobStore, today: date | None = None,
         job = store.get(job.id)
         result.jobs.append((job.id, script.format, job.status.value, job.video_path, note))
     return result
+
+
+def _render_with_retry(render_animated, script, out, settings, workers):
+    """One retry with a single worker: the usual cause of a failed render is memory pressure or a crashed worker."""
+    try:
+        return render_animated(script, out, settings, workers=workers)
+    except Exception as exc:
+        log.warning("render failed (%s: %s); retrying once with 1 worker", type(exc).__name__, exc)
+        return render_animated(script, out, settings, workers=1)
+
+
+class AlreadyRunning(RuntimeError):
+    pass
+
+
+def supervised_daily(settings: Settings, store: JobStore, today: date | None = None, send: bool = True,
+                     workers: int | None = None, shorts: int = 2, force: bool = False, retries: int = 1,
+                     retry_delay: float = 120.0, lock_path: Path | None = None, notifier=None) -> DailyResult | None:
+    """Production entry point used by the systemd timer.
+
+    - single instance (file lock), so a slow run and the next timer tick never overlap;
+    - idempotent: a day that already completed is skipped (use force=True to produce again);
+    - checks free disk first; retries a failed run once; on final failure sends a Telegram alert;
+    - also alerts when the day finished but any video failed or was rejected by compliance.
+    Never uploads, publishes or schedules anything on YouTube."""
+    import fcntl
+    import time
+
+    from .sysres import check_disk
+
+    today = today or date.today()
+    notifier = notifier or _notify
+    lock_path = lock_path or Path(settings.db_path).with_name("daily.lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    fh = open(lock_path, "w")
+    try:
+        fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        fh.close()
+        raise AlreadyRunning("another daily run holds the lock")
+    try:
+        done_key = f"daily_done:{today.isoformat()}"
+        if store.kv_get(done_key) and not force:
+            log.info("daily set for %s already produced; skipping (use --force to redo)", today)
+            return None
+        check_disk(Path(settings.output_dir))
+        last = None
+        for attempt in range(retries + 1):
+            try:
+                res = run_daily_v2(settings, store, today=today, send=send, workers=workers, shorts=shorts)
+                break
+            except Exception as exc:  # research outage, disk, etc.
+                last = exc
+                log.exception("daily run attempt %d failed", attempt + 1)
+                if attempt < retries:
+                    time.sleep(retry_delay)
+        else:
+            notifier(settings, f"GLIVARAO daily run FAILED for {today} after {retries + 1} attempts: "
+                               f"{type(last).__name__}: {str(last)[:300]}\nSee logs/daily.log on the server.")
+            raise last
+        store.kv_set(done_key, json.dumps([j[0] for j in res.jobs]))
+        bad = [j for j in res.jobs if j[2] in ("failed", "rejected_compliance")]
+        if bad:
+            notifier(settings, f"GLIVARAO {today}: {len(bad)} of {len(res.jobs)} videos need attention:\n" +
+                     "\n".join(f"- {j[0]} ({j[1]}): {j[2]}: {j[4]}" for j in bad))
+        return res
+    finally:
+        fcntl.flock(fh, fcntl.LOCK_UN)
+        fh.close()
+
+
+def _notify(settings: Settings, text: str) -> None:
+    try:
+        from .publish.telegram import notify
+
+        notify(settings, text)
+    except Exception:  # an alert failure must never mask the original error
+        log.exception("could not send Telegram alert")
 
 
 def _why_card(brief, report: dict) -> str:

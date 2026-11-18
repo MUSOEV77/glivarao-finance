@@ -30,8 +30,12 @@ def test_espeak_tts_produces_speech(tmp_path, settings):
 
 
 # ---------------- Claude script generation (mocked SDK) ----------------
-def test_claude_generator_parses_structured_output(monkeypatch, settings):
+def test_claude_generator_parses_structured_output(monkeypatch, settings, tmp_path):
+    from dataclasses import replace
+
     from glivarao.scriptgen import claude
+
+    settings = replace(settings, claude_spend_ledger_path=str(tmp_path / "claude_spend.json"))
 
     sample = generate_offline("Roth IRA vs Traditional IRA explained", "short").model_dump(
         exclude={"format", "topic"})

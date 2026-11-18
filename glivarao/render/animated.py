@@ -269,6 +269,10 @@ def render_animated(script: Script, workdir: Path, settings: Settings, voice: st
     log.info("narrator: %s", choice.label)
     unknown = sorted({w for n in narrations for w in n.unknown_words})
     log.info("narration synthesized in %.1fs", time.time() - t0)
+    if choice.provider == "kokoro" and os.environ.get("KEEP_TTS_LOADED") != "1":
+        from ..tts.kokoro import KokoroEngine
+
+        KokoroEngine.release()  # frees ~0.7 GB before the frame workers start
 
     audio = np.concatenate([n.audio for n in narrations])
     raw_wav = workdir / "narration_kokoro.wav"
@@ -314,11 +318,15 @@ def render_animated(script: Script, workdir: Path, settings: Settings, voice: st
 
     mastered_wav = workdir / "audio_master.wav"
     audio_report = master_to_lufs(raw_wav, mastered_wav)  # -14 LUFS, -1.5 dBTP ceiling
+    raw_wav.unlink(missing_ok=True)  # intermediate; the master is the only audio kept until the mux
+    audio = narrations = mixed = None  # free the big arrays before the workers start
     (workdir / "audio_master.json").write_text(json.dumps(audio_report, indent=2))
     frame_starts = [int(round(s * FPS)) for s in starts_sec]
 
     job = dict(script=script, plans=plans, envs=envs, starts=frame_starts, workdir=workdir)
-    workers = workers or max(1, (os.cpu_count() or 2))
+    from ..sysres import safe_workers
+
+    workers = safe_workers(workers)  # capped by free RAM (about 1 GB per worker), not just CPU count
     t1 = time.time()
     # "spawn" (not fork): the parent holds ONNX Runtime threads, and forking a threaded process can deadlock
     # generous timeout (~2 s per frame of the whole video) so a crashed worker fails loudly instead of hanging
@@ -348,6 +356,8 @@ def render_animated(script: Script, workdir: Path, settings: Settings, voice: st
     for s in segs:
         Path(s).unlink(missing_ok=True)
     joined.unlink(missing_ok=True)
+    if os.environ.get("KEEP_AUDIO_MASTER") != "1":
+        mastered_wav.unlink(missing_ok=True)  # the MP4 carries the mastered audio; report JSON is kept
     return AnimatedResult(video, srt, total, time.time() - t0, unknown, choice.label, starts_sec[:-1])
 
 

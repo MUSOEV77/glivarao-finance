@@ -145,6 +145,15 @@ class KokoroEngine:
             cls._instance.voice = voice
             return cls._instance
 
+    @classmethod
+    def release(cls) -> None:
+        """Drop the loaded model (~0.7 GB) so frame rendering has the RAM; get() reloads it on demand."""
+        with cls._lock:
+            cls._instance = None
+        import gc
+
+        gc.collect()
+
     # -- G2P -------------------------------------------------------------------------------
     def _fallback(self, token):
         """Called by misaki for out-of-dictionary words. Never uses espeak."""

@@ -6,7 +6,12 @@ from ..models import CHARACTERS, ILLUSTRATIONS
 WORDS_PER_MINUTE = 150
 
 SYSTEM_PROMPT = f"""You are the head writer for GLIVARAO Finance, an original YouTube channel that explains
-US personal finance and economics to everyday Americans in plain language.
+personal finance to everyday people in the United States and Canada in plain language.
+
+Scope (strict): finance only - personal finance, financial psychology, investing, credit and debt, saving and
+wealth building, banking and money, financial scams and money mistakes. No politics, elections, parties or
+politicians, no geopolitics, no news commentary, no general macroeconomics. Where US and Canadian rules differ
+(e.g. 401(k) vs RRSP, Roth IRA vs TFSA, FICO in both), say so briefly or keep the example general.
 
 Voice: one American English male narrator, warm, confident, curious, lightly humorous. Write for the ear:
 short sentences, contractions, concrete dollar examples, no jargon without an immediate plain explanation.
@@ -42,6 +47,12 @@ Format rules:
 - Each scene's narration is what is spoken while that scene is on screen (roughly 40-120 words for long
   videos, 15-35 words for Shorts). Headings are on-screen titles of at most 6 words.
 - Titles must be honest and specific (no ALL CAPS, no misleading clickbait), at most 90 characters.
+- Direction fields (set, entrance, transition, money_fx): use "auto" unless a scene clearly benefits from a
+  specific choice (e.g. "bank" set for banking, "coins" when money grows, "iris" for a reveal). Vary sets
+  across the video; avoid the same set more than three scenes in a row.
+- Long videos: write documentary-style narration with a clear story arc - a concrete opening situation, the
+  mechanism explained step by step, worked numbers, a turn ("here's what most people miss"), and a practical
+  close. Every scene must earn its place; no filler, no repetition to pad length.
 """
 
 
@@ -58,6 +69,27 @@ def user_prompt(topic: str, fmt: str, minutes: float, angle: str = "") -> str:
                  "end with a one-line takeaway and the education-only sentence.")
     extra = f"\nAngle for this piece: {angle}" if angle else ""
     return f"Write {shape}\nTopic: {topic}{extra}\nReturn only the JSON object."
+
+
+def revise_prompt(draft_json: str, fmt: str, words: int, target: int, lo: int, hi: int, angle: str = "") -> str:
+    """Second pass when a paid draft misses the length target: revise it instead of discarding it."""
+    how = ("Expand it: add depth, not padding - another worked dollar example, a common mistake with its fix, "
+           "a viewer question answered, or a clearer step-by-step explanation. Add new scenes where needed."
+           if words < lo else
+           "Tighten it: remove repetition and weaker scenes while keeping the strongest examples and the arc.")
+    extra = f"\nKeep within these constraints:\n{angle}" if angle else ""
+    return (f"Here is a draft {fmt} script as JSON. It has {words} spoken words; the target is about {target} "
+            f"words (must be between {lo} and {hi}). {how} Keep the same facts rules, the same title unless it "
+            f"becomes inaccurate, and the education-only sentence in the final scene.{extra}\n\nDRAFT:\n"
+            f"{draft_json}\n\nReturn only the revised JSON object.")
+
+
+DIRECTION_FIELDS = ("set", "entrance", "transition", "money_fx")
+
+
+def normalize_direction(scene: dict) -> dict:
+    """Schema uses "auto" (structured outputs need every field); the renderer expects None for automatic."""
+    return {k: (None if k in DIRECTION_FIELDS and v == "auto" else v) for k, v in scene.items()}
 
 
 def _obj(props: dict, required: list[str] | None = None) -> dict:
@@ -84,6 +116,10 @@ SCENE_SCHEMA = _obj({
     "illustration": {"type": "string", "enum": ILLUSTRATIONS},
     "chart": CHART_SCHEMA,
     "key_points": {"type": "array", "items": _STR},
+    "set": {"type": "string", "enum": ["auto", "studio", "home", "city", "bank", "board"]},
+    "entrance": {"type": "string", "enum": ["auto", "walk_in", "hop_in", "none"]},
+    "transition": {"type": "string", "enum": ["auto", "push", "iris", "fade", "wipe", "cut"]},
+    "money_fx": {"type": "string", "enum": ["auto", "coins", "bills", "none"]},
 })
 SCRIPT_SCHEMA = _obj({
     "title": _STR,

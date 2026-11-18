@@ -46,6 +46,13 @@ class Settings:
     allow_paid_apis: bool = field(default_factory=lambda: _bool("ALLOW_PAID_APIS", False))
     anthropic_api_key: str = field(default_factory=lambda: _env("ANTHROPIC_API_KEY"))
     script_model: str = field(default_factory=lambda: _env("GLIVARAO_SCRIPT_MODEL", "claude-opus-5-5"))
+    # Claude script-writing spend guard (USD per calendar month), enforced in code before every request.
+    # Prices are per 1M tokens for the script model (Claude Opus 5.5: $4 in / $20 out).
+    claude_monthly_budget_usd: float = field(default_factory=lambda: float(_env("CLAUDE_MONTHLY_BUDGET_USD", "30")))
+    claude_price_in: float = field(default_factory=lambda: float(_env("CLAUDE_PRICE_IN_PER_M", "4")))
+    claude_price_out: float = field(default_factory=lambda: float(_env("CLAUDE_PRICE_OUT_PER_M", "20")))
+    claude_spend_ledger_path: str = field(default_factory=lambda: _env("CLAUDE_SPEND_LEDGER_PATH",
+                                                                       "data/claude_spend.json"))
 
     tts_provider: str = field(default_factory=lambda: _env("TTS_PROVIDER", "kokoro"))
     kokoro_voice: str = field(default_factory=lambda: _env("KOKORO_VOICE", "am_michael"))

@@ -128,10 +128,18 @@ def cmd_daily_v2(args, s):
     """Autonomous daily production (research -> topic -> scripts -> video -> Telegram review). Never uploads."""
     from datetime import date
 
-    from .daily_v2 import run_daily_v2
+    from .daily_v2 import AlreadyRunning, supervised_daily
 
     day = date.fromisoformat(args.date) if args.date else None
-    res = run_daily_v2(s, _store(s), today=day, send=not args.no_telegram, workers=args.workers, shorts=args.shorts)
+    try:
+        res = supervised_daily(s, _store(s), today=day, send=not args.no_telegram, workers=args.workers,
+                               shorts=args.shorts, force=args.force, retries=args.retries)
+    except AlreadyRunning as exc:
+        print(f"skipped: {exc}")
+        return
+    if res is None:
+        print("skipped: today's daily set was already produced (use --force to produce again)")
+        return
     print(f"topic: {res.topic}\nwriter: {res.writer}")
     for job_id, fmt, status, video, note in res.jobs:
         print(f"  {job_id:28s} {fmt:5s} {status:20s} {video or ''} {note}")
@@ -294,6 +302,8 @@ def main(argv=None):
     d2.add_argument("--no-telegram", action="store_true")
     d2.add_argument("--workers", type=int)
     d2.add_argument("--shorts", type=int, default=2)
+    d2.add_argument("--force", action="store_true", help="produce again even if today already completed")
+    d2.add_argument("--retries", type=int, default=1, help="whole-run retries before alerting (default 1)")
     d2.set_defaults(fn=cmd_daily_v2)
     vs = sub.add_parser("voice-sample", help="narrated + mixed + mastered audio sample (local only)")
     vs.add_argument("--script", default="config/samples/voice_sample_60s.txt")
@@ -327,7 +337,7 @@ def main(argv=None):
     ev.set_defaults(fn=cmd_events)
 
     args = p.parse_args(argv)
-    logging.basicConfig(level=logging.INFO if args.verbose else logging.WARNING, format="%(levelname)s %(message)s")
+    logging.basicConfig(level=logging.INFO if args.verbose else logging.WARNING, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     try:
         args.fn(args, get_settings())
     except Exception as exc:  # concise operator-facing errors

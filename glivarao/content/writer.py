@@ -237,7 +237,22 @@ def write_with_claude(b: Brief, fmt: str, settings: Settings, angle: str = "") -
                  f"rate, limit or date:\n{facts}\n\nReal viewer questions to address:\n" +
                  "\n".join(f"- {q['title']}" for q in b.viewer_questions) +
                  f"\nAudience: the United States and Canada. Category: {b.category}. Finance only.")
-    return generate_with_claude(b.topic, fmt, settings, angle=grounding)
+    script = generate_with_claude(b.topic, fmt, settings, angle=grounding)
+    return with_house_description(b, script)
+
+
+def with_house_description(b: Brief, script: Script) -> Script:
+    """Keep Claude's summary paragraph, then add our chapters placeholder, sources, calculations and disclaimer
+    (the same honest packaging the free writer uses)."""
+    from .packaging import make_metadata
+
+    house = make_metadata(b, script)["description"].split("\n")
+    tail = "\n".join(house[house.index("{CHAPTERS}"):]) if "{CHAPTERS}" in house else "\n".join(house)
+    summary = script.description.strip().split("\n\n")[0].strip()[:600]
+    title = script.title
+    if script.format == "short" and "#shorts" not in title.lower():
+        title = f"{title[:91]} #Shorts"
+    return script.model_copy(update={"description": f"{summary}\n\n{tail}"[:4900], "title": title[:100]})
 
 
 def paid_writer_allowed(settings: Settings) -> bool:

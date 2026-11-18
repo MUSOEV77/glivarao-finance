@@ -112,7 +112,7 @@ def _coin(s: float, boil: int) -> Image.Image:
     return img
 
 
-@lru_cache(maxsize=2048)
+@lru_cache(maxsize=384)  # capped: each entry is a full sprite; 2048 cost ~0.5 GB per worker
 def _rotated(kind: str, s: float, boil: int, angle: float) -> Image.Image:
     base = {"torso": _max_torso, "head": _max_head, "coin": _coin}[kind](s, boil)
     return base.rotate(angle, resample=Image.BICUBIC, expand=True) if angle else base
