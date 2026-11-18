@@ -1,0 +1,8 @@
+[Unit]
+Description=GLIVARAO: back up the job database and prune old renders
+
+[Service]
+Type=oneshot
+User=glivarao
+WorkingDirectory=/opt/glivarao/app
+ExecStart=/bin/bash deploy/backup.sh

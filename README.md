@@ -33,7 +33,8 @@ Output goes to `output/<job_id>/`: `video.mp4`, `thumbnail.jpg`, `captions.srt`,
 Set `GLIVARAO_MODE=production`, add the keys from `docs/CREDENTIALS.md`, then run:
 
 ```bash
-python -m glivarao daily              # 1 long + 2 Shorts → full review package in Telegram
+python -m glivarao daily-v2           # autonomous: research → topic → 1 long + 2 Shorts → Telegram review
+python -m glivarao daily              # (v1 pipeline, kept for compatibility)
 python -m glivarao poll-approvals     # records Approve/Reject; never uploads
 python -m glivarao publish <job_id>   # optional, manual, interactive, private-only upload
 python -m glivarao analytics
@@ -54,7 +55,8 @@ RULE, ESTIMATE or UNAVAILABLE. Research never produces videos and never touches 
 - `docs/CREDENTIALS.md`: every credential and service needed, and where to get it
 - `docs/OPERATIONS.md`: daily runbook and publishing policy
 - `docs/DEPLOYMENT.md`: step-by-step VPS deployment
-- `docs/TEST_REPORT.md`: what was tested, what works, what's incomplete
+- `docs/TEST_REPORT.md`: first MVP test report
+- `docs/FINAL_REPORT.md`: current status: fully working, partial, and what needs credentials/VPS
 
 ## Layout
 ```

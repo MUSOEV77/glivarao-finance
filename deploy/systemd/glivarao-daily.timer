@@ -1,0 +1,10 @@
+[Unit]
+Description=Run GLIVARAO daily production every morning (America/New_York)
+
+[Timer]
+OnCalendar=*-*-* 04:17:00 America/New_York
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

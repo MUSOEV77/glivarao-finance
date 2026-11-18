@@ -1,0 +1,12 @@
+[Unit]
+Description=GLIVARAO: record Telegram Approve/Reject decisions (never uploads)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=glivarao
+WorkingDirectory=/opt/glivarao/app
+ExecStart=/opt/glivarao/app/.venv/bin/python -m glivarao poll-approvals
+StandardOutput=append:/opt/glivarao/app/logs/poll.log
+StandardError=append:/opt/glivarao/app/logs/poll.log
+NoNewPrivileges=true
