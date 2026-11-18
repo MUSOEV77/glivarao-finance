@@ -65,6 +65,7 @@ systemctl list-timers 'glivarao-*'          # daily 04:17 ET, poll every 5 min, 
 tail -f /opt/glivarao/app/logs/daily.log
 ```
 
+- Phone-only guide with copy-paste blocks: `docs/PHONE_SETUP.md`.
 - [ ] Telegram receives the thumbnail, metadata, preview, video, captions, research card and fact sheet for
   **1 long video and 2 Shorts**.
 - [ ] Approve and reject buttons work. Nothing appears on YouTube.
