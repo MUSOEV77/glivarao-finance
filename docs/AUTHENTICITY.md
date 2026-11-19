@@ -34,8 +34,14 @@ Send **/queue** to see what's planned.
    - Not a topic from the last 30 videos.
    - Not the same topic family as the last 3 videos.
    - No angle similar to any of the last 30 videos.
-4. **Rotation.**
-   - Never the same category twice in a row, and at most 2 of the last 7 videos per category.
+4. **Channel focus and rotation** (details: `docs/CHANNEL_FOCUS.md`).
+   - Every topic must fit one of the 5 pillars: debt and credit, budgeting and saving, taxes, retirement and
+     investing basics, scams and consumer protection. Anything else (crypto, single stocks, general news) is
+     rejected.
+   - Never the same pillar twice in a row, and at most 2 of the last 5 videos per pillar. Taxes get more room in
+     December–April.
+   - Each video belongs to a recurring series (for example "Money Traps" or "Tax Season 2027") that links its
+     episodes.
    - Formats rotate too, never the same twice in a row.
 5. **Sources for every claim.**
    - Every sentence with a number must trace to a source URL: official releases, research data, real questions,

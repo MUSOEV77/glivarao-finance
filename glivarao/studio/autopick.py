@@ -7,15 +7,19 @@ Rules, in order:
    high/medium-confidence topics first.
 3. No repeats: not the same topic, not the same topic family as the last 3 videos, and no angle similar to any
    of the last 30 videos.
-4. Rotation: never the same category twice in a row, at most 2 of the last 7 videos per category.
+4. Channel focus (studio/pillars.py): every topic must fit one of the 5 pillars; anything else is rejected.
+   Pillars rotate: never the same pillar twice in a row, at most 2 of the last 5 videos per pillar (taxes: 3 in
+   December-April), and pillars not covered recently (and taxes in tax season) are preferred.
 The reasons (with source URLs) are kept and shown in Telegram so you can reject the whole video.
 """
 from __future__ import annotations
 
 import json
 import re
+from datetime import date
 
 from ..content.brief import family_of
+from . import pillars as P
 
 RECENT_VIDEOS = 30
 FAMILY_GAP = 3
@@ -46,50 +50,65 @@ def recent(store, n: int = RECENT_VIDEOS, key: str = "used_topics") -> list[list
 
 def pick_topic(report: dict, store, free_writer: bool, history_key: str = "used_topics",
                recent_videos: int = RECENT_VIDEOS, family_gap: int = FAMILY_GAP,
-               exclude: set[str] | None = None) -> tuple[dict | None, list[str], dict]:
+               exclude: set[str] | None = None, today: date | None = None) -> tuple[dict | None, list[str], dict]:
     """history_key/recent_videos: long videos use the last 30 long topics; Shorts days use their own history
     (last 10 Shorts topics) because 90 Shorts a month can't all have a topic unused for 30 videos."""
     hist = recent(store, recent_videos, history_key)
     keys = {h[1] for h in hist} | set(exclude or ())
     fams = [h[3] for h in hist[-family_gap:] if len(h) > 3] if family_gap else []
-    cats = [h[2] for h in hist[-7:] if len(h) > 2]
-    last_cat = cats[-1] if cats else None
+    today = today or date.today()
+    recent_pillars = [p.key for p in (P.pillar_of(h[1]) for h in hist) if p is not None]
+    last_pillar = P.PILLARS[recent_pillars[-1]].name if recent_pillars else None
     angles = [h[4] for h in hist if len(h) > 4 and h[4]]
     skipped: dict[str, int] = {}
 
     def skip(reason):
         skipped[reason] = skipped.get(reason, 0) + 1
 
-    ranked = sorted(report.get("ranked", []), key=lambda c: ({"high": 0, "medium": 1}.get(c["confidence"], 2),
-                                                             -c["score"]))
+    all_ranked = report.get("ranked", [])
+    bonus = {}
+    for c in all_ranked:
+        p = P.pillar_of(c["key"])
+        bonus[c["key"]] = P.priority_bonus(p, recent_pillars, today) if p else (0.0, "")
+    ranked = sorted(all_ranked, key=lambda c: ({"high": 0, "medium": 1}.get(c["confidence"], 2),
+                                               -(c["score"] + bonus[c["key"]][0])))
     for c in ranked:
         fam = family_of(c["key"])
+        off = P.rejection(c)
+        if off:
+            skip(off)
+            continue
+        pillar = P.pillar_of(c["key"])
         if c["key"] in keys:
             skip(f"covered in the last {recent_videos} videos")
             continue
         if free_writer and fam == "generic":
             skip("needs the Claude writer")
             continue
-        if fam != "generic" and fam in fams:
+        recent_fams = fams[-1:] if (fam == "tax" and P.tax_season(today)) else fams  # tax season: more tax videos
+        if fam != "generic" and fam in recent_fams:
             skip(f"same topic family as one of the last {FAMILY_GAP} videos")
             continue
-        if c["category"] == last_cat:
-            skip("same category as the previous video")
-            continue
-        if cats.count(c["category"]) >= 2:
-            skip("category already used twice in the last 7 videos")
+        blocked = P.rotation_block(pillar, recent_pillars, today)
+        if blocked:
+            skip(blocked)
             continue
         sim = max((similarity(angle_text(c), a) for a in angles), default=0.0)
         if sim >= ANGLE_SIMILAR:
             skip(f"angle similar to a recent video ({sim:.0%} overlap)")
             continue
-        why = [f"Ranked #{c.get('rank', report.get('ranked', []).index(c) + 1)} of {len(report.get('ranked', []))} finance topics in today's research "
+        why = [f"Pillar: {pillar.name} ({pillar.short})" + (f"; previous video: {last_pillar}" if last_pillar else ""),
+               f"Ranked #{c.get('rank', all_ranked.index(c) + 1)} of {len(all_ranked)} finance topics in today's research "
                f"(score {c['score']}/100, {c['confidence']} confidence, sources: {', '.join(c.get('sources', []))})"]
         prac = c.get("scores", {}).get("practical", {}).get("value")
         if prac is not None:
             why.append(f"Practical value for viewers: {prac}/10")
         why += c.get("why", [])
-        why.append(f"Category {c['category']}" + (f" (previous video: {last_cat})" if last_cat else ""))
+        if bonus[c["key"]][1]:
+            why.append(f"Pillar rotation: {bonus[c['key']][1]}")
+        series = P.series_for(c["key"], today)
+        if series:
+            why.append(f"Series: {series}")
         if skipped:
             why.append("Skipped higher-ranked topics: " + "; ".join(f"{n}× {r}" for r, n in skipped.items()))
         return c, why, skipped

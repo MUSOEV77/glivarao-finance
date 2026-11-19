@@ -161,6 +161,29 @@ LIB = {
                     "Double-check every payment-app recipient",
                     "Know your deposit insurance coverage"],
     },
+    "tax": {  # US federal income tax; durable explanations only, no year-specific limits or amounts
+        "how": [
+            ("How a refund really works", "A tax refund isn't a bonus from the IRS. It's your own money coming back, "
+             "because more tax was withheld from your paychecks during the year than you actually owed. If less was "
+             "withheld than you owe, you pay the difference instead.", "paycheck", "home"),
+            ("Credits versus deductions", "Two words matter most at tax time. A deduction lowers the income you're "
+             "taxed on. A credit lowers the tax itself, dollar for dollar, which usually makes it worth more. And some "
+             "credits, like the Earned Income Tax Credit, are refundable: they can pay you even if you owe no tax.",
+             "lightbulb", "studio"),
+        ],
+        "mistakes": [
+            ("Mistake: paying when free works", "A common mistake is paying for tax software, or for a refund "
+             "advance, before checking the free options. The IRS lists free ways to file on IRS dot gov, and many "
+             "people with simple returns qualify.", "warning", "home"),
+            ("Mistake: trusting a scary message", "Another mistake is panicking over a call, text or email that "
+             "claims to be the IRS. The IRS usually contacts people by mail first. If you get a letter, check it "
+             "against your records and reach the IRS through IRS dot gov, never through a link in a message.",
+             "shield", "bank"),
+        ],
+        "actions": ["Check the free filing options on IRS dot gov first",
+                    "Keep every tax form in one folder as it arrives",
+                    "Adjust your W-4 if your refund or tax bill keeps surprising you"],
+    },
     "generic": {
         "how": [
             ("Start with the basics", "Most money problems get easier once you can see the whole picture: what comes "
@@ -258,6 +281,17 @@ MYTHS = {
          "Many fees can be avoided by meeting simple account rules or switching accounts. Ask your bank.", "bank"),
         ("A payment app works just like a bank account.",
          "Payments sent to the wrong person can be very hard to reverse. Double-check every recipient.", "warning"),
+    ],
+    "tax": [
+        ("A big refund means you did your taxes right.",
+         "A big refund usually means too much was withheld during the year: money you could have used every month. "
+         "Updating your W-4 with your employer can move it back into your paychecks.", "paycheck"),
+        ("A higher tax bracket means all of my income gets taxed more.",
+         "US tax brackets are marginal. Only the dollars above each threshold are taxed at the higher rate, so a "
+         "raise doesn't shrink your take-home pay because of the bracket alone.", "lightbulb"),
+        ("The IRS will call or text me if I owe money.",
+         "The IRS usually contacts people by mail first. Calls or texts demanding immediate payment, especially by "
+         "gift card, wire or payment app, are a classic scam.", "shield"),
     ],
     "generic": [
         ("Good money habits take a lot of willpower.",

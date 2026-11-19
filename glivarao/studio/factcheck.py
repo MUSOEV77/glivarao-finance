@@ -44,7 +44,7 @@ FEES_METHOD = ("Method: Investor.gov, expense ratios (SEC)",
                "https://www.investor.gov/introduction-investing/investing-basics/glossary/expense-ratio")
 DIGITS = re.compile(r"(?<![\w(])\$?\d[\d,]*(?:\.\d+)?(?:\s?%)?(?![\w(])")
 # account names, years and numbered labels ("myth number 2", "step 3", "option 2") are not claims
-NOT_A_CLAIM = re.compile(r"401\(k\)|\b(?:19|20)\d\d\b|\b(?:myth|step|option|tip|mistake|chapter|part|number)"
+NOT_A_CLAIM = re.compile(r"401\(k\)|403\(b\)|\bW-?[249]\b|\b1099(?:-[A-Z]+)?\b|\b1040\b|\b529 plan|\b(?:19|20)\d\d\b|\b(?:myth|step|option|tip|mistake|chapter|part|number)"
                          r"\s+(?:number\s+)?\d+\b", re.I)
 
 

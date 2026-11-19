@@ -74,10 +74,12 @@ def test_no_repeats_and_rotation(store):
     assert first["key"] == "credit_card" and any("Ranked #1" in w for w in why)
     store.kv_set("used_topics", json.dumps([[str(DAY), "credit_card", "Credit and Debt", "card", "credit card fees"]]))
     nxt, why, skipped = pick_topic(rep, store, free_writer=True)
-    # credit_card: repeat; debt_payoff: same family (card) ; mortgage: same category as previous -> 401(k)
+    # credit_card: repeat; debt_payoff: same family (card) ; mortgage: debt pillar just used -> 401(k)
     assert nxt["key"] == "retirement_401k"
-    assert any("covered in the last 30" in r for r in skipped) and any("category" in r for r in skipped)
-    assert any("Skipped higher-ranked" in w for w in why)
+    none, _, skipped = pick_topic(report(card(), card("debt_payoff", "Paying off debt")), store, free_writer=True)
+    assert none is None and any("covered in the last 30" in r for r in skipped)
+    assert any("same topic family" in r or "same pillar" in r for r in skipped)
+    assert any(w.startswith("Pillar: Retirement") for w in why)  # a pillar not covered recently comes first
 
 
 def test_similar_angle_is_skipped(store):

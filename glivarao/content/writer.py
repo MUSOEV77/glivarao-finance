@@ -249,7 +249,8 @@ def write_with_claude(b: Brief, fmt: str, settings: Settings, angle: str = "", s
     grounding = (f"{angle or b.angle}\n\nUse ONLY these facts and numbers; do not introduce any other statistic, "
                  f"rate, limit or date:\n{facts}\n\nReal viewer questions to address:\n" +
                  "\n".join(f"- {q['title']}" for q in b.viewer_questions) +
-                 f"\nAudience: the United States and Canada. Category: {b.category}. Finance only.")
+                 f"\nAudience: everyday people in the United States, ages 25-45, who struggle with money. "
+                 f"Category: {b.category}. Finance only.")
     if style and style in FORMATS:
         grounding += f"\n\nFORMAT: {FORMATS[style].label}. {FORMATS[style].claude_structure}"
     if creator_text.strip():

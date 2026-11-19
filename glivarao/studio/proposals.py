@@ -8,17 +8,18 @@ from pathlib import Path
 
 from ..content.brief import family_of
 from ..content.writer import paid_writer_allowed
+from .pillars import rejection
 from .queue import TopicQueue
 
 log = logging.getLogger(__name__)
 
 
 def candidates(report: dict, exclude: set[str], n: int, free_writer: bool, max_per_category: int = 2) -> list[dict]:
-    """Top-ranked, varied ideas: no repeats from the last 90 days, at most 2 per category."""
+    """Top-ranked, varied ideas inside the 5 pillars: no repeats from the last 90 days, at most 2 per category."""
     out, per_cat = [], {}
     for c in sorted(report.get("ranked", []), key=lambda c: ({"high": 0, "medium": 1}.get(c["confidence"], 2),
                                                              -c["score"])):
-        if c["key"] in exclude or (free_writer and family_of(c["key"]) == "generic"):
+        if c["key"] in exclude or (free_writer and family_of(c["key"]) == "generic") or rejection(c):
             continue
         if per_cat.get(c["category"], 0) >= max_per_category:
             continue

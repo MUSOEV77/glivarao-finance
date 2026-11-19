@@ -23,8 +23,10 @@ FAMILY = {
     "grow": {"hysa", "emergency_fund", "compound", "retirement_401k", "ira_roth", "rrsp", "tfsa", "fhsa", "hsa",
              "education_saving", "retirement_planning", "fire", "net_worth", "cd_gic", "budgeting", "paycheck",
              "spending_psych", "cost_of_living", "inflation_personal"},
-    "invest": {"index_funds", "stocks", "bonds", "fees_expense", "robo", "crypto", "gold", "capital_gains",
+    "invest": {"index_funds", "stocks", "bonds", "fees_expense", "robo", "crypto", "gold",
                "options", "real_estate_inv"},
+    "tax": {"income_tax", "tax_refund", "tax_credits", "tax_filing", "tax_withholding", "side_income_tax",
+            "capital_gains"},
     "bank": {"bank_account", "money_transfer", "debit_prepaid", "bank_fees", "deposit_insurance", "check_cashing",
              "currency_exchange"},
 }

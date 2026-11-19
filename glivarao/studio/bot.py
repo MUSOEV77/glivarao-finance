@@ -20,6 +20,14 @@ from .queue import TopicQueue
 
 log = logging.getLogger(__name__)
 PREFIXES = ("pick", "drop", "fmt")
+HELP = """GLIVARAO commands
+/queue — what's planned
+/series — series and which videos have their YouTube link
+/playlist <series> <playlist link> — save a series playlist
+/affiliate — your affiliate links per pillar (+ ideas)
+/affiliate <pillar> <name> <https link> — add one (pillars: debt, budget, taxes, retire, scams)
+After uploading a video, reply to its upload pack with the YouTube link.
+Reply to a topic announcement with text or a voice note to add your take."""
 
 
 def format_history(store) -> list[str]:
@@ -100,14 +108,78 @@ def _download_voice(msg: dict, client, workdir: Path) -> Path | None:
     return dst
 
 
+def _channel_command(text: str, reply_to, store, settings, client) -> str | None:
+    """/series, /playlist, /affiliate and YouTube links you send after uploading. None = not one of these."""
+    from . import series as S
+
+    chat = settings.telegram_approver_chat_id
+    say = lambda t: client.call("sendMessage", chat_id=chat, text=t, disable_web_page_preview=True)  # noqa: E731
+    low = text.lower()
+    if low.startswith("/series"):
+        say(S.status_text(store, date.today()))
+        return "series"
+    if low.startswith("/playlist"):
+        parts = text.split()
+        url = parts[-1] if len(parts) >= 3 else ""
+        name = S.resolve_series(store, " ".join(parts[1:-1]), date.today()) if url else None
+        if not (name and S.YOUTUBE_PLAYLIST.match(url)):
+            say("Usage: /playlist <series name> <YouTube playlist link>\nExample: /playlist Money Traps "
+                "https://www.youtube.com/playlist?list=...\n\n" + S.status_text(store, date.today()))
+            return "playlist_help"
+        S.set_playlist(store, name, url)
+        say(f"✅ Playlist saved for \"{name}\". New descriptions and end-screen tips will use it.")
+        return "playlist"
+    if low.startswith("/affiliate"):
+        parts = text.split()
+        if len(parts) == 1:
+            say(S.affiliate_text(store))
+            return "affiliate_list"
+        pillar = S.resolve_pillar(parts[1])
+        if pillar and len(parts) == 3 and parts[2].lower() == "clear":
+            S.clear_affiliates(store, pillar)
+            say(f"✅ Removed all affiliate links for {pillar}.")
+            return "affiliate_clear"
+        if not (pillar and len(parts) >= 4 and S.HTTPS_URL.match(parts[-1])):
+            say("Usage: /affiliate <pillar> <name> <https link>\nPillars: debt, budget, taxes, retire, scams\n"
+                "Example: /affiliate taxes FreeTaxUSA https://your-link\nSee all: /affiliate")
+            return "affiliate_help"
+        name = " ".join(parts[2:-1])[:60]
+        S.add_affiliate(store, pillar, name, parts[-1])
+        say(f"✅ Added \"{name}\" to the {pillar} pillar. It appears (with the disclosure) in the next upload packs "
+            "for that pillar.")
+        return "affiliate_add"
+    if S.YOUTUBE_VIDEO.match(text):
+        packs = json.loads(store.kv_get("pack_messages", "{}"))
+        job_id = packs.get(str(reply_to)) if reply_to else None
+        ep = S.set_link(store, job_id, text) if job_id else None
+        if ep is None and job_id is None:
+            target = S.unlinked_target(store, text)
+            ep = S.set_link(store, target["job"], text) if target else None
+        if ep is None:
+            say("I couldn't tell which video this link is for. Reply to that video's upload pack (the 🕒 PUBLISH "
+                "TIME message) with the link.")
+            return "link_unknown"
+        say(f"✅ Saved the YouTube link for \"{ep['title']}\" ({ep['series']}, episode {ep['episode']}). "
+            "Later episodes will link to it." + ("" if job_id else " Wrong video? Reply to the right upload pack "
+                                                                 "with the link instead."))
+        return "link"
+    return None
+
+
 def handle_message(msg: dict, store, settings, client, workdir: Path | None = None, transcriber=None) -> str:
     chat = settings.telegram_approver_chat_id
     text = (msg.get("text") or msg.get("caption") or "").strip()
     q = TopicQueue(store)
-    if text.lower().startswith("/queue") or text.lower() in ("/start", "/help"):
+    if text.lower() in ("/start", "/help"):
+        client.call("sendMessage", chat_id=chat, text=HELP + "\n\n" + q.status_text())
+        return "help"
+    if text.lower().startswith("/queue"):
         client.call("sendMessage", chat_id=chat, text=q.status_text())
         return "queue"
     reply_to = (msg.get("reply_to_message") or {}).get("message_id")
+    handled = _channel_command(text, reply_to, store, settings, client)
+    if handled:
+        return handled
     it = q.by_message(reply_to) if reply_to else None
     if it is None or it.status not in ("awaiting_input", "ready"):
         waiting = q.awaiting_input()

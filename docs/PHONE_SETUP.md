@@ -130,7 +130,11 @@ Approving uploads nothing.
    Save the video and upload it from the YouTube Studio app with **Schedule**. For long videos, set up large files
    once: `docs/TELEGRAM_LARGE_FILES.md`.
 
-Send `/queue` to the bot any time. Full explanation: `docs/AUTHENTICITY.md`.
+After uploading, **reply to the upload pack with the video's YouTube link**, so the next episodes of the series
+can link to it.
+
+Send `/help` to the bot for all commands: `/queue`, `/series`, `/playlist`, `/affiliate`. Full explanations:
+`docs/AUTHENTICITY.md` and `docs/CHANNEL_FOCUS.md` (the 5 pillars, series and affiliate links).
 
 To pick and announce the next topic right now:
 

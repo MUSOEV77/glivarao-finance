@@ -34,7 +34,12 @@ def announce(item, settings, client=None) -> None:
 
     fmt = FORMATS[item.format]
     wait = settings.creator_input_wait_hours
+    from .pillars import pillar_of, series_for
+
+    p = pillar_of(item.key)
+    s = series_for(item.key, date.fromisoformat(item.proposed_on) if item.proposed_on else date.today())
     lines = [f"🗓 Next video, picked automatically: \"{item.topic}\"",
+             f"Pillar: {p.name if p else '?'}" + (f" · Series: {s}" if s else ""),
              f"Format: {fmt.label} ({fmt.summary})", "", "Why this topic:"]
     lines += [f"• {w}" for w in item.why[:8]]
     lines += ["", ("Want to add your own take (an opinion, experience or example)? Reply to this message with text "
@@ -63,11 +68,11 @@ def plan_next(settings, store, today: date | None = None, research_dir: Path | N
     research_dir = research_dir or Path("reports/research")
     cached = research_dir / f"{today.isoformat()}.json"
     report = json.loads(cached.read_text()) if cached.exists() else run_research(today, research_dir, store)
-    card, why, skipped = pick_topic(report, store, free_writer=not paid_writer_allowed(settings))
+    card, why, skipped = pick_topic(report, store, free_writer=not paid_writer_allowed(settings), today=today)
     if card is None:
         log.warning("no eligible topic today (%s)", skipped)
         if send:
-            _notify(settings, "GLIVARAO: no topic passed today's checks (no repeats, rotation). "
+            _notify(settings, "GLIVARAO: no topic passed today's checks (5 pillars, no repeats, rotation). "
                               f"Skipped: {skipped}. I'll try again with tomorrow's research.")
         return None
     brief = build_brief(card, today)

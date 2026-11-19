@@ -6,6 +6,9 @@ Sent to Telegram right after you tap ✅ Approve (or with /pack JOB_ID, or the "
   2. the full-quality thumbnail (document)
   3. three title options, the full description (sources, AI note, affiliate disclosure), tags
   4. the suggested publish time in New York and Tashkent time, for YouTube Studio's "Schedule"
+  5. series: links to earlier episodes in the description, end-screen / related-video advice, playlist; and the
+     pillar's affiliate links that YOU added with /affiliate (just above the disclosure)
+After uploading, reply to the pack with the YouTube link so later episodes can link to this one.
 Text blocks are sent as <pre>/<code> so one tap copies them on a phone. Nothing is uploaded or scheduled here.
 """
 from __future__ import annotations
@@ -13,8 +16,10 @@ from __future__ import annotations
 import html
 import json
 import logging
+from datetime import date
 from pathlib import Path
 
+from . import series as S
 from .publish_times import describe, next_slot
 
 log = logging.getLogger(__name__)
@@ -52,7 +57,15 @@ def build_pack(job, settings, store) -> dict:
     meta = json.loads((out / "metadata.json").read_text())
     titles = meta.get("title_options") or [meta["title"]]
     slot = next_slot(store, job.format, settings, job_id=job.id)
-    return {"job": job.id, "format": job.format, "titles": titles, "description": meta["description"],
+    series, pillar = meta.get("series"), meta.get("pillar")
+    episode = None
+    if series:
+        episode = S.record_episode(store, job.id, series, pillar or "", titles[0], job.format,
+                                   slot.date() if slot else date.today())
+    blocks = S.description_blocks(store, job.id, series, pillar, job.format)
+    description = S.insert_blocks(meta["description"], list(blocks), settings.affiliate_disclosure)
+    return {"job": job.id, "format": job.format, "titles": titles, "description": description,
+            "series": series, "episode": episode, "end_screen": S.end_screen_advice(store, job.id, series, job.format),
             "tags": tags_line(meta.get("tags", [])), "video": Path(job.video_path),
             "thumbnail": Path(job.thumbnail_path) if job.thumbnail_path else None, "slot": slot,
             "when": describe(slot), "duration": job.duration_sec}
@@ -67,7 +80,9 @@ def send_pack(job, settings, store, client=None) -> dict:
     kind = "LONG VIDEO" if p["format"] == "long" else "SHORT"
     send = lambda text, **kw: c.call("sendMessage", chat_id=chat, text=text, parse_mode="HTML",  # noqa: E731
                                      disable_web_page_preview=True, **kw)
-    send(f"📦 <b>UPLOAD PACK — {kind}</b> ({_e(job.id)})\n"
+    ep = p["episode"]
+    series_line = (f"Series: <b>{_e(p['series'])}</b> (episode {ep['episode']})\n" if ep else "")
+    send(f"📦 <b>UPLOAD PACK — {kind}</b> ({_e(job.id)})\n{series_line}"
          f"Schedule it in YouTube Studio for:\n<b>{_e(p['when'])}</b>\n\n"
          "Steps: save the video file below → YouTube Studio app → ＋ → choose the video → paste the title, "
          "description and tags → set the thumbnail → Visibility → Schedule → enter the time above.\n"
@@ -99,9 +114,18 @@ def send_pack(job, settings, store, client=None) -> dict:
         label = "DESCRIPTION" + (f" (part {i}/{len(parts)}, paste in order)" if len(parts) > 1 else "")
         send(f"<b>{label}</b>\n<pre>{_e(part)}</pre>")
     send(f"<b>TAGS</b> ({len(p['tags'])}/500 characters)\n<pre>{_e(p['tags'])}</pre>")
-    send(f"🕒 <b>PUBLISH TIME</b>\n{_e(p['when'])}\nIn YouTube Studio: Visibility → Schedule → set this date and time "
-         "(Studio shows your phone's time zone).",
-         reply_markup={"inline_keyboard": [[{"text": "📦 Send upload pack again", "callback_data": f"pack:{job.id}"}]]})
+    send(f"🔗 <b>{'END SCREEN' if p['format'] == 'long' else 'RELATED VIDEO'}</b>\n{_e(p['end_screen'])}")
+    last = send(f"🕒 <b>PUBLISH TIME</b>\n{_e(p['when'])}\nIn YouTube Studio: Visibility → Schedule → set this date "
+                "and time (Studio shows your phone's time zone).\n\n"
+                "After uploading, <b>reply to this message with the YouTube link</b> so the next episodes can link "
+                "to it.",
+                reply_markup={"inline_keyboard": [[{"text": "📦 Send upload pack again",
+                                                    "callback_data": f"pack:{job.id}"}]]})
+    mid = (last or {}).get("message_id") if isinstance(last, dict) else None
+    if mid is not None:
+        msgs = json.loads(store.kv_get("pack_messages", "{}"))
+        msgs[str(mid)] = job.id
+        store.kv_set("pack_messages", json.dumps(dict(list(msgs.items())[-500:])))
     return {"video": video_note, "slot": p["slot"].isoformat(), "titles": len(p["titles"]), "parts": len(parts)}
 
 

@@ -197,7 +197,7 @@ def run_daily_v2(settings: Settings, store: JobStore, today: date | None = None,
         recent_long = {h[1] for h in json.loads(store.kv_get("used_topics", "[]"))[-3:]}
         card, short_why, _ = pick_topic(report, store, free_writer=not paid, history_key="used_short_topics",
                                         recent_videos=10, family_gap=0,
-                                        exclude=recent_long | ({planned.key} if planned else set()))
+                                        exclude=recent_long | ({planned.key} if planned else set()), today=today)
         if card is None:
             return DailyResult("", "skipped", note=f"{pace_note}; no Shorts topic passed today's checks")
         style = "explainer"
@@ -287,6 +287,7 @@ def run_daily_v2(settings: Settings, store: JobStore, today: date | None = None,
             desc = factcheck.add_sources_to_description(script.description, claims)
             desc = disclosure.add_note(desc, disc)
             from .content.packaging import add_affiliate_disclosure, title_options
+            from .studio.pillars import pillar_of, series_for
 
             desc = add_affiliate_disclosure(desc, settings.affiliate_disclosure)
             script = script.model_copy(update={"description": finalize_description(
@@ -298,6 +299,8 @@ def run_daily_v2(settings: Settings, store: JobStore, today: date | None = None,
                 {"title": script.title, "title_options": title_options(brief, script),
                  "description": script.description, "tags": script.tags,
                  "topic_key": brief.topic_key, "category": brief.category, "market": brief.market,
+                 "pillar": getattr(pillar_of(brief.topic_key), "key", None),
+                 "series": series_for(brief.topic_key, today),
                  "format": script.style, "creator_input": creator, "picked_by_you": item is not None,
                  "research_score": brief.score, "confidence": brief.confidence, "writer": writer,
                  "voice": res.voice, "render_seconds": round(res.render_seconds, 1),
@@ -330,7 +333,7 @@ def run_daily_v2(settings: Settings, store: JobStore, today: date | None = None,
                 from .render.video import preview_clip
 
                 preview = preview_clip(res.video, out / "preview.mp4")
-            checks = "\n\n".join([_topic_block(brief, item, script), report_c.summary(), sim.summary(),
+            checks = "\n\n".join([_topic_block(brief, item, script, store, today), report_c.summary(), sim.summary(),
                                    factcheck.report(claims), disc.review_text()])
             request_approval(job, store, settings, script, checks, preview=preview,
                              attachments=[(why_md, "Why this topic (research evidence)"),
@@ -431,12 +434,19 @@ def _notify(settings: Settings, text: str) -> None:
         log.exception("could not send Telegram alert")
 
 
-def _topic_block(brief, item, script) -> str:
+def _topic_block(brief, item, script, store=None, today: date | None = None) -> str:
     """First thing in the review message: what the topic is and why it was picked."""
     from .studio.formats import FORMATS
+    from .studio.pillars import pillar_of, series_for
+    from .studio.series import next_episode_number
 
     how = "picked automatically by research" if (item is None or item.auto) else "picked by you"
+    p = pillar_of(brief.topic_key)
+    s = series_for(brief.topic_key, today or date.fromisoformat(brief.date))
     lines = [f"TOPIC: {brief.topic} ({how})",
+             f"PILLAR: {p.name if p else 'outside the 5 pillars'}"
+             + (f" · SERIES: {s}" + (f" (episode {next_episode_number(store, s, script.format)} if approved)"
+                                     if store is not None else "") if s else ""),
              f"FORMAT: {FORMATS.get(script.style or '', FORMATS['explainer']).label if script.format == 'long' else script.style}",
              "WHY THIS TOPIC:"]
     lines += [f"• {w}" for w in ((item.why if item is not None and item.why else brief.why)[:8])]

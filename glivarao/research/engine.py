@@ -38,7 +38,8 @@ REGION_TAGS = {"united-states", "canada", "united-kingdom", "india", "australia"
 PRACTICAL = {
     # 10: everyday decisions that save or cost real money
     "credit_card": 10, "credit_score": 10, "budgeting": 10, "emergency_fund": 10, "hysa": 10, "income_tax": 10,
-    "debt_payoff": 10, "bank_fees": 10, "retirement_401k": 10, "scams": 10,
+    "debt_payoff": 10, "bank_fees": 10, "retirement_401k": 10, "scams": 10, "tax_refund": 10, "tax_credits": 10,
+    "tax_filing": 9, "tax_withholding": 9, "side_income_tax": 8,
     # 9: high practical value
     "credit_report": 9, "debt_collection": 9, "student_loan": 9, "ira_roth": 9, "rrsp": 9, "tfsa": 9, "fhsa": 9,
     "index_funds": 9, "compound": 9, "identity_theft": 9, "paycheck": 9, "fees_expense": 9, "money_mistakes": 9,

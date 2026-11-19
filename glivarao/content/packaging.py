@@ -71,8 +71,8 @@ def make_metadata(b: Brief, script: Script, variant: str = "") -> dict:
     # sources of what the video says (research evidence such as search-suggestion links stays in the review)
     sources = [f"- {f.source}: {f.url}" for f in b.facts if f.url and f.source != "Google search suggestions"]
     calcs = [f"- {f.text}" for f in b.facts if f.kind == "CALCULATION"]
-    desc = [f"{b.topic}, explained in plain English with original hand-drawn animation, for viewers in the US "
-            "and Canada.", "", "{CHAPTERS}"]
+    desc = [f"{b.topic}, explained in plain English with original hand-drawn animation: everyday "
+            "US personal finance, no jargon.", "", "{CHAPTERS}"]
     if sources:
         desc += ["Sources:"] + sources + [""]
     if calcs:
@@ -83,7 +83,7 @@ def make_metadata(b: Brief, script: Script, variant: str = "") -> dict:
         desc += ["", "#Shorts #personalfinance #money"]
     concept_words = [w for w in b.topic.lower().replace(",", "").split() if len(w) > 3]
     tags = list(dict.fromkeys([b.topic.lower(), b.category.lower(), "personal finance", "money tips",
-                               "finance for beginners", "usa", "canada", "GLIVARAO Finance"] + concept_words))[:20]
+                               "finance for beginners", "usa", "budgeting", "GLIVARAO Finance"] + concept_words))[:20]
     return {"title": title[:100], "description": "\n".join(desc), "tags": tags, "thumbnail_text": thumb}
 
 
