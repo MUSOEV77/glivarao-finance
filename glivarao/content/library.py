@@ -1,7 +1,7 @@
 """Reviewed editorial explanations used by the free (offline) script writer, per topic family.
 
 Rules for this file: general, durable explanations only; no year-specific figures, no statistics (numbers come
-from research data or calculators at run time); accurate for both the US and Canada unless marked.
+from research data or calculators at run time); written for US viewers.
 Each entry: (heading, narration, illustration, set). Narration may use *emphasis* markers.
 """
 from __future__ import annotations
@@ -33,8 +33,7 @@ LIB = {
             "scene": ("If a charge looks wrong", "If a charge on your statement looks wrong, act quickly. Contact "
                       "your card issuer, explain the problem, and follow up in writing. Keep receipts, emails and "
                       "screenshots. In the US, the Fair Credit Billing Act generally gives you sixty days from the "
-                      "statement date to dispute a billing error. In Canada, contact your issuer right away and ask "
-                      "about their dispute and chargeback process.", "paycheck", "bank"),
+                      "statement date to dispute a billing error.", "paycheck", "bank"),
         },
         "actions": ["Pick a fixed monthly payment above the minimum, and automate it",
                     "Put extra money toward the highest-APR card first",
@@ -72,8 +71,7 @@ LIB = {
         ],
         "mistakes": [
             ("Mistake: never checking", "The biggest mistake is never looking. In the US, you can get free credit "
-             "reports from all three national bureaus at AnnualCreditReport dot com. In Canada, Equifax and TransUnion "
-             "both offer free access to your credit report.", "lightbulb", "studio"),
+             "reports from all three national bureaus at AnnualCreditReport dot com.", "lightbulb", "studio"),
             ("Mistake: disputing without proof", "The second mistake is disputing without documents. Keep copies of "
              "statements, letters and payment confirmations, and send them with your dispute.", "paycheck", "home"),
         ],
@@ -95,8 +93,8 @@ LIB = {
              "faked. If a call or message worries you, hang up and contact the company yourself, using the number on "
              "your card or their official website.", "warning", "home"),
             ("Mistake: staying quiet", "Another mistake is staying quiet out of embarrassment. Report it. In the US, "
-             "you can report fraud to the Federal Trade Commission at Report Fraud dot F T C dot gov. In Canada, "
-             "contact the Canadian Anti-Fraud Centre. And tell your bank right away.", "shield", "bank"),
+             "you can report fraud to the Federal Trade Commission at Report Fraud dot F T C dot gov. And tell "
+             "your bank right away.", "shield", "bank"),
         ],
         "actions": ["Slow down when someone pressures you to pay",
                     "Verify by contacting the company yourself",
@@ -108,8 +106,7 @@ LIB = {
              "returns too. In the early years, the growth looks tiny. Later, it can become the biggest part of the "
              "total. The key ingredient isn't a big starting amount. It's time.", "growth_arrow", "studio"),
             ("Make it automatic", "The most reliable way to save is to make it automatic. Move a set amount on payday, "
-             "before you have a chance to spend it. Tax-advantaged accounts can help too, like a 401(k) or IRA in the "
-             "US, or a TFSA or RRSP in Canada.", "piggy_bank", "home"),
+             "before you have a chance to spend it. Tax-advantaged accounts can help too, like a 401(k) or an IRA.", "piggy_bank", "home"),
         ],
         "mistakes": [
             ("Mistake: waiting to start", "The biggest mistake is waiting for the perfect moment. Starting smaller but "
@@ -147,8 +144,7 @@ LIB = {
              "account.", "bank", "bank"),
             ("Is your money protected?", "Deposits at insured banks are protected up to limits. In the US that's the "
              "FDIC, which covers up to two hundred fifty thousand dollars per depositor, per insured bank, for each "
-             "account ownership category. In Canada, CDIC covers eligible deposits up to one hundred thousand dollars "
-             "per category at member institutions.", "shield", "bank"),
+             "account ownership category.", "shield", "bank"),
         ],
         "mistakes": [
             ("Mistake: payment apps as a bank", "A common mistake is treating payment apps like a bank account. "
@@ -206,7 +202,7 @@ LIB = {
 
 
 # Reviewed myth / fact pairs for the Myth vs Fact format: (myth stated fairly, the fact, illustration).
-# Same rules as above: durable, general, no statistics, accurate for the US and Canada.
+# Same rules as above: durable, general, no statistics, written for US viewers.
 MYTHS = {
     "card": [
         ("Paying the minimum keeps you on track.",
@@ -275,7 +271,7 @@ MYTHS = {
     ],
     "bank": [
         ("All my money is protected, whatever the amount.",
-         "Deposit insurance has limits and rules by account type, through the FDIC in the US and CDIC in Canada. "
+         "Deposit insurance has limits and rules by account type, through the FDIC. "
          "Know where your coverage ends.", "shield"),
         ("Bank fees are unavoidable.",
          "Many fees can be avoided by meeting simple account rules or switching accounts. Ask your bank.", "bank"),

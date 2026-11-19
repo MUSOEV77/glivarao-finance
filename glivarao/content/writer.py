@@ -140,7 +140,7 @@ def write_long_free(b: Brief) -> Script:
         scenes.append(_s(b.topic[:40], f"Let's talk about {topic_phrase(b.topic)}. It affects more people than you'd "
                          "think, and a few simple moves can save you real money.", "lightbulb", "studio",
                          entrance="walk_in"))
-    scenes.append(_s("Meet Max", f"Meet Max. Like a lot of people in the US and Canada, he's busy, he's careful with "
+    scenes.append(_s("Meet Max", f"Meet Max. Like a lot of people in the US, he's busy, he's careful with "
                      f"money, and he's never had anyone explain {topic_phrase(b.topic)} in plain English. Today, Penny and I "
                      "are going to fix that.", "coin_stack", "home", character="duo"))
     for h, n, illo, st in lib["how"]:
