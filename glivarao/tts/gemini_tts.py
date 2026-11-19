@@ -1,36 +1,45 @@
-"""Gemini TTS narrator (Google Gemini API; paid, owner approval required). GLIVARAO's selected premium voice:
-model `gemini-3.8-flash-tts`, prebuilt voice "Charon", directed as a warm, confident documentary narrator.
+"""Gemini TTS narrator (Google Gemini API; paid, owner approval required). THE channel voice (locked, see
+tts/voice_lock.py): pinned model `gemini-3.8-flash-tts`, prebuilt voice "Charon", fixed pace and style.
 
 * Whole scenes are synthesized as one paragraph so the model controls natural rhythm across sentences.
   Sentence timings (for captions and animation cues) are recovered from the pauses in the returned audio.
 * Billing is per audio token. Spend is recorded in USD from the API's own usage metadata, and a hard monthly
   cap is enforced before every scene. Scenes are cached on disk, so re-renders never pay twice.
 * The API key goes in a header, never the URL.
-NOTE: model IDs and prices vary between Google's pages; both are configurable and must be confirmed on the
-first approved call. A wrong model ID fails with an error (no charge) and the video falls back to Kokoro.
+* Temporary errors (network, 429 rate limit, 5xx) are retried with exponential backoff. Permanent errors (bad key,
+  retired model, refused request) are not. Either way the result is VoiceUnavailable: the video is HELD and
+  re-rendered later. There is no fallback voice or fallback model.
 """
 from __future__ import annotations
 
 import base64
 import hashlib
 import json
+import random
+import time
 from datetime import date
 from pathlib import Path
 
 import numpy as np
 import requests
 
-from .google_chirp import BudgetExceeded, PaidTTSError
 from .kokoro import KOKORO_SR, Narration, Sentence, normalize_text, split_sentences
+from .voice_lock import PINNED_MODEL, VoiceUnavailable, check_model
 
 API = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-DEFAULT_MODEL = "gemini-3.8-flash-tts"
-FALLBACK_MODEL = "gemini-3.8-flash-lite-tts"   # same prebuilt voices -> the channel keeps the same narrator
+DEFAULT_MODEL = PINNED_MODEL
 DEFAULT_VOICE = "Charon"
 DEFAULT_STYLE = ("Narrate as a warm, deep, confident American male documentary narrator explaining personal "
-                 "finance. Natural, measured pace with real pauses between sentences; clear numbers and money "
-                 "amounts; subtle emphasis on key figures; trustworthy, never theatrical.")
+                 "finance. Clear numbers and money amounts; subtle emphasis on key figures; trustworthy, never "
+                 "theatrical.")
+RETRYABLE = {408, 429, 500, 502, 503, 504}
+PERMANENT = {400: "the request was refused", 401: "the API key was rejected", 403: "the API key has no access "
+             "(check billing / API enabled)", 404: "the pinned model was not found (retired?)"}
 BRAND_RESPELL = {"GLIVARAO": "Gli-VAR-oh"}     # prompt-based models take respellings, not IPA
+
+
+class _Retryable(Exception):
+    pass
 
 
 class SpendLedger:
@@ -97,10 +106,13 @@ class GeminiTTSNarrator:
 
     def __init__(self, api_key: str, model: str = DEFAULT_MODEL, voice: str = DEFAULT_VOICE, style: str = DEFAULT_STYLE,
                  price_per_m_audio: float = 18.0, tokens_per_sec: float = 32.0, monthly_budget_usd: float = 20.0,
-                 cache_dir: Path = Path("data/tts_cache"), ledger: SpendLedger | None = None, session=None):
+                 cache_dir: Path = Path("data/tts_cache"), ledger: SpendLedger | None = None, session=None,
+                 retries: int = 5, backoff_sec: float = 5.0, sleep=time.sleep):
         if not api_key:
-            raise PaidTTSError("GEMINI_API_KEY is not set")
+            raise VoiceUnavailable("GEMINI_API_KEY is not set")
+        check_model(model)
         self._key, self.model, self.voice, self.style = api_key, model, voice, style
+        self.retries, self.backoff, self._sleep = retries, backoff_sec, sleep
         self.price, self.tps, self.budget = price_per_m_audio, tokens_per_sec, monthly_budget_usd
         self.cache = Path(cache_dir)
         self.ledger = ledger or SpendLedger(Path("data/tts_spend.json"))
@@ -117,7 +129,7 @@ class GeminiTTSNarrator:
 
     def check_budget(self, usd_needed: float) -> None:
         if self.ledger.spent() + usd_needed > self.budget:
-            raise BudgetExceeded(f"monthly TTS budget: ${self.ledger.spent():.2f} spent + ~${usd_needed:.2f} needed "
+            raise VoiceUnavailable(f"monthly voice budget: ${self.ledger.spent():.2f} spent + ~${usd_needed:.2f} needed "
                                  f"> ${self.budget:.2f}")
 
     # -- synthesis ---------------------------------------------------------------------------------------
@@ -129,20 +141,41 @@ class GeminiTTSNarrator:
         return t
 
     def _request(self, text: str) -> tuple[np.ndarray, int]:
+        """One synthesis with retries and exponential backoff (5, 10, 20, 40, 80 s + jitter; honours Retry-After)."""
+        last = ""
+        for attempt in range(self.retries + 1):
+            if attempt:
+                self._sleep(min(120.0, self._wait or self.backoff * 2 ** (attempt - 1)) + random.uniform(0, 1))
+            self._wait = 0.0
+            try:
+                return self._request_once(text)
+            except _Retryable as exc:
+                last = str(exc)
+        raise VoiceUnavailable(f"Gemini TTS unavailable after {self.retries + 1} attempts ({last})")
+
+    _wait = 0.0
+
+    def _request_once(self, text: str) -> tuple[np.ndarray, int]:
         body = {"contents": [{"parts": [{"text": f"{self.style}\n\n{text}"}]}],
                 "generationConfig": {"responseModalities": ["AUDIO"],
                                      "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": self.voice}}}}}
         try:
             r = self.http.post(API.format(model=self.model), headers={"x-goog-api-key": self._key}, json=body, timeout=180)
         except requests.RequestException as exc:
-            raise PaidTTSError(f"Gemini TTS request failed: {type(exc).__name__}") from None
+            raise _Retryable(f"network error: {type(exc).__name__}") from None
+        if r.status_code in PERMANENT:
+            raise VoiceUnavailable(f"Gemini TTS HTTP {r.status_code}: {PERMANENT[r.status_code]}")
         if r.status_code != 200:
-            raise PaidTTSError(f"Gemini TTS HTTP {r.status_code}")
+            try:
+                self._wait = float(r.headers.get("Retry-After", 0) or 0) if hasattr(r, "headers") else 0.0
+            except ValueError:
+                self._wait = 0.0
+            raise _Retryable(f"HTTP {r.status_code}")
         data = r.json()
         try:
             part = data["candidates"][0]["content"]["parts"][0]["inlineData"]
-        except (KeyError, IndexError):
-            raise PaidTTSError("Gemini TTS returned no audio") from None
+        except (KeyError, IndexError, TypeError):
+            raise _Retryable("no audio in the response") from None
         pcm = np.frombuffer(base64.b64decode(part["data"]), dtype="<i2").astype(np.float32) / 32768.0
         rate = KOKORO_SR
         mime = part.get("mimeType", "")

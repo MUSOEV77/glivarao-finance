@@ -45,7 +45,7 @@ B=https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0
 echo "==> configuration"
 if [ ! -f .env ]; then
   sudo -u glivarao cp .env.example .env
-  sed -i 's/^GLIVARAO_MODE=.*/GLIVARAO_MODE=production   /; s/^TTS_PROVIDER=.*/TTS_PROVIDER=kokoro/' .env
+  sed -i 's/^GLIVARAO_MODE=.*/GLIVARAO_MODE=production   /; s/^TTS_PROVIDER=.*/TTS_PROVIDER=gemini_tts/' .env
   chmod 600 .env
   echo "   created .env - fill in TELEGRAM_BOT_TOKEN and TELEGRAM_APPROVER_CHAT_ID"
 fi
@@ -59,7 +59,8 @@ if [ "$SKIP_SYSTEMD" != "1" ]; then
   cp deploy/logrotate-glivarao /etc/logrotate.d/glivarao
   systemctl daemon-reload
   systemctl disable --now glivarao-propose.timer 2>/dev/null || true   # weekly ideas are only for TOPIC_MODE=queue
-  systemctl enable --now glivarao-daily.timer glivarao-poll.timer glivarao-backup.timer glivarao-plan.timer
+  systemctl enable --now glivarao-daily.timer glivarao-poll.timer glivarao-backup.timer glivarao-plan.timer \
+    glivarao-voice-retry.timer
   systemctl list-timers 'glivarao-*' --no-pager
 fi
 echo "Done. Nothing is ever uploaded automatically. Manual upload: sudo -u glivarao $APP_DIR/.venv/bin/python -m glivarao publish <job_id>"

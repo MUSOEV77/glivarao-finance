@@ -46,7 +46,7 @@ sudo -u glivarao nano /opt/glivarao/app/.env
 | Setting | Value | Cost |
 |---|---|---|
 | `GLIVARAO_MODE` | `production` (the installer sets it) | — |
-| `TTS_PROVIDER` / `KOKORO_VOICE` | `kokoro` / `am_michael` (the installer sets it) | free, local |
+| `TTS_PROVIDER` | `gemini_tts` (the installer sets it): the locked Charon voice, see `docs/VOICE.md` | paid, capped at $20/month |
 | `TELEGRAM_BOT_TOKEN` | from @BotFather → /newbot | free |
 | `TELEGRAM_APPROVER_CHAT_ID` | message your bot, then open `https://api.telegram.org/bot<TOKEN>/getUpdates` and copy `message.chat.id` | free |
 | `TELEGRAM_API_BASE` / `TELEGRAM_MAX_UPLOAD_MB` | keep the defaults. The cloud Bot API is limited to 50 MB, so long videos arrive as a full-length 720p review copy | free |

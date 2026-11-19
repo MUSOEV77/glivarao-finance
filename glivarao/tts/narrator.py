@@ -1,6 +1,9 @@
-"""Chooses the narrator for a whole video: the approved paid voice when allowed and affordable, otherwise the
-free Kokoro am_michael backup. The choice is made once per video (never mid-video), so a video always has
-one consistent voice, and the reason for any fallback is recorded for the reviewer."""
+"""Chooses the narrator for a whole video.
+
+TTS_PROVIDER=gemini_tts (the channel's locked voice, the default): Gemini TTS "Charon" ONLY. If it can't be used
+(paid use off, no key, budget cap, settings changed, API down after retries) VoiceUnavailable is raised and the
+video is held; there is no fallback voice and no fallback model.
+Other providers (kokoro, google_chirp) are kept for development and tests."""
 from __future__ import annotations
 
 import logging
@@ -9,6 +12,7 @@ from pathlib import Path
 
 from ..config import Settings
 from .gemini_tts import GeminiTTSNarrator, SpendLedger
+from .voice_lock import VoiceUnavailable, style_prompt, verify
 from .google_chirp import (BudgetExceeded, GoogleChirpNarrator, PaidTTSError, UsageLedger, monthly_char_limit)
 from .kokoro import KokoroEngine
 
@@ -42,39 +46,36 @@ def paid_choice(settings: Settings, session=None) -> GoogleChirpNarrator:
                                       settings.tts_free_chars_per_month), session=session)
 
 
-def gemini_narrator(settings: Settings, fallback: bool = False, session=None) -> GeminiTTSNarrator:
+def gemini_narrator(settings: Settings, session=None, sleep=None) -> GeminiTTSNarrator:
+    kw = {"sleep": sleep} if sleep else {}
     return GeminiTTSNarrator(
-        settings.gemini_api_key, model=settings.gemini_tts_fallback_model if fallback else settings.gemini_tts_model,
-        voice=settings.gemini_tts_voice,
-        price_per_m_audio=settings.gemini_tts_fallback_price if fallback else settings.gemini_tts_price,
+        settings.gemini_api_key, model=settings.gemini_tts_model, voice=settings.gemini_tts_voice,
+        style=style_prompt(settings), price_per_m_audio=settings.gemini_tts_price,
         tokens_per_sec=settings.gemini_tts_tokens_per_sec, monthly_budget_usd=settings.tts_monthly_budget_usd,
         cache_dir=Path(settings.tts_cache_dir), ledger=SpendLedger(Path(settings.tts_spend_ledger_path)),
-        session=session)
+        session=session, retries=settings.gemini_tts_retries, backoff_sec=settings.gemini_tts_backoff_sec, **kw)
 
 
-def _gemini_choice(settings: Settings, script_text: str, kokoro_voice: str | None, session) -> NarratorChoice:
-    """Selected voice first; near the monthly cap, the same voice on the cheaper model; else Kokoro."""
-    scenes = [s for s in script_text.split("\n\n") if s.strip()]
-    reasons = []
-    for fallback in (False, True):
-        n = gemini_narrator(settings, fallback, session)
-        try:
-            n.check_budget(n.uncached_estimate_usd(scenes))
-            return NarratorChoice(n, "gemini_tts", settings.gemini_tts_voice,
-                                  "near monthly cap: cheaper model, same voice" if fallback else "")
-        except BudgetExceeded as exc:
-            reasons.append(str(exc))
-    return kokoro_choice(settings, kokoro_voice, reasons[-1])
+def _gemini_choice(settings: Settings, script_text: str, session, store, sleep) -> NarratorChoice:
+    """The locked voice or nothing: the whole video must fit the monthly cap before the first paid call."""
+    if not settings.allow_paid_apis:
+        raise VoiceUnavailable("paid voice is switched off (ALLOW_PAID_APIS=false)")
+    if not settings.gemini_api_key:
+        raise VoiceUnavailable("GEMINI_API_KEY is not set")
+    if store is None:
+        from ..storage import JobStore
+
+        store = JobStore(settings.db_path)
+    verify(settings, store)  # pinned model + settings unchanged since the voice was locked
+    n = gemini_narrator(settings, session, sleep)
+    n.check_budget(n.uncached_estimate_usd([s for s in script_text.split("\n\n") if s.strip()]))
+    return NarratorChoice(n, "gemini_tts", settings.gemini_tts_voice)
 
 
 def get_narrator(settings: Settings, script_text: str = "", kokoro_voice: str | None = None,
-                 session=None) -> NarratorChoice:
+                 session=None, store=None, sleep=None) -> NarratorChoice:
     if settings.tts_provider == "gemini_tts":
-        if not settings.allow_paid_apis:
-            return kokoro_choice(settings, kokoro_voice, "paid voice not approved (ALLOW_PAID_APIS=false)")
-        if not settings.gemini_api_key:
-            return kokoro_choice(settings, kokoro_voice, "GEMINI_API_KEY not set")
-        return _gemini_choice(settings, script_text, kokoro_voice, session)
+        return _gemini_choice(settings, script_text, session, store, sleep)
     if settings.tts_provider != "google_chirp":
         return kokoro_choice(settings, kokoro_voice)
     if not settings.allow_paid_apis:
@@ -90,12 +91,14 @@ def get_narrator(settings: Settings, script_text: str = "", kokoro_voice: str | 
 
 
 def narrate_all(choice: NarratorChoice, texts: list[str], settings: Settings, kokoro_voice: str | None = None):
-    """Narrate every scene with one voice. If the paid API fails part-way, redo the whole video with the
-    backup so voices are never mixed. Returns (narrations, final_choice)."""
+    """Narrate every scene with one voice. Gemini (locked voice): any failure raises VoiceUnavailable and the
+    video is held (scenes already synthesized are cached, so the retry doesn't pay for them twice).
+    Development providers only: if the paid API fails part-way, the whole video is redone with Kokoro.
+    Returns (narrations, final_choice)."""
     try:
         return [choice.narrator.narrate(t) for t in texts], choice
     except PaidTTSError as exc:
-        if choice.provider == "kokoro":
+        if choice.provider in ("kokoro", "gemini_tts"):
             raise
         log.warning("paid TTS failed (%s); using Kokoro backup for the whole video", exc)
         backup = kokoro_choice(settings, kokoro_voice, f"paid TTS error: {exc}")

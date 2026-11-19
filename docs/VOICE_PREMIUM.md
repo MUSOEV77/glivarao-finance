@@ -1,5 +1,8 @@
 # GLIVARAO premium narrator: final selection (2026-11-18)
 
+> **Superseded (voice lock):** the channel voice is now locked to Gemini TTS "Charon" with no fallback voice. See `docs/VOICE.md`.
+
+
 ## Selected voice
 
 **Google Gemini TTS: model `gemini-3.8-flash-tts`, voice `Charon`, with style direction "warm, deep, confident

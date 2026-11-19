@@ -77,19 +77,28 @@ bash /opt/glivarao/app/deploy/set-key.sh ANTHROPIC_API_KEY
 bash /opt/glivarao/app/deploy/set-key.sh GEMINI_API_KEY
 ```
 
-## Step 5: switch on paid services (only when you're ready to spend)
+## Step 5: switch on paid services (needed: the channel voice is Gemini "Charon")
 
-These two lines allow Claude and Gemini to be used. Spending is capped in code at **$30/month for Claude** and
-**$20/month for the voice**. Also set spending limits in the Anthropic Console and in Google Cloud Billing.
+This line allows Claude and Gemini to be used, and locks the channel voice:
+- Spending is capped in code at **$30/month for Claude** and **$20/month for the voice**.
+- You get an alert in Telegram at 80% of the voice budget.
+- Also set spending limits in the Anthropic Console and in Google Cloud Billing.
 
 ```
-bash /opt/glivarao/app/deploy/set-key.sh ALLOW_PAID_APIS true && bash /opt/glivarao/app/deploy/set-key.sh TTS_PROVIDER gemini_tts
+bash /opt/glivarao/app/deploy/set-key.sh ALLOW_PAID_APIS true && bash /opt/glivarao/app/deploy/set-key.sh TTS_PROVIDER gemini_tts && bash /opt/glivarao/app/deploy/set-key.sh GEMINI_TTS_MODEL gemini-3.8-flash-tts && bash /opt/glivarao/app/deploy/set-key.sh GEMINI_TTS_VOICE Charon && bash /opt/glivarao/app/deploy/set-key.sh GEMINI_TTS_PACE measured
 ```
 
-To switch paid services off again at any time:
+**Switching paid services off** stops new videos until you switch them back on. Videos are put on hold, never made
+with another voice:
 
 ```
 bash /opt/glivarao/app/deploy/set-key.sh ALLOW_PAID_APIS false
+```
+
+**Check the voice lock, this month's voice spending and any videos on hold:**
+
+```
+cd /opt/glivarao/app && sudo -u glivarao .venv/bin/python -m glivarao voice-lock
 ```
 
 ## Step 6: check the setup
@@ -148,6 +157,7 @@ cd /opt/glivarao/app && sudo -u glivarao .venv/bin/python -m glivarao plan-next
 - Next topic picked and announced every evening at 17:37 New York time (when the pace allows a video).
 - Production at 04:17 New York time: 16 long videos a month (spread evenly) and 3 Shorts every day.
 - Telegram approval check every 5 minutes.
+- Videos on hold (voice unavailable) retried every hour.
 - Backup at 03:40.
 
 Check the schedule:

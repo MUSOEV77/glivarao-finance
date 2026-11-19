@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from pathlib import Path
 import logging
 import sys
 
@@ -197,6 +198,58 @@ def cmd_pack(args, s):
     if job.status not in (JobStatus.APPROVED, JobStatus.PUBLISHED):
         raise SystemExit(f"{job.id} is {job.status.value}: approve it in Telegram first")
     print(send_pack(job, s, store))
+
+
+def cmd_voice_lock(args, s):
+    """Show the locked channel voice, voice budget and held videos; --reset accepts changed voice settings."""
+    from datetime import date as _d
+
+    from .daily_v2 import held_videos
+    from .tts import voice_lock
+    from .tts.gemini_tts import SpendLedger
+
+    store = _store(s)
+    if args.reset:
+        print("voice lock reset to:", json.dumps(voice_lock.reset(s, store)))
+        return
+    saved = store.kv_get("voice_lock")
+    print(f"provider: {s.tts_provider}   model: {s.gemini_tts_model}   voice: {s.gemini_tts_voice}   "
+          f"pace: {s.gemini_tts_pace}")
+    print(f"style: {s.gemini_tts_style}")
+    print("lock:", saved or "not recorded yet (recorded on the first narration)")
+    try:
+        voice_lock.check_model(s.gemini_tts_model)
+        cur = voice_lock.fingerprint(s)
+        print("matches lock:", "yes" if not saved or json.loads(saved) == cur else "NO (videos are held; use --reset "
+                                                                                     "if the change is intentional)")
+    except voice_lock.VoiceUnavailable as exc:
+        print("PROBLEM:", exc)
+    spent = SpendLedger(Path(s.tts_spend_ledger_path)).spent(_d.today().strftime("%Y-%m"))
+    print(f"voice budget this month: ${spent:.2f} of ${s.tts_monthly_budget_usd:.2f} "
+          f"(alert at {s.tts_alert_ratio:.0%})")
+    held = held_videos(store)
+    print(f"held videos: {len(held)}" + "".join(f"\n  {k}: since {v['since']}: {v['reason']}" for k, v in held.items()))
+
+
+def cmd_retry_held(args, s):
+    """Re-render videos held because the locked voice was unavailable (systemd: hourly)."""
+    from .daily_v2 import held_videos, retry_held_videos
+
+    import fcntl
+
+    store = _store(s)
+    if not held_videos(store):
+        print("no held videos")
+        return
+    lock = Path(s.db_path).with_name("daily.lock")  # the same lock as the daily run: never render twice at once
+    with open(lock, "w") as fh:
+        try:
+            fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            print("the daily run is busy; it retries held videos itself")
+            return
+        for r in retry_held_videos(s, store, send=not args.no_telegram):
+            print(r[0], r[2], r[4] or "")
 
 
 def cmd_queue(args, s):
@@ -386,6 +439,12 @@ def main(argv=None):
     pn.add_argument("--force", action="store_true", help="plan even if no long video is due tomorrow")
     pn.set_defaults(fn=cmd_plan)
     sub.add_parser("queue", help="show the topic queue").set_defaults(fn=cmd_queue)
+    vl = sub.add_parser("voice-lock", help="show the locked voice, budget and held videos")
+    vl.add_argument("--reset", action="store_true", help="accept changed voice settings in .env as the new lock")
+    vl.set_defaults(fn=cmd_voice_lock)
+    rh = sub.add_parser("retry-held", help="re-render videos held because the voice was unavailable")
+    rh.add_argument("--no-telegram", action="store_true")
+    rh.set_defaults(fn=cmd_retry_held)
     pk = sub.add_parser("pack", help="send the upload pack of an approved video to Telegram (uploads nothing)")
     pk.add_argument("job_id")
     pk.set_defaults(fn=cmd_pack)

@@ -1,4 +1,5 @@
-"""Voice configuration: am_michael primary, approved backups only, no paid TTS without approval,
+"""Voice configuration: the channel voice is Gemini TTS "Charon" (locked, pinned model; Kokoro stays only as a
+development engine), approved Kokoro voices only, no paid TTS without approval,
 pronunciation lexicon, and mastering targets."""
 import numpy as np
 import pytest
@@ -9,10 +10,13 @@ from glivarao.tts import TTSError, synthesize
 from glivarao.tts.kokoro import APPROVED_VOICES, DEFAULT_VOICE, MODEL, KokoroEngine, VoiceNotApproved, normalize_text
 
 
-def test_primary_voice_and_backups():
-    assert DEFAULT_VOICE == "am_michael" and Settings().kokoro_voice == "am_michael"
+def test_channel_voice_is_locked_gemini_charon():
+    s = Settings()
+    assert (s.tts_provider, s.gemini_tts_voice, s.gemini_tts_model, s.gemini_tts_pace) == (
+        "gemini_tts", "Charon", "gemini-3.8-flash-tts", "measured")
+    assert s.tts_monthly_budget_usd == 20 and s.tts_alert_ratio == 0.8
+    assert DEFAULT_VOICE == "am_michael" and s.kokoro_voice == "am_michael"   # development engine only
     assert APPROVED_VOICES == {"am_michael": "primary", "am_fenrir": "backup", "am_puck": "backup"}
-    assert Settings().tts_provider == "kokoro"
 
 
 def test_unapproved_voice_refused():

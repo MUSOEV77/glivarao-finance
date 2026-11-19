@@ -143,15 +143,15 @@ def _originality_gate(script, brief, today, history, settings, paid, used, regen
 
 def run_daily_v2(settings: Settings, store: JobStore, today: date | None = None, research_dir: Path | None = None,
                  send: bool = True, workers: int | None = None, shorts: int | None = None) -> DailyResult:
-    from .render.animated import render_animated
-    from .render.thumbnail_editorial import make_thumbnail
     from .research.run import run_research
-    from .studio import disclosure, factcheck, originality
+    from .studio import factcheck, originality
     from .studio.bot import format_history, push_format
     from .studio.formats import FORMATS, choose_format
     from .studio.queue import TopicQueue
 
     today = today or date.today()
+    if held_videos(store):  # videos held for the voice go first (they are already scripted and approved by checks)
+        retry_held_videos(settings, store, send=send, workers=workers)
     shorts = settings.shorts_per_day if shorts is None else shorts
     research_dir = research_dir or Path("reports/research")
     cached = research_dir / f"{today.isoformat()}.json"
@@ -281,71 +281,14 @@ def run_daily_v2(settings: Settings, store: JobStore, today: date | None = None,
             store.transition(job, JobStatus.REJECTED_COMPLIANCE, report_c.summary()[:500])
             result.jobs.append((job.id, script.format, "rejected_compliance", None, report_c.errors[0]))
             continue
-        try:
-            res = _render_with_retry(render_animated, script, out, settings, workers)
-            disc = disclosure.disclosure_for(res.voice)
-            desc = factcheck.add_sources_to_description(script.description, claims)
-            desc = disclosure.add_note(desc, disc)
-            from .content.packaging import add_affiliate_disclosure, title_options
-            from .studio.pillars import pillar_of, series_for
+        ctx = {"writer": writer, "creator": creator, "item_id": item.id if item is not None else None, "card": card,
+               "date": today.isoformat(), "compliance": report_c.summary(),
+               "sim": {"summary": sim.summary(), "phrase_overlap": sim.phrase_overlap,
+                       "structure_ratio": sim.structure_ratio}}
+        result.jobs.append(render_and_review(job, script, brief, claims, ctx, settings, store, send, workers,
+                                             report=report, item=item))
 
-            desc = add_affiliate_disclosure(desc, settings.affiliate_disclosure)
-            script = script.model_copy(update={"description": finalize_description(
-                desc, [s.heading for s in script.scenes], res.scene_starts or [], script.format == "long")})
-            Path(job.script_path).write_text(script.model_dump_json(indent=2))
-            thumb = make_thumbnail(script, out / "thumbnail.jpg", portrait=script.format == "short",
-                                   theme=getattr(settings, "theme", "editorial"))
-            (out / "metadata.json").write_text(json.dumps(
-                {"title": script.title, "title_options": title_options(brief, script),
-                 "description": script.description, "tags": script.tags,
-                 "topic_key": brief.topic_key, "category": brief.category, "market": brief.market,
-                 "pillar": getattr(pillar_of(brief.topic_key), "key", None),
-                 "series": series_for(brief.topic_key, today),
-                 "format": script.style, "creator_input": creator, "picked_by_you": item is not None,
-                 "research_score": brief.score, "confidence": brief.confidence, "writer": writer,
-                 "voice": res.voice, "render_seconds": round(res.render_seconds, 1),
-                 "youtube_altered_content": disc.youtube_altered_content, "disclosure": disc.reasons,
-                 "fact_check": {s: sum(c.status == s for c in claims)
-                                for s in ("source", "calculation", "reference", "creator", "UNSOURCED")},
-                 "originality": {"phrase_overlap": round(sim.phrase_overlap, 3),
-                                 "structure_similarity": round(sim.structure_ratio, 3)},
-                 "pronunciation_misses": res.unknown_words}, indent=2))
-            job.video_path, job.subtitles_path = str(res.video), str(res.srt)
-            job.thumbnail_path, job.duration_sec = str(thumb), round(res.duration, 2)
-            store.transition(job, JobStatus.RENDERED, f"{res.duration:.1f}s in {res.render_seconds:.0f}s")
-            originality.record(store, script, brief.topic_key, today)
-        except Exception as exc:  # one failed render must not stop the other videos
-            log.exception("render failed for %s", job.id)
-            job = store.get(job.id)
-            if JobStatus.FAILED in ALLOWED[job.status]:
-                store.transition(job, JobStatus.FAILED, f"{type(exc).__name__}: {exc}"[:500])
-            result.jobs.append((job.id, script.format, "failed", None, str(exc)[:200]))
-            continue
-
-        note = ""
-        if send and settings.telegram_bot_token and settings.telegram_approver_chat_id:
-            from .publish.telegram import request_approval
-
-            why_md = out / "why_this_topic.md"
-            why_md.write_text(_why_card(brief, report, item))
-            preview = None
-            if script.format == "long":
-                from .render.video import preview_clip
-
-                preview = preview_clip(res.video, out / "preview.mp4")
-            checks = "\n\n".join([_topic_block(brief, item, script, store, today), report_c.summary(), sim.summary(),
-                                   factcheck.report(claims), disc.review_text()])
-            request_approval(job, store, settings, script, checks, preview=preview,
-                             attachments=[(why_md, "Why this topic (research evidence)"),
-                                          (out / "fact_check.md", "Fact check: every number and its source"),
-                                          (out / "fact_sheet.md", "Fact sheet (sources and calculations)")])
-            note = "sent to Telegram"
-        elif send:
-            note = "Telegram not configured: review files in the output folder"
-        job = store.get(job.id)
-        result.jobs.append((job.id, script.format, job.status.value, job.video_path, note))
-
-    produced = [j for j in result.jobs if j[2] in ("rendered", "pending_approval")]
+    produced = [j for j in result.jobs if j[2] in ("rendered", "pending_approval", "held")]  # held = made later
     if any(j[1] == "long" for j in produced):
         dates = json.loads(store.kv_get("long_dates", "[]")) + [today.isoformat()]
         store.kv_set("long_dates", json.dumps(dates[-200:]))
@@ -355,10 +298,187 @@ def run_daily_v2(settings: Settings, store: JobStore, today: date | None = None,
     return result
 
 
+class _Sim:  # originality summary as saved for a held (voice-delayed) video
+    def __init__(self, d: dict):
+        self._s, self.phrase_overlap, self.structure_ratio = d["summary"], d["phrase_overlap"], d["structure_ratio"]
+
+    def summary(self) -> str:
+        return self._s
+
+
+def render_and_review(job, script, brief, claims, ctx: dict, settings: Settings, store: JobStore, send: bool,
+                      workers: int | None, report: dict | None = None, item=None) -> tuple:
+    """Render one scripted video and send it for review. If the locked voice is unavailable (Gemini error after
+    retries, budget cap, paid voice off), the video is HELD: it stays scripted, is re-rendered later by
+    retry_held_videos(), and you get a Telegram alert. Never falls back to another voice."""
+    from .render.animated import render_animated
+    from .render.thumbnail_editorial import make_thumbnail
+    from .studio import disclosure, factcheck, originality
+    from .tts.voice_lock import VoiceUnavailable
+
+    out = settings.output_dir / job.id
+    today = date.fromisoformat(ctx["date"])
+    creator, writer, sim = ctx["creator"], ctx["writer"], _Sim(ctx["sim"])
+    try:
+        res = _render_with_retry(render_animated, script, out, settings, workers)
+        disc = disclosure.disclosure_for(res.voice)
+        desc = factcheck.add_sources_to_description(script.description, claims)
+        desc = disclosure.add_note(desc, disc)
+        from .content.packaging import add_affiliate_disclosure, title_options
+        from .studio.pillars import pillar_of, series_for
+
+        desc = add_affiliate_disclosure(desc, settings.affiliate_disclosure)
+        script = script.model_copy(update={"description": finalize_description(
+            desc, [s.heading for s in script.scenes], res.scene_starts or [], script.format == "long")})
+        Path(job.script_path).write_text(script.model_dump_json(indent=2))
+        thumb = make_thumbnail(script, out / "thumbnail.jpg", portrait=script.format == "short",
+                               theme=getattr(settings, "theme", "editorial"))
+        (out / "metadata.json").write_text(json.dumps(
+            {"title": script.title, "title_options": title_options(brief, script),
+             "description": script.description, "tags": script.tags,
+             "topic_key": brief.topic_key, "category": brief.category, "market": brief.market,
+             "pillar": getattr(pillar_of(brief.topic_key), "key", None),
+             "series": series_for(brief.topic_key, today),
+             "format": script.style, "creator_input": creator, "picked_by_you": item is not None,
+             "research_score": brief.score, "confidence": brief.confidence, "writer": writer,
+             "voice": res.voice, "render_seconds": round(res.render_seconds, 1),
+             "youtube_altered_content": disc.youtube_altered_content, "disclosure": disc.reasons,
+             "fact_check": {s: sum(c.status == s for c in claims)
+                            for s in ("source", "calculation", "reference", "creator", "UNSOURCED")},
+             "originality": {"phrase_overlap": round(sim.phrase_overlap, 3),
+                             "structure_similarity": round(sim.structure_ratio, 3)},
+             "pronunciation_misses": res.unknown_words}, indent=2))
+        job.video_path, job.subtitles_path = str(res.video), str(res.srt)
+        job.thumbnail_path, job.duration_sec = str(thumb), round(res.duration, 2)
+        store.transition(job, JobStatus.RENDERED, f"{res.duration:.1f}s in {res.render_seconds:.0f}s")
+        originality.record(store, script, brief.topic_key, today)
+        _release_held(store, job.id)
+    except VoiceUnavailable as exc:  # hold the video; no other voice is ever used
+        log.warning("voice unavailable for %s: %s", job.id, exc)
+        (out / "held_render.json").write_text(json.dumps(ctx, indent=2))
+        first = _hold(store, job.id, str(exc))
+        if first and send:
+            _notify(settings, f"⏸ GLIVARAO: video {job.id} ({script.format}, \"{brief.topic}\") is ON HOLD: "
+                              f"{exc}\nNo other voice is used. I'll retry every hour and send the review as soon "
+                              "as the Charon voice works again. Your buffer of approved videos covers the schedule.")
+        return (job.id, script.format, "held", None, str(exc)[:200])
+    except Exception as exc:  # one failed render must not stop the other videos
+        log.exception("render failed for %s", job.id)
+        job = store.get(job.id)
+        if JobStatus.FAILED in ALLOWED[job.status]:
+            store.transition(job, JobStatus.FAILED, f"{type(exc).__name__}: {exc}"[:500])
+        return (job.id, script.format, "failed", None, str(exc)[:200])
+    finally:
+        _budget_alert(settings, store, send)
+
+    note = ""
+    if send and settings.telegram_bot_token and settings.telegram_approver_chat_id:
+        from .publish.telegram import request_approval
+
+        why_md = out / "why_this_topic.md"
+        why_md.write_text(_why_card(brief, report or {"ranked": []}, item))
+        preview = None
+        if script.format == "long":
+            from .render.video import preview_clip
+
+            preview = preview_clip(res.video, out / "preview.mp4")
+        checks = "\n\n".join([_topic_block(brief, item, script, store, today), ctx["compliance"], sim.summary(),
+                               factcheck.report(claims), disc.review_text()])
+        request_approval(job, store, settings, script, checks, preview=preview,
+                         attachments=[(why_md, "Why this topic (research evidence)"),
+                                      (out / "fact_check.md", "Fact check: every number and its source"),
+                                      (out / "fact_sheet.md", "Fact sheet (sources and calculations)")])
+        note = "sent to Telegram"
+    elif send:
+        note = "Telegram not configured: review files in the output folder"
+    job = store.get(job.id)
+    return (job.id, script.format, job.status.value, job.video_path, note)
+
+
+# ------------------------------------------------------------------------------------- held videos (voice)
+def held_videos(store: JobStore) -> dict:
+    return json.loads(store.kv_get("voice_held", "{}"))
+
+
+def _hold(store: JobStore, job_id: str, reason: str) -> bool:
+    """Returns True the first time a video is held (so you get one alert, not one per retry)."""
+    held = held_videos(store)
+    first = job_id not in held
+    held[job_id] = {"since": held.get(job_id, {}).get("since") or date.today().isoformat(), "reason": reason[:300]}
+    store.kv_set("voice_held", json.dumps(held))
+    return first
+
+
+def _release_held(store: JobStore, job_id: str) -> None:
+    held = held_videos(store)
+    if held.pop(job_id, None) is not None:
+        store.kv_set("voice_held", json.dumps(held))
+
+
+def retry_held_videos(settings: Settings, store: JobStore, send: bool = True, workers: int | None = None) -> list:
+    """Re-render videos held because the voice was unavailable (systemd: hourly, and before every daily run)."""
+    from .content.brief import build_brief
+    from .models import Script
+    from .studio import factcheck
+    from .studio.queue import TopicQueue
+
+    done = []
+    for job_id in list(held_videos(store)):
+        try:
+            job = store.get(job_id)
+        except KeyError:
+            _release_held(store, job_id)
+            continue
+        if job.status != JobStatus.SCRIPTED:
+            _release_held(store, job_id)
+            continue
+        out = settings.output_dir / job.id
+        ctx = json.loads((out / "held_render.json").read_text())
+        brief = build_brief(ctx["card"], date.fromisoformat(ctx["date"]))  # same inputs -> the same brief
+        script = Script.model_validate_json(Path(job.script_path).read_text())
+        claims = factcheck.check_claims(script, brief, ctx["creator"])
+        item = TopicQueue(store).get(ctx["item_id"]) if ctx.get("item_id") else None
+        cached = Path("reports/research") / f"{ctx['date']}.json"
+        report = json.loads(cached.read_text()) if cached.exists() else None
+        r = render_and_review(job, script, brief, claims, ctx, settings, store, send, workers, report, item)
+        done.append(r)
+        if r[2] == "held":
+            break  # the voice is still down: don't hammer the API with the rest
+        if send:
+            _notify(settings, f"▶️ GLIVARAO: held video {job.id} (\"{brief.topic}\") rendered with the Charon voice; "
+                              "the review is in Telegram.")
+    return done
+
+
+def _budget_alert(settings: Settings, store: JobStore, send: bool) -> None:
+    """One Telegram alert per month at 80% of the voice budget, and one when the cap is reached."""
+    if settings.tts_provider != "gemini_tts":
+        return
+    from .tts.gemini_tts import SpendLedger
+
+    month = date.today().strftime("%Y-%m")
+    spent, cap = SpendLedger(Path(settings.tts_spend_ledger_path)).spent(month), settings.tts_monthly_budget_usd
+    if cap <= 0:
+        return
+    level = 100 if spent >= cap * 0.995 else (80 if spent >= cap * settings.tts_alert_ratio else 0)
+    key = f"tts_budget_alert:{month}"
+    if level and int(store.kv_get(key, "0")) < level:
+        store.kv_set(key, str(level))
+        if send:
+            _notify(settings, f"💰 GLIVARAO voice budget: ${spent:.2f} of ${cap:.2f} used this month ({spent / cap:.0%})."
+                    + (" The cap is reached: new videos are held until next month (no other voice is used)."
+                       if level == 100 else " Videos continue; the hard cap stops paid voice use at 100%."))
+
+
 def _render_with_retry(render_animated, script, out, settings, workers):
-    """One retry with a single worker: the usual cause of a failed render is memory pressure or a crashed worker."""
+    """One retry with a single worker: the usual cause of a failed render is memory pressure or a crashed worker.
+    A voice outage is not retried here (the voice client already retried with backoff); the video is held."""
+    from .tts.voice_lock import VoiceUnavailable
+
     try:
         return render_animated(script, out, settings, workers=workers)
+    except VoiceUnavailable:
+        raise
     except Exception as exc:
         log.warning("render failed (%s: %s); retrying once with 1 worker", type(exc).__name__, exc)
         return render_animated(script, out, settings, workers=1)

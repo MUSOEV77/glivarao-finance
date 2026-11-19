@@ -52,7 +52,7 @@ Edit it with `sudo -u glivarao nano /opt/glivarao/app/.env`. Never paste keys in
 |---|---|---|
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_APPROVER_CHAT_ID` | Review package and approve/reject | **Yes** |
 | `ANTHROPIC_API_KEY` + `ALLOW_PAID_APIS=true` | **15–18 min long scripts** (Claude writer; capped by `CLAUDE_MONTHLY_BUDGET_USD=30`) | Yes, for full-length videos. Without it, the long video is ~3.6 min |
-| `GEMINI_API_KEY` + `TTS_PROVIDER=gemini_tts` | Premium Charon voice (capped at `TTS_MONTHLY_BUDGET_USD=20`) | Optional (Kokoro is used otherwise) |
+| `GEMINI_API_KEY` + `TTS_PROVIDER=gemini_tts` + `ALLOW_PAID_APIS=true` | The channel voice, Charon (locked; capped at `TTS_MONTHLY_BUDGET_USD=20`, alert at 80%) | **Required**: without it videos are held, never made with another voice |
 | `YOUTUBE_CLIENT_SECRETS_FILE` (file in `secrets/`) | Manual private upload and analytics only | Optional |
 | `YOUTUBE_PUBLISH_ENABLED` | Leave **false** | — |
 

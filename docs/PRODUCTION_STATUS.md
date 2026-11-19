@@ -22,7 +22,7 @@
 | Backups | `backup.sh` → tar.gz with an integrity-checked DB copy plus the spend ledgers (never `.env`). `restore.sh` round-trip tested |
 | Logging | Timestamped `logs/daily.log`, rotated by logrotate |
 | Claude spend guard and length revision | Monthly USD cap checked before every request. Real usage (including cache tokens) recorded. A draft outside 2,200–2,800 words gets one revision instead of being discarded. Claude descriptions get chapters, sources and the disclaimer. **Tested with a simulated SDK only** |
-| Gemini Charon voice: code paths | Request format, spend ledger, cache, $20 cap, fallback to Flash-Lite and then Kokoro. **Simulated HTTP only** |
+| Gemini Charon voice (locked, no fallback): code paths | Pinned model `gemini-3.8-flash-tts`, voice/pace/style locked, retries with backoff, videos held and retried hourly, $20 cap with an 80% alert (`docs/VOICE.md`). **Simulated HTTP only** |
 
 ## 🟡 Partially completed
 

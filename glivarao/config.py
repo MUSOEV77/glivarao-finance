@@ -54,7 +54,7 @@ class Settings:
     claude_spend_ledger_path: str = field(default_factory=lambda: _env("CLAUDE_SPEND_LEDGER_PATH",
                                                                        "data/claude_spend.json"))
 
-    tts_provider: str = field(default_factory=lambda: _env("TTS_PROVIDER", "kokoro"))
+    tts_provider: str = field(default_factory=lambda: _env("TTS_PROVIDER", "gemini_tts"))
     kokoro_voice: str = field(default_factory=lambda: _env("KOKORO_VOICE", "am_michael"))
     renderer: str = field(default_factory=lambda: _env("GLIVARAO_RENDERER", "v1"))
     # Visual theme of the animated (v2) renderer: "editorial" (premium documentary, default) or "cartoon".
@@ -93,12 +93,18 @@ class Settings:
     tts_free_chars_per_month: int = field(default_factory=lambda: int(_env("TTS_FREE_CHARS_PER_MONTH", "0")))
     # Gemini TTS (selected premium voice). Prices default to the HIGHER reported rates (conservative cap).
     gemini_api_key: str = field(default_factory=lambda: _env("GEMINI_API_KEY"))
+    # The channel voice is LOCKED (tts/voice_lock.py): pinned model, Charon, fixed pace and style. No fallback.
     gemini_tts_model: str = field(default_factory=lambda: _env("GEMINI_TTS_MODEL", "gemini-3.8-flash-tts"))
-    gemini_tts_fallback_model: str = field(default_factory=lambda: _env("GEMINI_TTS_FALLBACK_MODEL",
-                                                                        "gemini-3.8-flash-lite-tts"))
     gemini_tts_voice: str = field(default_factory=lambda: _env("GEMINI_TTS_VOICE", "Charon"))
+    gemini_tts_pace: str = field(default_factory=lambda: _env("GEMINI_TTS_PACE", "measured"))
+    gemini_tts_style: str = field(default_factory=lambda: _env(
+        "GEMINI_TTS_STYLE", "Narrate as a warm, deep, confident American male documentary narrator explaining "
+        "personal finance. Clear numbers and money amounts; subtle emphasis on key figures; trustworthy, never "
+        "theatrical."))
+    gemini_tts_retries: int = field(default_factory=lambda: int(_env("GEMINI_TTS_RETRIES", "5")))
+    gemini_tts_backoff_sec: float = field(default_factory=lambda: float(_env("GEMINI_TTS_BACKOFF_SEC", "5")))
+    tts_alert_ratio: float = field(default_factory=lambda: float(_env("TTS_ALERT_RATIO", "0.8")))
     gemini_tts_price: float = field(default_factory=lambda: float(_env("GEMINI_TTS_PRICE_PER_M_AUDIO", "18")))
-    gemini_tts_fallback_price: float = field(default_factory=lambda: float(_env("GEMINI_TTS_FALLBACK_PRICE_PER_M_AUDIO", "12")))
     gemini_tts_tokens_per_sec: float = field(default_factory=lambda: float(_env("GEMINI_TTS_TOKENS_PER_SEC", "32")))
     tts_spend_ledger_path: str = field(default_factory=lambda: _env("TTS_SPEND_LEDGER_PATH", "data/tts_spend.json"))
     tts_cache_dir: str = field(default_factory=lambda: _env("TTS_CACHE_DIR", "data/tts_cache"))

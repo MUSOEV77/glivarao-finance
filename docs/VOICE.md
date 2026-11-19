@@ -1,55 +1,50 @@
-# GLIVARAO narration voice
+# The channel voice (locked): Gemini TTS "Charon"
 
-**Primary narrator (owner-approved 2026-11-18): Kokoro `am_michael`.** An American English male voice that
-runs locally on the server: free, no API key, Apache-2.0 licence. It narrates every long video and every
-Short, so the channel always has the same voice.
+Every GLIVARAO video, long and Short, is narrated by **one voice**: Google Gemini TTS, prebuilt voice
+**Charon**. There is **no fallback voice**: if Charon can't be used, the video waits instead.
 
-| Setting | Value | Where |
+## What is locked (in `.env` on the VPS)
+
+| Setting | Value | Why |
 |---|---|---|
-| Provider | `TTS_PROVIDER=kokoro` (default) | `.env` |
-| Voice | `KOKORO_VOICE=am_michael` (default) | `.env` |
-| Approved backups | `am_fenrir`, `am_puck` (backup only; any other voice is refused in code) | `glivarao/tts/kokoro.py` → `APPROVED_VOICES` |
-| Pace | speed 0.98 (≈133 wpm average including pauses; faster within sentences) | `DEFAULT_SPEED` |
-| Pauses | sentence 0.42 s · question 0.55 s · emphasis +0.12 s · paragraph break +0.30 s | `KokoroEngine.narrate` |
-| Emphasis | wrap words in `*asterisks*` in scripts: slightly slower delivery and a longer pause | scripts |
-| Paid voices | ElevenLabs / Google refused unless `ALLOW_PAID_APIS=true` (owner approval) | `glivarao/tts/__init__.py` |
-| Placeholder voices | espeak and silent refused in production mode | `glivarao/tts/__init__.py` |
+| `TTS_PROVIDER` | `gemini_tts` | the only channel voice |
+| `GEMINI_TTS_MODEL` | `gemini-3.8-flash-tts` | Google's **stable** TTS model ID, pinned. Names containing "latest", "preview" or "exp" are refused, because those aliases can point to a new model (and a different sound) without notice |
+| `GEMINI_TTS_VOICE` | `Charon` | the narrator |
+| `GEMINI_TTS_PACE` | `measured` | Gemini has no numeric speed setting; the pace is part of the fixed direction prompt (`slow`, `measured`, `brisk`) |
+| `GEMINI_TTS_STYLE` | warm, deep, confident documentary narrator (built-in default) | the delivery style |
 
-## Pronunciation
+**Changes are blocked.** The first narration records a fingerprint of these settings. If any of them changes
+later, nothing is narrated: the videos go on hold, and Telegram tells you what changed. If you really mean to
+change the voice settings, confirm on the server:
 
-Pronunciation comes from misaki, Kokoro's own dictionary (espeak is not used). It is backed by:
-- a **finance text normalizer**: 401(k), 403(b), 529, S&P 500, W-2, 1099, YoY, fractions, US, $K/$M/$B, and
-  number ranges;
-- an **explicit lexicon** for words the dictionary misses or misreads: GLIVARAO, Roth, FICO, HELOC, FINRA,
-  Equifax, Experian, Zelle, Venmo, Interac, Klarna, Afterpay, Schwab, Wealthsimple, Questrade, Robinhood,
-  Nasdaq, Vanguard, annuity and amortization.
+```
+cd /opt/glivarao/app && sudo -u glivarao .venv/bin/python -m glivarao voice-lock --reset
+```
 
-An audit of about 60 finance terms (acronyms, brands, dollar amounts, percentages, years, ranges) showed no
-words falling back to guesswork. Any new word the dictionary doesn't know is listed in each video's
-`metadata.json` (`pronunciation_misses`) for review.
+## If Gemini fails
 
-**Brand name.** "GLIVARAO" is currently pronounced **"gli-VAR-oh"** (`ɡlɪvˈɑɹO`). This awaits owner
-confirmation. To change it, edit `LEXICON["glivarao"]`.
+1. **Temporary errors** (network, rate limit, Google server errors) are retried with backoff: 5, 10, 20, 40 and
+   80 seconds. When Google says how long to wait, that wait is used.
+2. **Still failing,** or a permanent error (key rejected, model retired, billing off), or the monthly cap is
+   reached: the video is **put on hold**.
+   - It stays scripted and checked.
+   - You get one Telegram alert (⏸ ON HOLD) with the reason.
+   - Nothing is made with another voice.
+3. Videos on hold are **retried every hour**, and before every daily run. When Charon works again, the review
+   arrives as usual, with a ▶️ message.
+4. Scenes already narrated are cached, so a retry never pays twice for the same audio.
+5. Your buffer of approved, scheduled videos covers the schedule while a video is on hold.
 
-## Audio chain
+## Budget: $20 a month, alert at 80%
 
-1. **Narrator voice processing:**
-   - 75 Hz high-pass (removes rumble);
-   - +1.5 dB at 160 Hz (warmth);
-   - −1.5 dB at 380 Hz (less boxy);
-   - +1.8 dB at 3.2 kHz (presence);
-   - a de-esser;
-   - gentle 2.5:1 compression.
-2. **Music bed:** original, synthesized in code. It sits about 14 dB under the voice and ducks a further
-   ~8 dB while the narrator speaks.
-3. **Sound effects:** synthesized in code, cued to animation events.
-4. **Master:** −14 LUFS integrated, true peak capped at −1.5 dBTP. Float processing with 4× oversampled
-   limiting means nothing clips.
+- **Before every video,** the whole video's cost is estimated at conservative rates ($18 per 1M audio tokens and
+  32 tokens per second). If it would pass $20 this month, the video goes on hold.
+- **Actual spend** is recorded from Google's own usage numbers.
+- **Telegram alerts:** one at **80%** ($16), and one when the cap is reached. At the cap, videos stay on hold until
+  the next month starts.
+- **Expected spend at 16 long + 90 Shorts a month:** about 5.5 hours of narration, roughly $9–11 a month at the
+  2027 price. That leaves room for re-renders.
+- **Prices:** third-party sources report $9 per 1M audio tokens in 2026 and $18 from January 2027. The cap
+  already uses $18. Check Google's pricing page once and update `GEMINI_TTS_PRICE_PER_M_AUDIO` if it differs.
 
-## Approval sample
-
-`python -m glivarao voice-sample` renders `config/samples/voice_sample_60s.txt`, a real finance script whose
-claims are sourced in `config/samples/voice_sample_60s.sources.md`.
-
-Result: 62.6 s · −14.2 LUFS · −2.0 dBTP · 0 clipped samples · voice 14.2 dB above the music · 0
-pronunciation misses.
+`voice-lock` (command above) shows the lock, this month's spending and any videos on hold.
