@@ -27,6 +27,13 @@ cd "$APP_DIR"
 mkdir -p secrets data output logs reports models/kokoro
 chown -R glivarao:glivarao /opt/glivarao
 chmod 700 secrets
+find secrets -type f -exec chmod 600 {} + 2>/dev/null || true   # keys: owner-only
+[ -f .env ] && chmod 600 .env
+# record exactly which version is installed (deploy/update.sh compares against this, not against git pull)
+if git -C "$SRC_DIR" rev-parse HEAD >/dev/null 2>&1; then
+  git -C "$SRC_DIR" rev-parse HEAD > "$APP_DIR/.deployed_commit"
+  chown glivarao:glivarao "$APP_DIR/.deployed_commit"
+fi
 
 echo "==> python environment"
 sudo -u glivarao python3 -m venv .venv
@@ -66,4 +73,4 @@ if [ "$SKIP_SYSTEMD" != "1" ]; then
     glivarao-voice-retry.timer
   systemctl list-timers 'glivarao-*' --no-pager
 fi
-echo "Done. Nothing is ever uploaded automatically. Manual upload: sudo -u glivarao $APP_DIR/.venv/bin/python -m glivarao publish <job_id>"
+echo "Done. Installed $(cat "$APP_DIR/.deployed_commit" 2>/dev/null | cut -c1-8). Nothing is ever uploaded automatically."

@@ -9,14 +9,14 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
 
 from .compliance import check_script
 from .config import Settings
-from .content.brief import build_brief, pick_card
+from .content.brief import build_brief
 from .content.packaging import finalize_description
-from .content.writer import paid_writer_allowed, write_long_free, write_shorts_free, write_with_claude
+from .content.writer import paid_writer_allowed, write_with_claude
 from .models import JobStatus, Script
 from .research.finance_filter import gate
 from .storage import ALLOWED, JobStore
@@ -34,16 +34,6 @@ class DailyResult:
     note: str = ""            # why nothing was produced (pace, waiting for your input)
 
 
-def _used_topics(store: JobStore, today: date) -> set[str]:
-    hist = json.loads(store.kv_get("used_topics", "[]"))
-    cutoff = (today - timedelta(days=REPEAT_WINDOW_DAYS)).isoformat()
-    return {h[1] for h in hist if h[0] >= cutoff}  # entries: [date, topic_key] or [date, topic_key, category]
-
-
-def _recent_categories(store: JobStore, today: date, days: int = 7) -> list[str]:
-    hist = json.loads(store.kv_get("used_topics", "[]"))
-    cutoff = (today - timedelta(days=days)).isoformat()
-    return [h[2] for h in hist if len(h) > 2 and h[0] > cutoff]
 
 
 def _mark_used(store: JobStore, today: date, topic_key: str, category: str = "", family: str = "", angle: str = "",
@@ -219,6 +209,12 @@ def run_daily_v2(settings: Settings, store: JobStore, today: date | None = None,
             lambda k: _write_long(brief, style if k < 2 else choose_format(brief, [style]), creator, used, paid,
                                   settings, variant=k))
         drafts = [(long_script, long_sim)]
+        if paid:  # which backend actually wrote it (Claude on Vertex / Anthropic API, or the Gemini fallback)
+            from .scriptgen.claude import LAST_WRITER
+
+            if LAST_WRITER.get("name"):
+                writer = LAST_WRITER["name"] + (f" — Claude failed: {LAST_WRITER['note'][:120]}"
+                                                if LAST_WRITER.get("note") else "")
     lead_style = long_script.style if long_script is not None else style
     lead_hook = long_script.hook if long_script is not None else ""
     # Shorts are checked against past videos and each other. Sharing a line with their own companion long video
@@ -411,7 +407,7 @@ def render_and_review(job, script, brief, claims, ctx: dict, settings: Settings,
             from .render.video import preview_clip
 
             preview = preview_clip(res.video, out / "preview.mp4")
-        checks = "\n\n".join([_topic_block(brief, item, script, store, today), ctx["compliance"], sim.summary(),
+        checks = "\n\n".join([_topic_block(brief, item, script, store, today, writer), ctx["compliance"], sim.summary(),
                                factcheck.report(claims), disc.review_text()])
         attachments = [(why_md, "Why this topic (research evidence)"),
                        (out / "fact_check.md", "Fact check: every number and its source"),
@@ -425,8 +421,16 @@ def render_and_review(job, script, brief, claims, ctx: dict, settings: Settings,
                                                "attachments": [[str(p), cap] for p, cap in attachments]})
             note = f"review queued until {settings.quiet_end} ({settings.local_tz})"
         else:
-            request_approval(job, store, settings, script, checks, preview=preview, attachments=attachments)
-            note = "sent to Telegram"
+            try:
+                request_approval(job, store, settings, script, checks, preview=preview, attachments=attachments)
+                note = "sent to Telegram"
+            except Exception as exc:  # noqa: BLE001  never re-produce a finished video because Telegram hiccuped
+                log.warning("review for %s not sent (%s); queued for the next poll", job.id, exc)
+                (out / "review_checks.txt").write_text(checks)
+                quiet.queue_review(store, job.id, {"checks": str(out / "review_checks.txt"),
+                                                   "preview": str(preview) if preview else "",
+                                                   "attachments": [[str(p), cap] for p, cap in attachments]})
+                note = "review queued (Telegram error); the 5-minute poll will deliver it"
     elif send:
         note = "Telegram not configured: review files in the output folder"
     job = store.get(job.id)
@@ -587,7 +591,7 @@ def _notify(settings: Settings, text: str) -> None:
         log.exception("could not send Telegram alert")
 
 
-def _topic_block(brief, item, script, store=None, today: date | None = None) -> str:
+def _topic_block(brief, item, script, store=None, today: date | None = None, writer: str = "") -> str:
     """First thing in the review message: what the topic is and why it was picked."""
     from .studio.formats import FORMATS
     from .studio.pillars import pillar_of, series_for
@@ -605,6 +609,8 @@ def _topic_block(brief, item, script, store=None, today: date | None = None) -> 
     lines += [f"• {w}" for w in ((item.why if item is not None and item.why else brief.why)[:8])]
     take = (item.creator_input if item is not None else "") or ""
     lines.append(f"YOUR TAKE: \"{take[:300]}\"" if take else "YOUR TAKE: none received (made without \"My take\")")
+    if writer:
+        lines.append(f"WRITER: {writer}")
     lines.append("Don't like the topic? Tap ❌ Reject: the whole video is discarded and nothing is uploaded.")
     return "\n".join(lines)
 

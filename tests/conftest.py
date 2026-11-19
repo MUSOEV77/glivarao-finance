@@ -10,7 +10,9 @@ def settings(tmp_path):
                     tts_provider="silent", anthropic_api_key="", telegram_bot_token="",
                     telegram_approver_chat_id="", youtube_publish_enabled=False,
                     youtube_client_secrets_file=tmp_path / "none.json", youtube_token_file=tmp_path / "tok.json",
-                    buffer_long=0, buffer_shorts=0)  # buffer rules are tested in test_buffer_schedule.py
+                    buffer_long=0, buffer_shorts=0,  # buffer rules are tested in test_buffer_schedule.py
+                    quiet_start="00:00", quiet_end="00:00",  # no quiet hours: tests must not depend on the clock
+                    writer="claude_api")
 
 
 @pytest.fixture

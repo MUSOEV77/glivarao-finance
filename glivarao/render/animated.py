@@ -31,7 +31,7 @@ from ..art.charts import draw_chart
 from ..art.style import Ink, font, paper
 from ..config import Settings
 from ..models import Script
-from ..tts.kokoro import KOKORO_SR, Narration
+from ..tts.kokoro import KOKORO_SR
 from .subtitles import Cue, chunk_text, write_ass, write_srt
 from .video import _ffmpeg_filter_path
 

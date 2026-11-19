@@ -5,7 +5,7 @@ Titles create curiosity but must stay accurate. Every number used comes from the
 from __future__ import annotations
 
 from ..models import Script
-from .brief import Brief, topic_phrase
+from .brief import Brief
 
 DISCLAIMER = "This video is for education only and isn't financial advice."
 

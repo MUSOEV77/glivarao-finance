@@ -9,7 +9,7 @@ import pytest
 
 from glivarao.config import Settings
 from glivarao.content.packaging import finalize_description
-from glivarao.scriptgen.claude import (ClaudeBudgetExceeded, ClaudeSpendLedger, generate_with_claude,
+from glivarao.scriptgen.claude import (ClaudeSpendLedger, ScriptGenerationError, generate_with_claude,
                                        usage_cost)
 from glivarao.scriptgen.prompts import SCRIPT_SCHEMA, normalize_direction
 from glivarao.storage import JobStore
@@ -65,6 +65,7 @@ class FakeClaude:
 
 def settings(tmp_path, **kw):
     return Settings(allow_paid_apis=True, anthropic_api_key="x", claude_spend_ledger_path=str(tmp_path / "c.json"),
+                    writer="claude_api", gemini_api_key="", db_path=tmp_path / "db.sqlite3",
                     **kw)
 
 
@@ -93,7 +94,7 @@ def test_budget_blocks_request_before_any_call(tmp_path):
     s = settings(tmp_path, claude_monthly_budget_usd=1.0)
     ClaudeSpendLedger(tmp_path / "c.json").add(0.9, 0, 0)
     fake = FakeClaude([script_json(25, 100)])
-    with pytest.raises(ClaudeBudgetExceeded):
+    with pytest.raises(ScriptGenerationError, match="Claude monthly budget"):  # no Gemini key: nothing else to use
         generate_with_claude("t", "long", s, client=fake)
     assert fake.calls == []
 

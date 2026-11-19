@@ -280,7 +280,12 @@ def with_house_description(b: Brief, script: Script) -> Script:
 
 
 def paid_writer_allowed(settings: Settings) -> bool:
-    return bool(settings.allow_paid_apis and settings.anthropic_api_key)
+    """A paid writer can run: Claude (Vertex or API, per WRITER) or, failing that, the Gemini Pro fallback."""
+    if not settings.allow_paid_apis or settings.writer == "free":
+        return False
+    from ..scriptgen.backends import claude_configured
+
+    return claude_configured(settings) or bool(settings.gemini_api_key)
 
 
 __all__ = ["write_long_free", "write_shorts_free", "write_with_claude", "paid_writer_allowed"]

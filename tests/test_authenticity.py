@@ -301,10 +301,13 @@ def test_claude_prompt_carries_format_your_take_and_banned_openings(settings, tm
     from glivarao.content.writer import write_with_claude
     from tests.test_production_hardening import FakeClaude, script_json
 
+    import glivarao.scriptgen.backends as be
+
     s = replace(settings, allow_paid_apis=True, anthropic_api_key="x",
                 claude_spend_ledger_path=str(tmp_path / "c.json"))
     fake = FakeClaude([script_json(25, 100), script_json(25, 100)])
-    monkeypatch.setattr(cl.anthropic, "Anthropic", lambda api_key=None: fake)
+    monkeypatch.setattr(be, "claude_client", lambda st: (fake, "api", st.script_model, 4.0, 20.0))
+    assert cl.LAST_WRITER is not None
     out = write_with_claude(brief(), "long", s, style="myth_vs_fact", creator_text=TAKE,
                             avoid_lines=["Old opening line."])
     prompt = fake.calls[0]["messages"][0]["content"]

@@ -42,22 +42,45 @@ class TelegramClient:
         self._base = base.rstrip("/")
         self.http = session or requests.Session()
 
+    RETRIES = 3
+
     def call(self, method: str, files: dict | None = None, **params) -> dict:
+        """One Bot API call. Temporary problems (network, 429 flood control, 5xx) are retried with backoff,
+        honouring Telegram's retry_after; files are rewound before each retry."""
+        import time as _time
+
         url = f"{self._base}/bot{self._token}/{method}"
-        try:
-            if files:
-                data = {k: (json.dumps(v) if isinstance(v, (dict, list)) else v) for k, v in params.items()}
-                resp = self.http.post(url, data=data, files=files, timeout=1800)
-            else:
-                resp = self.http.post(url, json=params, timeout=60)
-            body = resp.json()
-        except (requests.RequestException, ValueError) as exc:
-            # requests puts the URL (which contains the bot token) in its messages: never re-raise it
-            raise TelegramError(f"{method} failed: {type(exc).__name__} (network/response error)") from None
-        if not body.get("ok"):
+        last = ""
+        for attempt in range(self.RETRIES + 1):
+            if attempt:
+                for f in (files or {}).values():
+                    fh = f[1] if isinstance(f, tuple) else f
+                    if hasattr(fh, "seek"):
+                        fh.seek(0)
+            try:
+                if files:
+                    data = {k: (json.dumps(v) if isinstance(v, (dict, list)) else v) for k, v in params.items()}
+                    resp = self.http.post(url, data=data, files=files, timeout=1800)
+                else:
+                    resp = self.http.post(url, json=params, timeout=60)
+                body = resp.json()
+            except (requests.RequestException, ValueError) as exc:
+                # requests puts the URL (which contains the bot token) in its messages: never re-raise it
+                last = f"{type(exc).__name__} (network/response error)"
+                if attempt < self.RETRIES and method != "getUpdates":
+                    _time.sleep(min(30, 2 * 2 ** attempt))
+                    continue
+                raise TelegramError(f"{method} failed: {last}") from None
+            if body.get("ok"):
+                return body["result"]
+            code = body.get("error_code", getattr(resp, "status_code", 0))
+            wait = (body.get("parameters") or {}).get("retry_after")
+            if (code == 429 or (isinstance(code, int) and code >= 500)) and attempt < self.RETRIES:
+                _time.sleep(min(60, float(wait or 2 * 2 ** attempt)))
+                continue
             # never include the URL (it contains the token) in errors
-            raise TelegramError(f"{method} failed: {body.get('description', resp.status_code)}")
-        return body["result"]
+            raise TelegramError(f"{method} failed: {body.get('description', code)}")
+        raise TelegramError(f"{method} failed: {last}")
 
 
     def download(self, file_path: str, dst: Path) -> Path:

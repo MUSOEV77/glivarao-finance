@@ -13,8 +13,6 @@ import logging
 from datetime import date
 from pathlib import Path
 
-import anthropic
-
 from ..config import Settings
 from ..models import Script
 from .prompts import (SCRIPT_SCHEMA, SYSTEM_PROMPT, WORDS_PER_MINUTE, normalize_direction, originality_prompt, sources_prompt,
@@ -72,34 +70,35 @@ def usage_cost(usage, price_in: float, price_out: float) -> tuple[float, int, in
     return usd, inp + cw + cr, out
 
 
-def _check_budget(settings: Settings, ledger: ClaudeSpendLedger, prompt_chars: int, fmt: str) -> None:
-    est = (prompt_chars / 3.5 + len(SYSTEM_PROMPT) / 3.5) * settings.claude_price_in / 1e6 + \
-        EST_OUTPUT_TOKENS[fmt] * settings.claude_price_out / 1e6
+def _check_budget(settings: Settings, ledger: ClaudeSpendLedger, prompt_chars: int, fmt: str,
+                  price_in: float, price_out: float) -> None:
+    est = (prompt_chars / 3.5 + len(SYSTEM_PROMPT) / 3.5) * price_in / 1e6 + EST_OUTPUT_TOKENS[fmt] * price_out / 1e6
     spent = ledger.spent()
     if spent + est > settings.claude_monthly_budget_usd:
         raise ClaudeBudgetExceeded(f"Claude monthly budget: ${spent:.2f} spent + ~${est:.2f} for this request "
                                    f"would exceed ${settings.claude_monthly_budget_usd:.2f}")
 
 
-def _request(client, settings: Settings, ledger: ClaudeSpendLedger, prompt: str, fmt: str) -> dict:
-    _check_budget(settings, ledger, len(prompt), fmt)
-    # Streaming avoids HTTP timeouts on long outputs. Server-side fallback re-runs the request on
-    # another model if the primary declines (e.g. a finance topic tripping a classifier).
-    with client.beta.messages.stream(
-        model=settings.script_model,
-        max_tokens=MAX_TOKENS,
-        betas=["server-side-fallback-2026-07-01"],
-        fallbacks="default",
-        output_config={"effort": "high", "format": {"type": "json_schema", "schema": SCRIPT_SCHEMA}},
-        system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": prompt}],
-    ) as stream:
-        message = stream.get_final_message()
+def _request(client, settings: Settings, ledger: ClaudeSpendLedger, prompt: str, fmt: str,
+             platform: str = "api", model: str | None = None, prices: tuple[float, float] | None = None) -> dict:
+    price_in, price_out = prices or (settings.claude_price_in, settings.claude_price_out)
+    _check_budget(settings, ledger, len(prompt), fmt, price_in, price_out)
+    kwargs = dict(model=model or settings.script_model, max_tokens=MAX_TOKENS,
+                  output_config={"effort": "high", "format": {"type": "json_schema", "schema": SCRIPT_SCHEMA}},
+                  system=SYSTEM_PROMPT, messages=[{"role": "user", "content": prompt}])
+    # Streaming avoids HTTP timeouts on long outputs. On the Claude API, server-side fallback re-runs a declined
+    # request on another model; Vertex has no server-side fallbacks, so there a refusal goes to the Gemini writer.
+    if platform == "api":
+        stream = client.beta.messages.stream(betas=["server-side-fallback-2026-07-01"], fallbacks="default", **kwargs)
+    else:
+        stream = client.messages.stream(**kwargs)
+    with stream as st:
+        message = st.get_final_message()
 
-    usd, tin, tout = usage_cost(message.usage, settings.claude_price_in, settings.claude_price_out)
+    usd, tin, tout = usage_cost(message.usage, price_in, price_out)
     ledger.add(usd, tin, tout)  # billed even when the output is unusable
-    log.info("Claude usage: in=%s out=%s cost=$%.3f (month: $%.2f of $%.2f)", tin, tout, usd, ledger.spent(),
-             settings.claude_monthly_budget_usd)
+    log.info("Claude (%s) usage: in=%s out=%s cost=$%.3f (month: $%.2f of $%.2f)", platform, tin, tout, usd,
+             ledger.spent(), settings.claude_monthly_budget_usd)
     if message.stop_reason == "refusal":
         raise ScriptGenerationError(f"Model declined: {getattr(message, 'stop_details', None)}")
     if message.stop_reason == "max_tokens":
@@ -111,6 +110,65 @@ def _request(client, settings: Settings, ledger: ClaudeSpendLedger, prompt: str,
         raise ScriptGenerationError(f"Invalid JSON from model: {exc}") from exc
 
 
+LAST_WRITER: dict = {"name": "", "note": ""}   # which backend wrote the most recent script (shown in the review)
+
+
+def _ask(settings: Settings, prompt: str, fmt: str, client=None, ledger: ClaudeSpendLedger | None = None) -> dict:
+    """Claude first (Vertex or Anthropic API, per WRITER); Gemini Pro automatically if Claude fails."""
+    import anthropic
+
+    from .backends import WriterUnavailable, claude_client, gemini_write
+
+    ledger = ledger or ClaudeSpendLedger(Path(settings.claude_spend_ledger_path))
+    why = ""
+    try:
+        if client is not None:  # injected (tests): treat as the configured platform
+            platform = "vertex" if settings.writer == "claude_vertex" else "api"
+            model = settings.vertex_model if platform == "vertex" else settings.script_model
+            prices = ((settings.vertex_price_in, settings.vertex_price_out) if platform == "vertex"
+                      else (settings.claude_price_in, settings.claude_price_out))
+        else:
+            client, platform, model, p_in, p_out = claude_client(settings)
+            prices = (p_in, p_out)
+        data = _request(client, settings, ledger, prompt, fmt, platform, model, prices)
+        LAST_WRITER.update(name=f"Claude {model} ({'Vertex AI' if platform == 'vertex' else 'Anthropic API'})",
+                           note="")
+        return data
+    except ClaudeBudgetExceeded as exc:
+        why = str(exc)
+    except (ScriptGenerationError, WriterUnavailable) as exc:
+        why = str(exc)
+    except anthropic.APIError as exc:  # auth, quota, outage after the SDK's own retries
+        why = f"{type(exc).__name__}: {getattr(exc, 'status_code', '')}".strip()
+    except Exception as exc:  # noqa: BLE001  e.g. google-auth token refresh failures
+        why = f"{type(exc).__name__}"
+    log.warning("Claude writer failed (%s); using the Gemini Pro fallback", why)
+    try:
+        data = gemini_write(settings, SYSTEM_PROMPT, prompt, SCRIPT_SCHEMA, fmt)
+    except WriterUnavailable as exc:
+        raise ScriptGenerationError(f"Claude failed ({why}) and the Gemini fallback failed ({exc})") from None
+    LAST_WRITER.update(name=f"Gemini {settings.gemini_writer_model} (fallback)", note=why)
+    _fallback_alert(settings, why)
+    return data
+
+
+def _fallback_alert(settings: Settings, why: str) -> None:
+    """One Telegram alert per day when the fallback writer had to step in."""
+    try:
+        from ..publish.telegram import notify
+        from ..storage import JobStore
+
+        store = JobStore(settings.db_path)
+        key = f"writer_fallback_alert:{date.today().isoformat()}"
+        if store.kv_get(key):
+            return
+        store.kv_set(key, "1")
+        notify(settings, f"✍️ GLIVARAO: the Claude writer failed ({why[:200]}); Gemini Pro wrote today's script "
+                         "instead. Check: python -m glivarao doctor --live")
+    except Exception:  # noqa: BLE001  an alert must never break production
+        log.exception("could not send the writer fallback alert")
+
+
 def _to_script(data: dict, fmt: str, topic: str) -> Script:
     data = {**data, "scenes": [normalize_direction(s) for s in data.get("scenes", [])]}
     return Script.model_validate({**data, "format": fmt, "topic": topic})
@@ -120,10 +178,8 @@ def generate_with_claude(topic: str, fmt: str, settings: Settings, minutes: floa
                          angle: str = "", client=None, ledger: ClaudeSpendLedger | None = None,
                          max_revisions: int = 1) -> Script:
     minutes = minutes or DEFAULT_MINUTES[fmt]
-    if client is None:
-        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
     ledger = ledger or ClaudeSpendLedger(Path(settings.claude_spend_ledger_path))
-    script = _to_script(_request(client, settings, ledger, user_prompt(topic, fmt, minutes, angle), fmt), fmt, topic)
+    script = _to_script(_ask(settings, user_prompt(topic, fmt, minutes, angle), fmt, client, ledger), fmt, topic)
     lo, hi = TARGET_WORDS[fmt]
     for attempt in range(max_revisions):
         n = script.word_count
@@ -132,11 +188,10 @@ def generate_with_claude(topic: str, fmt: str, settings: Settings, minutes: floa
         target = int(minutes * WORDS_PER_MINUTE)
         log.info("Claude draft has %d words (target %d-%d); requesting revision %d", n, lo, hi, attempt + 1)
         try:
-            revised = _to_script(_request(client, settings, ledger,
-                                          revise_prompt(script.model_dump_json(), fmt, n, target, lo, hi, angle),
-                                          fmt), fmt, topic)
-        except ClaudeBudgetExceeded:
-            log.warning("no budget left for a length revision; keeping the draft")
+            revised = _to_script(_ask(settings, revise_prompt(script.model_dump_json(), fmt, n, target, lo, hi, angle),
+                                      fmt, client, ledger), fmt, topic)
+        except ScriptGenerationError:
+            log.warning("no writer available for a length revision; keeping the draft")
             break
         # keep whichever draft is closer to the target range
         if abs(revised.word_count - target) < abs(n - target):
@@ -147,11 +202,8 @@ def generate_with_claude(topic: str, fmt: str, settings: Settings, minutes: floa
 def rewrite_for_originality(script: Script, reasons: list[str], phrases: list[str], settings: Settings,
                             client=None, ledger: ClaudeSpendLedger | None = None) -> Script:
     """One paid rewrite of a draft that the anti-repetition check flagged."""
-    if client is None:
-        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-    ledger = ledger or ClaudeSpendLedger(Path(settings.claude_spend_ledger_path))
-    data = _request(client, settings, ledger, originality_prompt(script.model_dump_json(), reasons, phrases,
-                                                                 script.format), script.format)
+    data = _ask(settings, originality_prompt(script.model_dump_json(), reasons, phrases, script.format),
+                script.format, client, ledger)
     out = _to_script(data, script.format, script.topic)
     return out.model_copy(update={"style": script.style})
 
@@ -159,8 +211,5 @@ def rewrite_for_originality(script: Script, reasons: list[str], phrases: list[st
 def rewrite_for_sources(script: Script, unsourced: list[str], settings: Settings, client=None,
                         ledger: ClaudeSpendLedger | None = None) -> Script:
     """One paid rewrite that removes or replaces claims without a source on the fact sheet."""
-    if client is None:
-        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-    ledger = ledger or ClaudeSpendLedger(Path(settings.claude_spend_ledger_path))
-    data = _request(client, settings, ledger, sources_prompt(script.model_dump_json(), unsourced), script.format)
+    data = _ask(settings, sources_prompt(script.model_dump_json(), unsourced), script.format, client, ledger)
     return _to_script(data, script.format, script.topic).model_copy(update={"style": script.style})

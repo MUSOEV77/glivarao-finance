@@ -28,66 +28,12 @@ def _store(settings):
 
 
 def cmd_doctor(args, s):
-    """Production checklist. Keys show as set/missing, never their values. --strict exits 1 only when the
-    installation itself is broken (used by deploy/update.sh to decide on a rollback), not for missing keys."""
-    import shutil
-    import time as _time
+    """Every key and setting (ok / MISSING / INVALID / warn); --live tests each API with a tiny real call."""
+    from .doctor import run
 
-    from .studio.health import disk_free_gb, failed_units
-    from .tts import voice_lock
-
-    broken, todo = [], []
-
-    def row(ok, name, hint="", critical=False):
-        print(f"  [{'x' if ok else ' '}] {name:44s} {'' if ok else '-> ' + hint}")
-        if not ok:
-            (broken if critical else todo).append(name)
-
-    print("GLIVARAO doctor\n\nINSTALLATION")
-    row(bool(shutil.which("ffmpeg")), "ffmpeg", "apt-get install ffmpeg", True)
-    try:
-        st = _store(s)
-        st.kv_set("doctor_ping", str(_time.time()))
-        row(True, "database writable")
-    except Exception as exc:  # noqa: BLE001
-        row(False, "database writable", str(exc)[:80], True)
-        st = None
-    try:
-        voice_lock.check_model(s.gemini_tts_model)
-        voice_lock.style_prompt(s)
-        row(s.tts_provider == "gemini_tts", f"voice locked: {s.gemini_tts_voice} on {s.gemini_tts_model}",
-            "set TTS_PROVIDER=gemini_tts")
-    except voice_lock.VoiceUnavailable as exc:
-        row(False, "voice settings", str(exc), True)
-    free = disk_free_gb(Path(s.output_dir))
-    row(free >= s.disk_alert_gb, f"disk free ({free:.0f} GB)", f"below {s.disk_alert_gb:g} GB")
-    fails = failed_units()
-    row(not fails, "systemd services", "failed: " + ", ".join(fails))
-    print(f"  [{'x' if s.image_provider == 'gemini' else ' '}] AI images: {s.image_model} (scenes {s.image_scene_size}, "
-          f"thumbnails {s.image_thumb_size}, cap ${s.image_monthly_budget_usd:g}/month; code-drawn if unavailable)")
-    print("\nKEYS (values never shown)")
-    row(bool(s.telegram_bot_token), "TELEGRAM_BOT_TOKEN", "deploy/set-key.sh TELEGRAM_BOT_TOKEN")
-    row(bool(s.telegram_approver_chat_id), "TELEGRAM_APPROVER_CHAT_ID", "deploy/set-key.sh TELEGRAM_APPROVER_CHAT_ID")
-    row(bool(s.anthropic_api_key), "ANTHROPIC_API_KEY (script writer)", "deploy/set-key.sh ANTHROPIC_API_KEY")
-    row(bool(s.gemini_api_key), "GEMINI_API_KEY (Charon voice)", "deploy/set-key.sh GEMINI_API_KEY")
-    row(bool(s.youtube_api_key), "YOUTUBE_API_KEY (competitor research)", "deploy/set-key.sh YOUTUBE_API_KEY")
-    row(s.allow_paid_apis, "ALLOW_PAID_APIS=true (voice + Claude, capped)", "deploy/set-key.sh ALLOW_PAID_APIS true")
-    row(not s.youtube_publish_enabled, "YouTube auto-publishing OFF", "must stay false", True)
-    print("\nSCHEDULE")
-    print(f"  time zone {s.local_tz}: topic 09:00 · health 09:05 · production 13:17 · quiet {s.quiet_start}-"
-          f"{s.quiet_end}")
-    print(f"  pace {s.long_videos_per_month} long + {s.shorts_per_month} Shorts a month · buffer {s.buffer_long} long + "
-          f"{s.buffer_shorts} Shorts · lead {s.production_lead_days} days")
-    if st is not None:
-        from .studio import launch_plan
-
-        print(f"  launch list: {16 - launch_plan.remaining(st)}/16 planned")
-    print(f"\nmode: {s.mode} ({'DRY RUN — no network calls, placeholder voice' if s.dry_run else 'PRODUCTION'})")
-    print(("BROKEN: " + ", ".join(broken)) if broken else "installation OK" + (f"; to do: {len(todo)} item(s)" if todo else ""))
-    if getattr(args, "verbose_config", False):
+    run(s, _store(s), live=args.live, strict=args.strict)
+    if args.verbose_config:
         print(json.dumps(s.redacted(), indent=2))
-    if getattr(args, "strict", False) and broken:
-        raise SystemExit(1)
 
 
 def cmd_produce(args, s):
@@ -298,8 +244,12 @@ def cmd_retry_held(args, s):
         except BlockingIOError:
             print("the daily run is busy; it retries held videos itself")
             return
-        for r in retry_held_videos(s, store, send=not args.no_telegram):
-            print(r[0], r[2], r[4] or "")
+        try:
+            for r in retry_held_videos(s, store, send=not args.no_telegram):
+                print(r[0], r[2], r[4] or "")
+        except Exception as exc:  # noqa: BLE001  hourly timer: never crash-loop; the next hour retries
+            logging.getLogger("glivarao").exception("retry of held videos failed")
+            print(f"retry failed ({type(exc).__name__}); trying again next hour")
 
 
 def cmd_competitors(args, s):
@@ -352,7 +302,7 @@ def cmd_alert(args, s):
     """Send one alert to Telegram (used by systemd OnFailure=). Queued during quiet hours."""
     from .publish.telegram import notify
 
-    notify(s, "🔴 GLIVARAO: " + " ".join(args.text)[:3500])
+    notify(s, ("ℹ️ GLIVARAO: " if args.info else "🔴 GLIVARAO: ") + " ".join(args.text)[:3500])
 
 
 def cmd_queue(args, s):
@@ -445,14 +395,42 @@ def cmd_poll(args, s):
     from .publish.telegram import poll_decisions
     from .studio import quiet
 
+    import time as _t
+
     store = _store(s)
+    if not (s.telegram_bot_token and s.telegram_approver_chat_id):
+        print("Telegram is not configured yet; nothing to poll")
+        return
+    # Tolerant by design (runs every 5 minutes): a network or Telegram error never makes the service fail.
+    # After a failure the next polls back off (5, 10, 20, ... up to 60 min); one alert after 6 failures in a row.
+    state = json.loads(store.kv_get("poll_backoff", '{"fails": 0, "next": 0}'))
+    if _t.time() < state["next"]:
+        print(f"backing off after {state['fails']} failure(s); next try in {int(state['next'] - _t.time())} s")
+        return
     try:
         delivered = quiet.flush(s, store)  # alerts and reviews held during quiet hours
         if delivered:
             print(f"delivered {delivered} queued message(s)")
     except Exception as exc:  # noqa: BLE001  never block approvals
-        print(f"could not flush queued messages: {exc}")
-    decisions = poll_decisions(store, s)
+        print(f"could not flush queued messages: {type(exc).__name__}")
+    try:
+        decisions = poll_decisions(store, s)
+    except Exception as exc:  # noqa: BLE001
+        fails = state["fails"] + 1
+        wait = min(3600, 300 * 2 ** (fails - 1))
+        store.kv_set("poll_backoff", json.dumps({"fails": fails, "next": _t.time() + wait}))
+        print(f"poll failed ({type(exc).__name__}: {str(exc)[:120]}); retry in {wait // 60} min")
+        if fails == 6:
+            try:
+                from .publish.telegram import notify
+
+                notify(s, f"🔴 GLIVARAO: Telegram polling failed 6 times in a row ({type(exc).__name__}). "
+                          "It keeps retrying every hour.")
+            except Exception:  # noqa: BLE001
+                pass
+        return
+    if state["fails"]:
+        store.kv_set("poll_backoff", json.dumps({"fails": 0, "next": 0}))
     print(decisions or "no new decisions")
     # Approval never triggers an upload. Uploading is a separate, manual, interactive step.
 
@@ -509,6 +487,7 @@ def main(argv=None):
     sub = p.add_subparsers(dest="cmd", required=True)
     dr = sub.add_parser("doctor", help="production checklist (keys shown as set/missing only)")
     dr.add_argument("--strict", action="store_true", help="exit 1 if the installation is broken")
+    dr.add_argument("--live", action="store_true", help="test Telegram, YouTube, Gemini and Claude with tiny calls")
     dr.add_argument("--config", dest="verbose_config", action="store_true", help="also print the redacted config")
     dr.set_defaults(fn=cmd_doctor)
     pr = sub.add_parser("produce")
@@ -560,6 +539,7 @@ def main(argv=None):
     hl.add_argument("--no-telegram", action="store_true")
     hl.set_defaults(fn=cmd_health)
     al = sub.add_parser("alert", help="send an alert to Telegram (systemd OnFailure)")
+    al.add_argument("--info", action="store_true", help="informational (no red alert icon)")
     al.add_argument("text", nargs="+")
     al.set_defaults(fn=cmd_alert)
     sub.add_parser("verify-facts", help="re-check the launch list's facts on official pages").set_defaults(

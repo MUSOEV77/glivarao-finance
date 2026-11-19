@@ -9,7 +9,7 @@ import pytest
 
 from glivarao.compliance import check_script
 from glivarao.content import calculators as calc
-from glivarao.content.brief import build_brief, family_of, pick_card, topic_phrase
+from glivarao.content.brief import build_brief, family_of, topic_phrase
 from glivarao.content.packaging import finalize_description
 from glivarao.content.writer import paid_writer_allowed, write_long_free, write_shorts_free
 
@@ -67,14 +67,6 @@ def test_free_writer_outputs_pass_compliance(key, topic, cat):
         assert "#Shorts" in s.title and s.thumbnail_text
 
 
-def test_pick_card_rules():
-    rep = {"ranked": [card("credit_card"), card("tag:gnucash", "Gnucash", "Personal Finance"),
-                      card("mortgage", "Mortgages"), card("scams", "Scams", "Financial Mistakes and Scams")]}
-    assert pick_card(rep, set())["key"] == "credit_card"
-    assert pick_card(rep, {"credit_card"})["key"] == "mortgage"           # no repeats
-    assert pick_card(rep, {"credit_card"}, recent_categories=["Credit and Debt"] * 2)["key"] == "scams"  # rotation
-    assert family_of("tag:gnucash") == "generic"
-
 
 def test_chapters_inserted_for_long_videos():
     d = finalize_description("Intro\n\n{CHAPTERS}\nEnd", ["Hook", "How", "Math", "Tiny", "Plan"],
@@ -84,9 +76,17 @@ def test_chapters_inserted_for_long_videos():
 
 
 def test_paid_writer_requires_explicit_approval():
-    assert not paid_writer_allowed(SimpleNamespace(allow_paid_apis=False, anthropic_api_key="sk-x"))
-    assert not paid_writer_allowed(SimpleNamespace(allow_paid_apis=True, anthropic_api_key=""))
-    assert paid_writer_allowed(SimpleNamespace(allow_paid_apis=True, anthropic_api_key="sk-x"))
+    def s(**kw):
+        base = dict(allow_paid_apis=True, anthropic_api_key="", writer="claude_api", gemini_api_key="",
+                    vertex_project_id="", vertex_credentials_file="/nonexistent.json")
+        return SimpleNamespace(**{**base, **kw})
+
+    assert not paid_writer_allowed(s(allow_paid_apis=False, anthropic_api_key="sk-x"))
+    assert not paid_writer_allowed(s())
+    assert paid_writer_allowed(s(anthropic_api_key="sk-x"))
+    assert not paid_writer_allowed(s(writer="claude_vertex", vertex_project_id="p"))     # no key file yet
+    assert paid_writer_allowed(s(writer="claude_vertex", gemini_api_key="G"))           # Gemini fallback alone
+    assert not paid_writer_allowed(s(writer="free", anthropic_api_key="sk-x", gemini_api_key="G"))
 
 
 def test_audio_synthesis_and_ducking():

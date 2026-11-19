@@ -8,7 +8,7 @@ from functools import lru_cache
 from PIL import Image
 
 from ..art.illustrations import draw_illustration
-from ..art.style import Ink, font, wrap
+from ..art.style import Ink, wrap
 from .easing import clamp, ease_out, ease_out_back, progress
 
 
@@ -131,14 +131,3 @@ def sticky_note(dst, text, x, y, t, start, idx, boil, w=520):
     dst.paste(img, (int(xx), int(y)), img)
 
 
-def counter(dst, value: float, x, y, t, start, dur, size=96, prefix="$", color=(46, 139, 87)):
-    """Number that counts up from 0 to `value`."""
-    p = progress(t, start, dur)
-    if p <= 0:
-        return
-    v = value * ease_out(p)
-    text = f"{prefix}{v:,.0f}"
-    ink = Ink(dst, seed=3)
-    for dx, dy in ((-3, 0), (3, 0), (0, -3), (0, 3)):
-        ink.d.text((x + dx, y + dy), text, font=font(size), fill=(255, 253, 247), anchor="mm")
-    ink.d.text((x, y), text, font=font(size), fill=color, anchor="mm")

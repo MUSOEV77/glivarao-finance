@@ -41,7 +41,6 @@ class Settings:
     output_dir: Path = field(default_factory=lambda: Path(_env("GLIVARAO_OUTPUT_DIR", "output")))
     db_path: Path = field(default_factory=lambda: Path(_env("GLIVARAO_DB_PATH", "data/glivarao.sqlite3")))
     fps: int = field(default_factory=lambda: int(_env("GLIVARAO_FPS", "12")))
-    timezone: str = field(default_factory=lambda: _env("GLIVARAO_TIMEZONE", "America/New_York"))
 
     # Owner approval switch for anything that costs money (Claude API). Default: off.
     allow_paid_apis: bool = field(default_factory=lambda: _bool("ALLOW_PAID_APIS", False))
@@ -54,6 +53,25 @@ class Settings:
     claude_price_out: float = field(default_factory=lambda: float(_env("CLAUDE_PRICE_OUT_PER_M", "20")))
     claude_spend_ledger_path: str = field(default_factory=lambda: _env("CLAUDE_SPEND_LEDGER_PATH",
                                                                        "data/claude_spend.json"))
+    # Long-script writer: claude_vertex (Claude on Google Vertex AI, service-account JSON) | claude_api
+    # (Anthropic Console key) | free (offline templates). Gemini Pro (same GEMINI_API_KEY) takes over automatically
+    # if the Claude writer fails. One shared Claude cap (CLAUDE_MONTHLY_BUDGET_USD) covers both Claude backends.
+    writer: str = field(default_factory=lambda: _env("WRITER", "claude_vertex"))
+    vertex_project_id: str = field(default_factory=lambda: _env("VERTEX_PROJECT_ID"))
+    vertex_region: str = field(default_factory=lambda: _env("VERTEX_REGION", "global"))
+    vertex_model: str = field(default_factory=lambda: _env("VERTEX_MODEL", "claude-sonnet-5-5"))
+    vertex_credentials_file: str = field(default_factory=lambda: _env("VERTEX_CREDENTIALS_FILE",
+                                                                      "secrets/vertex-sa.json"))
+    vertex_price_in: float = field(default_factory=lambda: float(_env("VERTEX_PRICE_IN_PER_M", "2")))
+    vertex_price_out: float = field(default_factory=lambda: float(_env("VERTEX_PRICE_OUT_PER_M", "10")))
+    gemini_writer_model: str = field(default_factory=lambda: _env("GEMINI_WRITER_MODEL", "gemini-3.1-pro-preview"))
+    gemini_writer_price_in: float = field(default_factory=lambda: float(_env("GEMINI_WRITER_PRICE_IN_PER_M", "2")))
+    gemini_writer_price_out: float = field(default_factory=lambda: float(_env("GEMINI_WRITER_PRICE_OUT_PER_M", "12")))
+    gemini_writer_monthly_budget_usd: float = field(default_factory=lambda: float(_env(
+        "GEMINI_WRITER_MONTHLY_BUDGET_USD", "5")))
+    ai_studio_limit_usd: float = field(default_factory=lambda: float(_env("AI_STUDIO_LIMIT_USD", "35")))
+    gemini_writer_ledger_path: str = field(default_factory=lambda: _env("GEMINI_WRITER_LEDGER_PATH",
+                                                                        "data/gemini_writer_spend.json"))
 
     tts_provider: str = field(default_factory=lambda: _env("TTS_PROVIDER", "gemini_tts"))
     kokoro_voice: str = field(default_factory=lambda: _env("KOKORO_VOICE", "am_michael"))
@@ -172,38 +190,6 @@ class Settings:
             else:
                 out[f.name] = str(value)
         return out
-
-    def readiness(self) -> dict[str, tuple[bool, str]]:
-        """Which integrations are configured. Values: (ready, explanation)."""
-        kokoro_ready = (Path(__file__).resolve().parents[1] / "models/kokoro/kokoro-v1.0.onnx").exists()
-        tts_ready = {
-            "kokoro": kokoro_ready,
-            "elevenlabs": bool(self.elevenlabs_api_key and self.elevenlabs_voice_id),
-            "google": bool(self.google_tts_api_key),
-            "google_chirp": bool(self.google_tts_api_key and self.allow_paid_apis),
-            "gemini_tts": bool(self.gemini_api_key and self.allow_paid_apis),
-            "espeak": True,
-            "silent": True,
-        }.get(self.tts_provider, False)
-        return {
-            "script_generation (Claude)": (bool(self.anthropic_api_key), "ANTHROPIC_API_KEY"),
-            f"narration ({self.tts_provider})": (
-                tts_ready,
-                "ELEVENLABS_API_KEY + ELEVENLABS_VOICE_ID or GOOGLE_TTS_API_KEY",
-            ),
-            "production voice": (
-                self.tts_provider in {"kokoro", "elevenlabs", "google", "google_chirp", "gemini_tts"} and tts_ready,
-                "set TTS_PROVIDER=kokoro (local, free) — espeak/silent are refused in production",
-            ),
-            "market data (FRED)": (bool(self.fred_api_key), "FRED_API_KEY (optional)"),
-            "telegram approval": (
-                bool(self.telegram_bot_token and self.telegram_approver_chat_id),
-                "TELEGRAM_BOT_TOKEN + TELEGRAM_APPROVER_CHAT_ID",
-            ),
-            "youtube oauth client": (self.youtube_client_secrets_file.exists(), str(self.youtube_client_secrets_file)),
-            "youtube authorized token": (self.youtube_token_file.exists(), "run: python -m glivarao youtube-auth"),
-            "youtube publishing switch": (self.youtube_publish_enabled, "YOUTUBE_PUBLISH_ENABLED=true"),
-        }
 
 
 def get_settings() -> Settings:

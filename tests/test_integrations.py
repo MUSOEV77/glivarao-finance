@@ -54,15 +54,20 @@ def test_claude_generator_parses_structured_output(monkeypatch, settings, tmp_pa
                                    usage=SimpleNamespace(input_tokens=1, output_tokens=1))
 
     class FakeClient:
-        def __init__(self, api_key):
+        def __init__(self, api_key=None, **kw):
             self.beta = SimpleNamespace(messages=SimpleNamespace(stream=self.stream))
 
         def stream(self, **kw):
             captured.update(kw)
             return FakeStream()
 
-    monkeypatch.setattr(claude.anthropic, "Anthropic", FakeClient)
-    script = claude.generate_with_claude("Roth IRA vs Traditional IRA explained", "short", settings)
+    import anthropic
+
+    monkeypatch.setattr(anthropic, "Anthropic", FakeClient)
+    from dataclasses import replace as _r
+
+    script = claude.generate_with_claude("Roth IRA vs Traditional IRA explained", "short",
+                                         _r(settings, anthropic_api_key="sk-test", writer="claude_api"))
     assert script.format == "short" and len(script.scenes) == len(sample["scenes"])
     assert captured["model"] == "claude-opus-5-5"
     assert captured["output_config"]["format"]["type"] == "json_schema"

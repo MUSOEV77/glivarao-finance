@@ -50,7 +50,8 @@ def test_low_buffer_allows_an_early_long_video(settings, store):
 
 
 def test_quiet_hours_queue_messages_until_morning(settings, store, monkeypatch):
-    s = replace(settings, telegram_bot_token="T", telegram_approver_chat_id="42")
+    s = replace(settings, telegram_bot_token="T", telegram_approver_chat_id="42", quiet_start="23:00",
+                quiet_end="08:00")
     assert quiet.is_quiet(s, NIGHT) and not quiet.is_quiet(s, MORNING)
     assert quiet.is_quiet(s, datetime(2026, 11, 19, 18, 0, tzinfo=timezone.utc))      # 23:00 Tashkent
     assert not quiet.is_quiet(s, datetime(2026, 11, 19, 17, 59, tzinfo=timezone.utc))

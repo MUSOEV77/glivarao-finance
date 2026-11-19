@@ -12,7 +12,7 @@ Angle conventions (degrees):
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, fields
 from functools import lru_cache
 
 from PIL import Image
