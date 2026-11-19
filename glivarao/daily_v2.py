@@ -328,6 +328,11 @@ def render_and_review(job, script, brief, claims, ctx: dict, settings: Settings,
     today = date.fromisoformat(ctx["date"])
     creator, writer, sim = ctx["creator"], ctx["writer"], _Sim(ctx["sim"])
     try:
+        art_stats = {}
+        if script.format == "long":  # AI scene illustrations (Nano Banana); code-drawn where they fail
+            from .art.ai_visuals import illustrate_scenes
+
+            script, art_stats = illustrate_scenes(script, out, settings, store)
         res = _render_with_retry(render_animated, script, out, settings, workers)
         disc = disclosure.disclosure_for(res.voice)
         desc = factcheck.add_sources_to_description(script.description, claims)
@@ -339,8 +344,17 @@ def render_and_review(job, script, brief, claims, ctx: dict, settings: Settings,
         script = script.model_copy(update={"description": finalize_description(
             desc, [s.heading for s in script.scenes], res.scene_starts or [], script.format == "long")})
         Path(job.script_path).write_text(script.model_dump_json(indent=2))
-        thumb = make_thumbnail(script, out / "thumbnail.jpg", portrait=script.format == "short",
-                               theme=getattr(settings, "theme", "editorial"))
+        theme = getattr(settings, "theme", "editorial")
+        thumb_how: list[str] = []
+        if script.format == "long":  # 3 options (AI + our own bold words); you pick one in Telegram
+            from .art.ai_visuals import thumbnail_options
+
+            opts_paths, thumb_how = thumbnail_options(
+                script, out, settings, store,
+                fallback=lambda sc, dst: make_thumbnail(sc, dst, portrait=False, theme=theme))
+            thumb = opts_paths[0] if opts_paths else make_thumbnail(script, out / "thumbnail.jpg", theme=theme)
+        else:
+            thumb = make_thumbnail(script, out / "thumbnail.jpg", portrait=True, theme=theme)
         from .research.competitors import load_latest, too_similar
 
         comp = load_latest()
@@ -361,7 +375,8 @@ def render_and_review(job, script, brief, claims, ctx: dict, settings: Settings,
                             for s in ("source", "calculation", "reference", "creator", "UNSOURCED")},
              "originality": {"phrase_overlap": round(sim.phrase_overlap, 3),
                              "structure_similarity": round(sim.structure_ratio, 3)},
-             "pronunciation_misses": res.unknown_words}, indent=2))
+             "pronunciation_misses": res.unknown_words,
+             "thumbnail_options": thumb_how, "scene_art": art_stats}, indent=2))
         job.video_path, job.subtitles_path = str(res.video), str(res.srt)
         job.thumbnail_path, job.duration_sec = str(thumb), round(res.duration, 2)
         store.transition(job, JobStatus.RENDERED, f"{res.duration:.1f}s in {res.render_seconds:.0f}s")

@@ -40,7 +40,8 @@ def disclosure_for(voice_label: str, realistic_ai_visuals: bool = False, real_pe
         reasons.append("uses a synthetic version of a real person's voice")
     if not flag:
         reasons.append("illustrated visuals, no realistic people or events, generic narrator voice")
-    note = ("About this video: the narration is an AI-generated voice and the visuals are illustrated. Research, "
+    note = ("About this video: the narration is an AI-generated voice and the visuals are illustrations, some made "
+            "with AI image tools in our own original style (no real people or events). Research, "
             "script and numbers were prepared with AI assistance and the exact calculations shown, then reviewed and "
             "approved by a person before publishing. The \"My take\" section is the channel host's own view.")
     platform = []

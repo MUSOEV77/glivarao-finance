@@ -63,6 +63,8 @@ def cmd_doctor(args, s):
     row(free >= s.disk_alert_gb, f"disk free ({free:.0f} GB)", f"below {s.disk_alert_gb:g} GB")
     fails = failed_units()
     row(not fails, "systemd services", "failed: " + ", ".join(fails))
+    print(f"  [{'x' if s.image_provider == 'gemini' else ' '}] AI images: {s.image_model} (scenes {s.image_scene_size}, "
+          f"thumbnails {s.image_thumb_size}, cap ${s.image_monthly_budget_usd:g}/month; code-drawn if unavailable)")
     print("\nKEYS (values never shown)")
     row(bool(s.telegram_bot_token), "TELEGRAM_BOT_TOKEN", "deploy/set-key.sh TELEGRAM_BOT_TOKEN")
     row(bool(s.telegram_approver_chat_id), "TELEGRAM_APPROVER_CHAT_ID", "deploy/set-key.sh TELEGRAM_APPROVER_CHAT_ID")

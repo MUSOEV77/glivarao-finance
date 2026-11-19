@@ -25,7 +25,8 @@ class RecTG(FakeTG):
 
     def call(self, method, files=None, **params):
         if files:
-            name, fh = files["document"] if isinstance(files["document"], tuple) else ("?", files["document"])
+            f = next(iter(files.values()))
+            name, fh = f if isinstance(f, tuple) else (getattr(f, "name", "?").rsplit("/", 1)[-1], f)
             self.files.append((method, name, len(fh.read())))
         return super().call(method, files, **params)
 

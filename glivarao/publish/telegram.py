@@ -120,6 +120,7 @@ def request_approval(job: Job, store: JobStore, settings: Settings, script: Scri
 
     with open(job.thumbnail_path, "rb") as fh:  # a. thumbnail
         client.call("sendPhoto", files={"photo": fh}, chat_id=chat, caption=build_caption(job, script.title))
+    send_thumbnail_picker(job, settings, client)
     meta = (f"TITLE:\n{script.title}\n\nDESCRIPTION:\n{script.description}\n\n"
             f"TAGS: {', '.join(script.tags)}")
     for part in _chunks(meta):  # b. title + description
@@ -180,6 +181,20 @@ def poll_decisions(store: JobStore, settings: Settings, client: TelegramClient |
             client.call("answerCallbackQuery", callback_query_id=cq["id"], text="Not authorized")
             continue
         action, _, job_id = cq.get("data", "").partition(":")
+        if action == "thumb":  # thumbnail choice (long videos)
+            jid, _, n = job_id.rpartition(":")
+            try:
+                pick_thumbnail(store, jid, int(n))
+                client.call("answerCallbackQuery", callback_query_id=cq["id"], text=f"Thumbnail {n} selected")
+                after = store.get(jid).status in (JobStatus.APPROVED, JobStatus.PUBLISHED)
+                client.call("sendMessage", chat_id=chat_id, text=f"🖼 {jid}: thumbnail option {n} selected. " + (
+                    "The upload pack was already sent: tap \"📦 Send upload pack again\" for this thumbnail."
+                    if after else "It goes into the upload pack."))
+                decisions.append((jid, f"thumbnail:{n}"))
+            except Exception as exc:  # noqa: BLE001
+                log.warning("could not pick thumbnail: %s", exc)
+                client.call("answerCallbackQuery", callback_query_id=cq["id"], text="Could not pick that one")
+            continue
         if action == "pack":  # resend an upload pack
             try:
                 from ..studio.uploadpack import send_pack
@@ -231,6 +246,35 @@ def poll_decisions(store: JobStore, settings: Settings, client: TelegramClient |
                 except Exception:  # noqa: BLE001
                     pass
     return decisions
+
+
+def thumbnail_options(job: Job) -> list[Path]:
+    out = Path(job.video_path).parent if job.video_path else None
+    return [p for p in (sorted(out.glob("thumbnail_[0-9].jpg")) if out else []) if p.exists()]
+
+
+def send_thumbnail_picker(job: Job, settings: Settings, client: TelegramClient) -> None:
+    """Long videos: the 3 thumbnail options, then one message with [1] [2] [3]. Option 1 is used until you pick."""
+    opts = thumbnail_options(job)
+    if len(opts) < 2:
+        return
+    chat = settings.telegram_approver_chat_id
+    for k, p in enumerate(opts, 1):
+        with open(p, "rb") as fh:
+            client.call("sendPhoto", files={"photo": fh}, chat_id=chat, caption=f"Thumbnail option {k}")
+    client.call("sendMessage", chat_id=chat, text="Pick the thumbnail (option 1 is used if you don't pick):",
+                reply_markup={"inline_keyboard": [[{"text": f"🖼 {k}", "callback_data": f"thumb:{job.id}:{k}"}
+                                                   for k in range(1, len(opts) + 1)]]})
+
+
+def pick_thumbnail(store: JobStore, job_id: str, n: int) -> Path:
+    job = store.get(job_id)
+    opts = thumbnail_options(job)
+    if not 1 <= n <= len(opts):
+        raise TelegramError(f"no thumbnail option {n}")
+    job.thumbnail_path = str(opts[n - 1])
+    store.save(job)
+    return opts[n - 1]
 
 
 def notify(settings: Settings, text: str, client: TelegramClient | None = None, now=None) -> None:

@@ -13,6 +13,7 @@ from pathlib import Path
 
 
 def _spend(settings) -> list[tuple[str, float, float]]:
+    from ..art.gemini_image import ImageLedger
     from ..scriptgen.claude import ClaudeSpendLedger
     from ..tts.gemini_tts import SpendLedger
 
@@ -20,7 +21,9 @@ def _spend(settings) -> list[tuple[str, float, float]]:
     return [("Voice (Gemini Charon)", SpendLedger(Path(settings.tts_spend_ledger_path)).spent(m),
              settings.tts_monthly_budget_usd),
             ("Scripts (Claude)", ClaudeSpendLedger(Path(settings.claude_spend_ledger_path)).spent(m),
-             settings.claude_monthly_budget_usd)]
+             settings.claude_monthly_budget_usd),
+            ("Images (Nano Banana)", ImageLedger(Path(settings.image_spend_ledger_path)).spent(m),
+             settings.image_monthly_budget_usd)]
 
 
 def spend_alerts(settings, store) -> list[str]:
@@ -34,7 +37,8 @@ def spend_alerts(settings, store) -> list[str]:
         if level and int(store.kv_get(key, "0")) < level:
             store.kv_set(key, str(level))
             out.append(f"💰 {name}: ${spent:.2f} of ${cap:.2f} this month ({spent / cap:.0%})."
-                       + (" Cap reached: paid use stops until next month (videos wait; nothing else is used)."
+                       + ((" Cap reached: new images are code-drawn until next month." if "Images" in name else
+                           " Cap reached: paid use stops until next month (videos wait; nothing else is used).")
                           if level == 100 else " Hard cap stops spending at 100%."))
     return out
 

@@ -45,6 +45,8 @@ class Scene(BaseModel):
     # Format beat for the editorial renderer: myth, fact, question, case, option_a, option_b, verdict, update,
     # creator (the host's own take). None = ordinary scene.
     beat: Optional[str] = None
+    # AI scene illustration (long videos; set by art/ai_visuals.py). None/missing file = code-drawn plate.
+    art_path: Optional[str] = None
 
 
 class Script(BaseModel):

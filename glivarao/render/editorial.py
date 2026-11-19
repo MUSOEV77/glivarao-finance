@@ -108,6 +108,16 @@ def plan_beats(scene, sentences, plan: ScenePlan, long_form: bool) -> list[Beat]
         beats.append(cand)
     if not beats:
         beats.append(Beat("plate", 0.0, dur))
+    if getattr(scene, "art_path", None) and not any(b.kind == "plate" for b in beats):
+        # an AI illustration exists for this scene: show it in place of the first plain quote
+        q = next((b for b in beats if b.kind == "quote" and role != "creator"), None)
+        if q is not None:
+            q.kind, q.text = "plate", ""
+        elif beats[0].kind == "chapter":  # room after the chapter card: show the illustration there
+            nxt = beats[1].t0 if len(beats) > 1 else dur
+            start = beats[0].t1 if len(beats) > 1 else min(CHAPTER_SEC, dur)
+            if nxt - start >= MIN_BEAT or (len(beats) == 1 and dur - start >= 1.5):
+                beats.insert(1, Beat("plate", start, nxt))
     beats[0].t0 = 0.0
     for a, b in zip(beats, beats[1:]):
         a.t1 = b.t0
@@ -271,7 +281,14 @@ class EditorialFrames:
             dd = ImageDraw.Draw(card)
             dd.rectangle((0, 0, size - 1, size - 1), outline=PAL["ink"], width=2)
             dd.rectangle((14, 14, size - 15, size - 15), outline=(*PAL["rule"], 255), width=1)
-            art = duotone_plate(self.scene.illustration, int(size * 0.78))
+            art = None
+            ap = getattr(self.scene, "art_path", None)
+            if ap and "scene_art" in ap:  # AI illustration made for this video (art/ai_visuals.py)
+                from ..art.ai_visuals import load_art
+
+                art = load_art(ap, int(size * 0.90))
+            if art is None:  # code-drawn fallback
+                art = duotone_plate(self.scene.illustration, int(size * 0.78))
             card.paste(art, ((size - art.width) // 2, (size - art.height) // 2), art)
             sh = soft_shadow((size, size), 16, 55)
             self._cache[key] = (card, sh)
