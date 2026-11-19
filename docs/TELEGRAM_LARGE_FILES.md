@@ -17,7 +17,7 @@
 
 It is simpler *and* safer: nothing on the VPS becomes reachable from the internet.
 
-## One-time setup (about 30–45 minutes, mostly waiting)
+## One-time setup (about 30–60 minutes, mostly waiting)
 
 1. **On your phone,** open https://my.telegram.org and log in with your Telegram number. Then:
    1. tap **API development tools**;
@@ -32,7 +32,7 @@ It is simpler *and* safer: nothing on the VPS becomes reachable from the interne
    ```
 
    - It asks for the api_id and the api_hash; the hash is hidden as you type.
-   - It builds the official server from Telegram's GitHub, which takes 20–40 minutes. You can leave Termius in the
+   - It builds the official server from Telegram's GitHub, which takes 30–50 minutes. You can leave Termius in the
      background.
    - It starts the server on 127.0.0.1:8081 as a service that restarts by itself.
    - It moves your bot to the local server (Telegram requires a one-time `logOut` from its cloud server), then sets

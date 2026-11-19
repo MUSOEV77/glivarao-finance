@@ -8,7 +8,7 @@
 # Safe by design: listens on 127.0.0.1 only (no open ports, no domain, no public links); runs as the 'glivarao'
 # user; api_id/api_hash are typed at hidden prompts and stored in a root-only file, never on the command line.
 # Needs api_id + api_hash (free): https://my.telegram.org -> API development tools.
-# Build takes about 20-40 minutes on 6 vCPU. Safe to re-run.
+# Build takes about 30-50 minutes (verified: builds cleanly; option names checked against --help). Safe to re-run.
 set -euo pipefail
 APP=/opt/glivarao/app
 SRC=/opt/telegram-bot-api-src
