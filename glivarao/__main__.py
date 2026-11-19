@@ -161,6 +161,22 @@ def cmd_propose(args, s):
     print(f"{len(items)} new ideas" + ("" if args.no_telegram else " sent to Telegram"))
 
 
+def cmd_plan(args, s):
+    """Pick the next topic automatically and announce it in Telegram (with why + sources)."""
+    from datetime import date
+
+    from .studio.planner import plan_next
+
+    day = date.fromisoformat(args.date) if args.date else None
+    it = plan_next(s, _store(s), today=day, send=not args.no_telegram)
+    if it is None:
+        print("no topic passed today's checks")
+        return
+    print(f"next video: {it.topic} [{it.format}] status={it.status}")
+    for w in it.why:
+        print(f"  - {w}")
+
+
 def cmd_queue(args, s):
     from .studio.queue import TopicQueue
 
@@ -342,7 +358,11 @@ def main(argv=None):
     pp.add_argument("--date", help="YYYY-MM-DD (default today)")
     pp.add_argument("--no-telegram", action="store_true")
     pp.set_defaults(fn=cmd_propose)
-    sub.add_parser("queue", help="show your topic queue").set_defaults(fn=cmd_queue)
+    pn = sub.add_parser("plan-next", help="pick the next topic automatically and announce it in Telegram")
+    pn.add_argument("--date", help="YYYY-MM-DD (default today)")
+    pn.add_argument("--no-telegram", action="store_true")
+    pn.set_defaults(fn=cmd_plan)
+    sub.add_parser("queue", help="show the topic queue").set_defaults(fn=cmd_queue)
     ai = sub.add_parser("add-input", help="add your own take to a picked topic")
     ai.add_argument("item_id")
     ai.add_argument("text")

@@ -30,6 +30,8 @@ class Item:
     proposal_msg_id: int | None = None
     produced_on: str = ""
     jobs: list = field(default_factory=list)
+    auto: bool = False            # picked automatically by research (TOPIC_MODE=auto)
+    why: list = field(default_factory=list)  # why it was picked, with source URLs
 
 
 def _now() -> str:

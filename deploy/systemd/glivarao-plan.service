@@ -1,0 +1,15 @@
+[Unit]
+Description=GLIVARAO: pick the next topic automatically (fresh research) and announce it in Telegram. Never uploads.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=glivarao
+WorkingDirectory=/opt/glivarao/app
+ExecStart=/opt/glivarao/app/.venv/bin/python -m glivarao -v plan-next
+StandardOutput=append:/opt/glivarao/app/logs/plan.log
+StandardError=append:/opt/glivarao/app/logs/plan.log
+TimeoutStartSec=45min
+NoNewPrivileges=true
+PrivateTmp=true

@@ -4,33 +4,57 @@ YouTube can demonetize channels whose videos are mass-produced, templated or rep
 used. GLIVARAO now builds every video around **your choices and your own words**, with real variety and
 checked facts. These are not tricks: they are the human input and editorial standards the policy is asking for.
 
-## Your week, in practice
+## Your week, in practice (automatic topics)
 
 | When | What happens | What you do |
 |---|---|---|
-| **Sunday ~10:07 ET** | Telegram brings 5–7 topic ideas from the week's research, each with ✅ / ✖ | Tap ✅ on the ones you want (about 3) |
-| Right after you tap ✅ | GLIVARAO picks a format and asks for **your take** | Reply with a few sentences or a **voice note**: your opinion, a personal experience, or an example. Tap 🔁 for a different format |
-| Next morning, 04:17 ET | If the pace allows (3 long videos a week, at least 2 days apart), it writes, checks and renders the long video + 2 Shorts | — |
-| After rendering | The review package arrives: video, thumbnail, title, description, **fact check**, **originality report**, **AI disclosure** | Approve or reject. Approving uploads nothing |
-| When you choose | — | Upload manually (always private), then publish in YouTube Studio |
+| **Every evening ~17:37 ET** (when the pace allows a video) | Fresh research picks the next topic and format, then Telegram announces it with **why it was picked and the source links** | Nothing. *Optionally* reply with your take (text or voice note) |
+| Next morning, 04:17 ET | The long video + 2 Shorts are written, fact-checked and rendered. Your take is included if it arrived within 10 hours (`CREATOR_INPUT_WAIT_HOURS`) | — |
+| After rendering | The review arrives. It **starts with the topic and why it was picked**, then the fact check (every claim with its source URL), the originality report and the AI disclosure | Approve, or **reject the whole video** if you don't like the topic |
+| When you choose | — | Upload manually (always private) and publish in YouTube Studio |
 
-Send **/queue** to the bot at any time to see what's waiting.
+On the announcement you can tap **🔁 Other format** or **⏭ Skip this topic** (another one is picked on the next run).
+Send **/queue** to see what's planned.
 
-**Nothing is made without you:**
-- no picked topic means no video;
-- no input from you means no video;
-- the bot reminds you instead.
+### How topics are picked (fully automatic)
+
+1. **Fresh sources, every run.** Each signal keeps its link:
+   - official news: Federal Reserve press releases, the CFPB newsroom and blog, IRS news releases;
+   - Google Trends: daily trending searches in the US and Canada;
+   - the questions people type into Google (search suggestions);
+   - CFPB complaint trends;
+   - Stack Exchange personal-finance questions;
+   - Wikipedia reading trends.
+   - BLS, FTC and some news sites block automated requests from servers. BLS data series are available through
+     FRED when a free `FRED_API_KEY` is set.
+2. **Ranking.** Search interest and demand, real questions, freshness (official news in the last 14 days, trending
+   today) and **practical value** (saving, debt, credit, taxes, investing basics score highest), with
+   high/medium-confidence topics first.
+3. **No repeats.**
+   - Not a topic from the last 30 videos.
+   - Not the same topic family as the last 3 videos.
+   - No angle similar to any of the last 30 videos.
+4. **Rotation.**
+   - Never the same category twice in a row, and at most 2 of the last 7 videos per category.
+   - Formats rotate too, never the same twice in a row.
+5. **Sources for every claim.**
+   - Every sentence with a number must trace to a source URL: official releases, research data, real questions,
+     or an official page that explains or reproduces the calculation (CFPB, Investor.gov).
+   - A script with any claim without a URL is rewritten by the Claude writer, or **not rendered**.
+   - All URLs go into the YouTube description.
+
+The manual mode with weekly ideas still exists (`TOPIC_MODE=queue`) if you ever want to choose topics yourself.
 
 ## The 8 changes
 
-1. **Topics are chosen by you.**
-   - Research only *suggests* (`propose-topics`, weekly).
-   - A topic is produced only after you tap ✅. Automatic topic picking is switched off (`TOPIC_MODE=queue`).
-2. **Your input is in every video.**
+1. **Topics are picked automatically** (see above), and every pick shows its reasons and sources in Telegram.
+2. **Your input, whenever you want to give it.**
    - Your text or voice note becomes a **"My take"** scene, with its own on-screen card.
    - Voice notes are transcribed on the server (free, local, via faster-whisper), and you get the transcript back
      to correct.
    - With the Claude writer, your words are woven in faithfully and the rest of the script connects to them.
+   - In automatic mode it's optional: without a reply within 10 hours, the video is made without "My take", and
+     the review says so.
    - Any numbers you mention are flagged for you to confirm.
 3. **Six formats, rotated.**
    - The formats are: Explainer, Myth vs Fact, Case study (clearly hypothetical person), Viewer question (a real
@@ -91,8 +115,9 @@ Send **/queue** to the bot at any time to see what's waiting.
 ## Settings (`deploy/set-key.sh NAME value`)
 
 ```
-TOPIC_MODE=queue            # queue = only topics you pick (auto exists for development only)
-REQUIRE_CREATOR_INPUT=true  # no video without your take
+TOPIC_MODE=auto             # auto = research picks topics (default); queue = you pick from weekly ideas
+CREATOR_INPUT_WAIT_HOURS=10 # auto: how long to wait for your optional take
+REQUIRE_CREATOR_INPUT=true  # queue mode only: no video without your take
 LONG_VIDEOS_PER_WEEK=3
 MIN_DAYS_BETWEEN_LONG=2
 SHORTS_PER_LONG=2

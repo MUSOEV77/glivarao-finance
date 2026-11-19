@@ -217,6 +217,7 @@ def test_daily_run_uses_only_your_picked_topics_with_your_input(settings, store,
     from glivarao.daily_v2 import run_daily_v2
 
     _stub_render(monkeypatch)
+    settings = replace(settings, topic_mode="queue")  # manual mode
     rdir = tmp_path / "r"
     rdir.mkdir()
     q = TopicQueue(store)

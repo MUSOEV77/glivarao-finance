@@ -60,7 +60,10 @@ class Settings:
     # Visual theme of the animated (v2) renderer: "editorial" (premium documentary, default) or "cartoon".
     theme: str = field(default_factory=lambda: _env("GLIVARAO_THEME", "editorial"))
     # Human-in-the-loop production (YouTube "inauthentic content" safety). See docs/AUTHENTICITY.md.
-    topic_mode: str = field(default_factory=lambda: _env("TOPIC_MODE", "queue"))  # queue = only topics you pick
+    # auto = research picks topics (default); queue = only topics you pick from weekly ideas
+    topic_mode: str = field(default_factory=lambda: _env("TOPIC_MODE", "auto"))
+    # Auto mode: after a topic is announced, wait this long for your take before producing without it
+    creator_input_wait_hours: float = field(default_factory=lambda: float(_env("CREATOR_INPUT_WAIT_HOURS", "10")))
     require_creator_input: bool = field(default_factory=lambda: _bool("REQUIRE_CREATOR_INPUT", True))
     long_videos_per_week: int = field(default_factory=lambda: int(_env("LONG_VIDEOS_PER_WEEK", "3")))
     shorts_per_long: int = field(default_factory=lambda: int(_env("SHORTS_PER_LONG", "2")))

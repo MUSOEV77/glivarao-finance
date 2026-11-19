@@ -115,28 +115,27 @@ tail -n 15 /opt/glivarao/app/logs/daily.log
 When it finishes, Telegram shows the review package for 1 long video and 2 Shorts. Use **Approve** or **Reject**.
 Approving uploads nothing.
 
-## How a week works now (you choose, you add your take)
+## How it works now (topics are picked automatically)
 
-1. **Sunday:** Telegram sends 5–7 topic ideas. Tap ✅ on the ones you want (about 3).
-2. For each one, the bot asks for **your take**. Reply with a few sentences or a voice note. Tap 🔁 for another
-   format.
-3. The next morning, the video is written, fact-checked and rendered. The review arrives in Telegram with the fact
-   check and the AI-disclosure notes.
-4. Approve or reject. Upload manually when you want.
+1. **Evening:** Telegram announces the next video's topic and format, with **why it was picked** and the source
+   links. Optionally reply with your own take (text or voice note).
+2. **Next morning:** the video is written, fact-checked (every number with its source URL) and rendered.
+3. **Review:** the message starts with the topic and why it was picked. Approve, or reject the whole video.
+4. Upload manually when you want.
 
 Send `/queue` to the bot any time. Full explanation: `docs/AUTHENTICITY.md`.
 
-To get ideas right now, instead of waiting for Sunday:
+To pick and announce the next topic right now:
 
 ```
-cd /opt/glivarao/app && sudo -u glivarao .venv/bin/python -m glivarao propose-topics
+cd /opt/glivarao/app && sudo -u glivarao .venv/bin/python -m glivarao plan-next
 ```
 
 ## Every day after that (automatic)
 
 **What runs by itself:**
-- Topic ideas every Sunday at 10:07 New York time.
-- Production check at 04:17 New York time (only topics you picked, with your take, and only when the pace allows).
+- Next topic picked and announced every evening at 17:37 New York time (when the pace allows a video).
+- Production at 04:17 New York time (3 long videos a week by default, at least 2 days apart).
 - Telegram approval check every 5 minutes.
 - Backup at 03:40.
 

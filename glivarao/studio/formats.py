@@ -101,7 +101,8 @@ def eligible(brief) -> list[str]:
         keys.append("viewer_question")
     if brief.calcs and len(brief.calcs) >= 2:
         keys.append("comparison")
-    if any(p.get("year_ago") and p["complaints_90d"] > p["year_ago"] * 1.1 for p in brief.problems):
+    if any(p.get("year_ago") and p["complaints_90d"] > p["year_ago"] * 1.1 for p in brief.problems) or \
+            getattr(brief, "news", None):
         keys.append("news_breakdown")
     return keys
 

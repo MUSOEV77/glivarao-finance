@@ -102,6 +102,16 @@ def originality_prompt(draft_json: str, reasons: list[str], phrases: list[str], 
             f"DRAFT:\n{draft_json}\n\nReturn only the revised JSON object.")
 
 
+def sources_prompt(draft_json: str, unsourced: list[str]) -> str:
+    """Rewrite request when sentences state numbers or claims that aren't on the fact sheet."""
+    bad = "\n".join(f"- \"{u}\"" for u in unsourced[:15])
+    return ("Every number and factual claim in a GLIVARAO script must come from the fact sheet you were given "
+            "(each fact there has a source URL). These sentences state numbers or claims that are NOT on the fact "
+            f"sheet:\n{bad}\nRewrite only those sentences: remove the unsupported number or claim, or replace it with "
+            "a fact from the fact sheet. Keep everything else, including the host's 'creator' scene and the "
+            f"education-only sentence.\n\nDRAFT:\n{draft_json}\n\nReturn only the revised JSON object.")
+
+
 def _obj(props: dict, required: list[str] | None = None) -> dict:
     return {"type": "object", "properties": props, "required": required or list(props),
             "additionalProperties": False}

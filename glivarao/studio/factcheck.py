@@ -29,6 +29,19 @@ REFERENCES = [
     (r"report fraud dot f t c", "FTC fraud reporting", "https://reportfraud.ftc.gov"),
     (r"canadian anti-fraud centre", "Canadian Anti-Fraud Centre", "https://antifraudcentre-centreantifraude.ca"),
 ]
+# Official pages that explain (or reproduce) the method behind each family's calculations.
+METHOD = {
+    "card": ("Method: CFPB, minimum payments on a credit card",
+             "https://www.consumerfinance.gov/ask-cfpb/what-is-a-minimum-payment-on-a-credit-card-en-1953/"),
+    "loan": ("Method: CFPB, how amortization works",
+             "https://www.consumerfinance.gov/ask-cfpb/what-is-amortization-and-how-could-it-affect-my-auto-loan-en-873/"),
+    "grow": ("Method: Investor.gov compound interest calculator (SEC)",
+             "https://www.investor.gov/financial-tools-calculators/calculators/compound-interest-calculator"),
+    "invest": ("Method: Investor.gov compound interest calculator (SEC)",
+               "https://www.investor.gov/financial-tools-calculators/calculators/compound-interest-calculator"),
+}
+FEES_METHOD = ("Method: Investor.gov, expense ratios (SEC)",
+               "https://www.investor.gov/introduction-investing/investing-basics/glossary/expense-ratio")
 DIGITS = re.compile(r"(?<![\w(])\$?\d[\d,]*(?:\.\d+)?(?:\s?%)?(?![\w(])")
 # account names, years and numbered labels ("myth number 2", "step 3", "option 2") are not claims
 NOT_A_CLAIM = re.compile(r"401\(k\)|\b(?:19|20)\d\d\b|\b(?:myth|step|option|tip|mistake|chapter|part|number)"
@@ -70,30 +83,46 @@ def numbers_in(text: str) -> list[float]:
     return vals
 
 
+def _method(brief, key: str = "") -> tuple[str, str]:
+    if key == "fees":
+        return FEES_METHOD
+    return METHOD.get(brief.family, ("Method: GLIVARAO calculation (inputs in the description)", ""))
+
+
 def _index(brief) -> list[tuple[float, str, str, str]]:
     """(value, status, source label, url) for every number the brief can vouch for."""
     idx = []
     for f in brief.facts:
         status = {"DATA": "source", "CALCULATION": "calculation"}.get(f.kind, "reference")
+        label, url = (f.source or f.kind.title(), f.url)
+        if status == "calculation" and not url:
+            label, url = _method(brief)
         for v in numbers_in(f.text):
-            idx.append((v, status, f.source or f.kind.title(), f.url))
+            idx.append((v, status, label, url))
     for p in brief.problems:
         if p.get("year_ago"):
             growth = (p["complaints_90d"] / p["year_ago"] - 1) * 100
             for v in (p["complaints_90d"], p["year_ago"], round(growth)):
                 idx.append((float(v), "source", "CFPB Consumer Complaint Database", p.get("link", "")))
-    for c in (brief.calcs or {}).values():
+    for name, c in (brief.calcs or {}).items():
+        label, url = _method(brief, name)
         for d in (getattr(c, "inputs", {}), getattr(c, "results", {})):
             for v in d.values():
                 if isinstance(v, (int, float)):
                     for x in {float(v), float(v) * 100, float(v) * 12}:
-                        idx.append((x, "calculation", "GLIVARAO calculation (hypothetical inputs)", ""))
+                        idx.append((x, "calculation", label, url))
     return idx
+
+
+def _rounding_unit(s: float) -> float:
+    """The rounding GLIVARAO uses when it speaks a number (calculators.spoken_money)."""
+    a = abs(s)
+    return 100_000 if a >= 1_000_000 else 1_000 if a >= 10_000 else 100 if a >= 1_000 else 1
 
 
 def _match(v: float, idx) -> tuple | None:
     for s, status, label, url in idx:
-        if abs(v - s) <= max(0.51, 0.015 * abs(s)):
+        if abs(v - s) <= max(0.51, 0.015 * abs(s), _rounding_unit(s) / 2 + 1e-9):
             return status, label, url
     return None
 
@@ -125,17 +154,27 @@ def check_claims(script: Script, brief, creator_text: str = "") -> list[Claim]:
         if scene.chart.kind != "none" and scene.chart.kind != "compound_growth" and scene.chart.values:
             src = scene.chart.source
             url = next((f.url for f in brief.facts if f.url and f.source and f.source in src), "")
-            status = "calculation" if "calculat" in src.lower() else ("source" if url else "reference")
+            status = "calculation" if "calculat" in src.lower() else ("source" if url else "UNSOURCED")
+            if status == "calculation":
+                src, url = _method(brief, "fees" if "fee" in scene.chart.title.lower() else "")
             claims.append(Claim(i, f"Chart: {scene.chart.title}", list(scene.chart.values), status, src, url))
+        if scene.chart.kind == "compound_growth":
+            src, url = _method(brief) if brief.family in ("grow", "invest") else METHOD["grow"]
+            claims.append(Claim(i, f"Chart: {scene.chart.title}", [], "calculation", src, url))
     return claims
 
 
+def needs_source(claims: list[Claim]) -> list[Claim]:
+    """Claims without a source URL (your own personal experience is listed separately, not counted here)."""
+    return [c for c in claims if c.status != "creator" and not c.url]
+
+
 def report(claims: list[Claim], limit: int = 40) -> str:
-    n_bad = sum(c.status == "UNSOURCED" for c in claims)
+    n_bad = len(needs_source(claims))
     n_creator = sum(c.status == "creator" for c in claims)
     head = (f"FACT CHECK: {len(claims)} numbers/claims. "
-            + (f"⚠️ {n_bad} have NO SOURCE. " if n_bad else "All have a source or calculation. ")
-            + (f"🗣 {n_creator} come from your input; please confirm." if n_creator else ""))
+            + (f"⚠️ {n_bad} have NO SOURCE URL. " if n_bad else "✅ Every claim has a source URL. ")
+            + (f"🗣 {n_creator} come from your own experience; please confirm." if n_creator else ""))
     lines = [c.line(i + 1) for i, c in enumerate(claims[:limit])]
     if len(claims) > limit:
         lines.append(f"... and {len(claims) - limit} more in fact_check.md")
@@ -162,4 +201,4 @@ def add_sources_to_description(description: str, claims: list[Claim]) -> str:
     return description.rstrip() + "\n\n" + block + "\n"
 
 
-__all__ = ["check_claims", "report", "source_urls", "add_sources_to_description", "Claim", "numbers_in"]
+__all__ = ["check_claims", "report", "needs_source", "source_urls", "add_sources_to_description", "Claim", "numbers_in"]

@@ -17,7 +17,7 @@ import anthropic
 
 from ..config import Settings
 from ..models import Script
-from .prompts import (SCRIPT_SCHEMA, SYSTEM_PROMPT, WORDS_PER_MINUTE, normalize_direction, originality_prompt,
+from .prompts import (SCRIPT_SCHEMA, SYSTEM_PROMPT, WORDS_PER_MINUTE, normalize_direction, originality_prompt, sources_prompt,
                       revise_prompt, user_prompt)
 
 log = logging.getLogger(__name__)
@@ -154,3 +154,13 @@ def rewrite_for_originality(script: Script, reasons: list[str], phrases: list[st
                                                                  script.format), script.format)
     out = _to_script(data, script.format, script.topic)
     return out.model_copy(update={"style": script.style})
+
+
+def rewrite_for_sources(script: Script, unsourced: list[str], settings: Settings, client=None,
+                        ledger: ClaudeSpendLedger | None = None) -> Script:
+    """One paid rewrite that removes or replaces claims without a source on the fact sheet."""
+    if client is None:
+        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+    ledger = ledger or ClaudeSpendLedger(Path(settings.claude_spend_ledger_path))
+    data = _request(client, settings, ledger, sources_prompt(script.model_dump_json(), unsourced), script.format)
+    return _to_script(data, script.format, script.topic).model_copy(update={"style": script.style})

@@ -1,0 +1,9 @@
+[Unit]
+Description=Pick and announce the next video's topic every evening (America/New_York)
+
+[Timer]
+OnCalendar=*-*-* 17:37:00 America/New_York
+Persistent=true
+
+[Install]
+WantedBy=timers.target

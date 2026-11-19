@@ -68,7 +68,8 @@ def make_metadata(b: Brief, script: Script, variant: str = "") -> dict:
     title, thumb = titles_for(b, variant)
     if script.format == "short" and "#shorts" not in title.lower():
         title = f"{title} #Shorts"
-    sources = [f"- {f.source}: {f.url}" for f in b.facts if f.url]
+    # sources of what the video says (research evidence such as search-suggestion links stays in the review)
+    sources = [f"- {f.source}: {f.url}" for f in b.facts if f.url and f.source != "Google search suggestions"]
     calcs = [f"- {f.text}" for f in b.facts if f.kind == "CALCULATION"]
     desc = [f"{b.topic}, explained in plain English with original hand-drawn animation, for viewers in the US "
             "and Canada.", "", "{CHAPTERS}"]

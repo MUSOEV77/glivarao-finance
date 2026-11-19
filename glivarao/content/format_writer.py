@@ -48,6 +48,16 @@ def creator_scene(text: str, rng: random.Random) -> Scene:
         update={"beat": "creator", "key_points": []})
 
 
+def _spoken_date(iso: str) -> str:
+    from datetime import date as _d
+
+    try:
+        d = _d.fromisoformat(iso)
+        return f"{d.strftime('%B')} {d.day}, {d.year}"
+    except ValueError:
+        return "recently"
+
+
 def _b(scene: Scene, beat: str) -> Scene:
     return scene.model_copy(update={"beat": beat})
 
@@ -124,17 +134,28 @@ def write_long_format(b: Brief, style: str, creator_text: str = "", used_lines: 
         sc.append(_b(_s("The verdict", f"So which is better? For most people, {_lc(acts[0])}. But your own "
                         "numbers and goals decide. Run the comparison with your real figures.", "scale", "studio"),
                      "verdict"))
-    elif style == "news_breakdown" and hook:
-        sc.append(_b(_s("What changed", f"{intro} {hook[0]} That's from the US Consumer Financial Protection Bureau's "
-                        "public complaint database.", "warning", "city", key_points=hook[1]), "update"))
+    elif style == "news_breakdown" and (hook or b.news):
+        if b.news:  # a fresh official release, quoted with its date and source
+            n = b.news[0]
+            when = _spoken_date(n["date"])
+            summary = re.sub(r"^IR-\d{4}-\d+,[^—]*—\s*", "", n.get("summary", "")).strip()  # drop "IR-..., date —"
+            summary = re.split(r"(?<=[a-z0-9)][.!?])\s+(?=[A-Z])", summary)[0] if summary else ""
+            agency = re.sub(r"\s*\(.*\)", "", n["source"])
+            sc.append(_b(_s("What changed", f"{intro} On {when}, the {agency} announced: {n['title']}. "
+                            f"{summary} The link is in the description.", "warning", "city"), "update"))
+        else:
+            sc.append(_b(_s("What changed", f"{intro} {hook[0]} That's from the US Consumer Financial Protection "
+                            "Bureau's public complaint database.", "warning", "city", key_points=hook[1]), "update"))
         sc.append(_s("What it means", lib["how"][0][1], lib["how"][0][2], lib["how"][0][3]))
         sc.append(_s("Who is affected", lib["how"][-1][1], lib["how"][-1][2], lib["how"][-1][3]))
         sc += math[:1]
         if take:
             sc.append(take)
         sc.append(plan)
-        sc.append(_s("What to watch next", "Complaint numbers are a signal, not a full picture of every consumer. "
-                     "We'll keep watching the data, and update you if it changes again.", "calendar", "studio"))
+        sc.append(_s("What to watch next", ("Official announcements can be followed by details and deadlines. "
+                     "Check the source linked below before you act, and we'll cover it if it changes again.")
+                     if b.news else ("Complaint numbers are a signal, not a full picture of every consumer. "
+                     "We'll keep watching the data, and update you if it changes again."), "calendar", "studio"))
     else:  # explainer (and the fallback when a format's material is missing)
         style = "explainer"
         fmt = FORMATS[style]

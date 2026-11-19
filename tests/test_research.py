@@ -117,7 +117,11 @@ class FakeSession:
 
 def test_run_research_writes_report(tmp_path):
     rep = run_research(TODAY, tmp_path, session=FakeSession())
-    assert [s["ok"] for s in rep["sources"]] == [True, True, True, False, True]
+    ok = {s["name"]: s["ok"] for s in rep["sources"]}
+    assert [v for k, v in ok.items() if k.startswith(("Stack", "CFPB", "Wikipedia"))] == [True, True, True, True]
+    assert not next(v for k, v in ok.items() if k.startswith("YouTube"))
+    # the new fresh-signal sources are present in the report (the fake session doesn't serve them -> not ok)
+    assert any(k.startswith("Official news") for k in ok) and any(k.startswith("Google Trends") for k in ok)
     assert rep["ranked"] and rep["ranked"][0]["rank"] == 1 and rep["recommended"]
     md = (tmp_path / "2026-11-18.md").read_text()
     assert "Report only" in md and "UNAVAILABLE" in md and "will go viral" in md and "Recommended pick" in md

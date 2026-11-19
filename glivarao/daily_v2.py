@@ -46,9 +46,11 @@ def _recent_categories(store: JobStore, today: date, days: int = 7) -> list[str]
     return [h[2] for h in hist if len(h) > 2 and h[0] > cutoff]
 
 
-def _mark_used(store: JobStore, today: date, key: str, category: str = "") -> None:
+def _mark_used(store: JobStore, today: date, key: str, category: str = "", family: str = "", angle: str = "") -> None:
     hist = json.loads(store.kv_get("used_topics", "[]"))
-    hist.append([today.isoformat(), key, category])
+    if any(h[1] == key and h[0] == today.isoformat() for h in hist):
+        return
+    hist.append([today.isoformat(), key, category, family, angle])
     store.kv_set("used_topics", json.dumps(hist[-500:]))
 
 
@@ -147,7 +149,7 @@ def run_daily_v2(settings: Settings, store: JobStore, today: date | None = None,
     cached = research_dir / f"{today.isoformat()}.json"
     paid = paid_writer_allowed(settings)
     item, creator, style = None, "", None
-    if settings.topic_mode == "queue":  # only topics YOU picked, with YOUR input
+    if settings.topic_mode == "queue":  # manual mode: only topics YOU picked from the weekly ideas
         ok, why = pace_check(store, today, settings)
         if not ok:
             return DailyResult("", "skipped", note=why)
@@ -156,14 +158,20 @@ def run_daily_v2(settings: Settings, store: JobStore, today: date | None = None,
         if not ready:
             return DailyResult("", "waiting", note=_remind(settings, store, send))
         item = ready[0]
-        card, creator, style = item.card, item.creator_input, item.format
-        report = json.loads(cached.read_text()) if cached.exists() else {"ranked": []}
-    else:  # TOPIC_MODE=auto (development / backtests only)
-        report = json.loads(cached.read_text()) if cached.exists() else run_research(today, research_dir, store)
-        card = pick_card(report, _used_topics(store, today), free_writer=not paid,
-                         recent_categories=_recent_categories(store, today))
-        if card is None:
-            raise RuntimeError("No eligible finance topic found in today's research")
+    else:  # automatic (default): research picks the topic; your take is optional within a time window
+        from .studio.planner import input_window_over, plan_next
+
+        ok, why = pace_check(store, today, settings)
+        if not ok:
+            return DailyResult("", "skipped", note=why)
+        item = plan_next(settings, store, today, research_dir, send)
+        if item is None:
+            return DailyResult("", "waiting", note="no topic passed today's checks (no repeats, rotation)")
+        if item.status == "awaiting_input" and not input_window_over(item, settings):
+            return DailyResult("", "waiting", note=f"waiting up to {settings.creator_input_wait_hours:g} h for "
+                                                   f"your take on \"{item.topic}\" (announced in Telegram)")
+    card, creator, style = item.card, item.creator_input, item.format
+    report = json.loads(cached.read_text()) if cached.exists() else {"ranked": []}
     brief = build_brief(card, today)
     if not style:
         style = choose_format(brief, format_history(store))
@@ -196,7 +204,9 @@ def run_daily_v2(settings: Settings, store: JobStore, today: date | None = None,
         drafts.append((sh, sim))
         session.append(originality.entry(sh, brief.topic_key, today))
     result = DailyResult(brief.topic, writer, style=FORMATS.get(long_script.style or style, FORMATS["explainer"]).label)
-    _mark_used(store, today, brief.topic_key, brief.category)
+    from .studio.autopick import angle_text
+
+    _mark_used(store, today, brief.topic_key, brief.category, brief.family, angle_text(card))
 
     for script, sim in drafts:
         job = store.create(script.format, brief.topic)
@@ -205,6 +215,13 @@ def run_daily_v2(settings: Settings, store: JobStore, today: date | None = None,
         (out / "brief.json").write_text(brief.to_json())
         (out / "fact_sheet.md").write_text(brief.fact_sheet_md())
         claims = factcheck.check_claims(script, brief, creator)
+        missing = factcheck.needs_source(claims)
+        if missing and paid:  # every claim needs a source URL: ask Claude to source or remove the rest
+            from .scriptgen.claude import rewrite_for_sources
+
+            script = rewrite_for_sources(script, [c.text for c in missing], settings)
+            claims = factcheck.check_claims(script, brief, creator)
+            missing = factcheck.needs_source(claims)
         (out / "fact_check.md").write_text("# " + factcheck.report(claims, limit=500).replace("\n", "\n\n") + "\n")
         job.script_path = str(out / "script.json")
         Path(job.script_path).write_text(script.model_dump_json(indent=2))
@@ -216,6 +233,9 @@ def run_daily_v2(settings: Settings, store: JobStore, today: date | None = None,
             report_c.errors.append(f"Finance-only gate failed: {why}")
         if not sim.ok:
             report_c.errors.append("Too similar to earlier videos even after rewriting: " + "; ".join(sim.reasons))
+        if missing:
+            report_c.errors.append(f"{len(missing)} claim(s) without a source URL: "
+                                   + " | ".join(c.text[:80] for c in missing[:3]))
         (out / "compliance.txt").write_text(report_c.summary() + "\n\n" + sim.summary())
         if not report_c.ok:
             store.transition(job, JobStatus.REJECTED_COMPLIANCE, report_c.summary()[:500])
@@ -266,8 +286,8 @@ def run_daily_v2(settings: Settings, store: JobStore, today: date | None = None,
                 from .render.video import preview_clip
 
                 preview = preview_clip(res.video, out / "preview.mp4")
-            checks = "\n\n".join([report_c.summary(), sim.summary(), factcheck.report(claims),
-                                   disc.review_text()])
+            checks = "\n\n".join([_topic_block(brief, item, script), report_c.summary(), sim.summary(),
+                                   factcheck.report(claims), disc.review_text()])
             request_approval(job, store, settings, script, checks, preview=preview,
                              attachments=[(why_md, "Why this topic (research evidence)"),
                                           (out / "fact_check.md", "Fact check: every number and its source"),
@@ -367,10 +387,31 @@ def _notify(settings: Settings, text: str) -> None:
         log.exception("could not send Telegram alert")
 
 
+def _topic_block(brief, item, script) -> str:
+    """First thing in the review message: what the topic is and why it was picked."""
+    from .studio.formats import FORMATS
+
+    how = "picked automatically by research" if (item is None or item.auto) else "picked by you"
+    lines = [f"TOPIC: {brief.topic} ({how})",
+             f"FORMAT: {FORMATS.get(script.style or '', FORMATS['explainer']).label if script.format == 'long' else script.style}",
+             "WHY THIS TOPIC:"]
+    lines += [f"• {w}" for w in ((item.why if item is not None and item.why else brief.why)[:8])]
+    take = (item.creator_input if item is not None else "") or ""
+    lines.append(f"YOUR TAKE: \"{take[:300]}\"" if take else "YOUR TAKE: none received (made without \"My take\")")
+    lines.append("Don't like the topic? Tap ❌ Reject: the whole video is discarded and nothing is uploaded.")
+    return "\n".join(lines)
+
+
 def _why_card(brief, report: dict, item=None) -> str:
     runners = [t for t in report.get("ranked", [])[:4] if t["key"] != brief.topic_key][:2]
-    picked = (f"Picked by you on {item.picked_at[:10]} from the weekly ideas. Your take: \"{item.creator_input}\""
-              if item is not None else "Chosen automatically (TOPIC_MODE=auto).")
+    if item is not None and item.auto:
+        picked = "Picked automatically by research.\n\n" + "\n".join(f"- {w}" for w in item.why)
+    elif item is not None:
+        picked = f"Picked by you on {item.picked_at[:10]} from the weekly ideas."
+    else:
+        picked = "Picked automatically."
+    if item is not None and item.creator_input:
+        picked += f"\n\nYour take: \"{item.creator_input}\""
     lines = [f"# Why \"{brief.topic}\" was chosen ({brief.date})", "", picked, "",
              f"Research score {brief.score}/100 · {brief.confidence} confidence · {brief.category} · {brief.market}",
              "", "## Evidence"] + [f"- {w}" for w in brief.why]

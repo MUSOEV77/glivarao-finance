@@ -110,7 +110,8 @@ def test_daily_v2_orchestration_with_stubbed_render(settings, store, tmp_path, m
 
     rdir = tmp_path / "research"
     rdir.mkdir()
-    (rdir / "2026-11-18.json").write_text(json.dumps({"ranked": [card(), card("mortgage", "Mortgages")]}))
+    (rdir / "2026-11-18.json").write_text(json.dumps({"ranked": [card(), card("mortgage", "Mortgages",
+                                                                              "Saving and Wealth Building")]}))
 
     def fake_render(script, out, s, voice=None, workers=None):
         out.mkdir(parents=True, exist_ok=True)
@@ -127,7 +128,7 @@ def test_daily_v2_orchestration_with_stubbed_render(settings, store, tmp_path, m
     monkeypatch.setattr(te, "make_thumbnail", lambda sc, dst, portrait=False, theme="": (dst.write_bytes(b"jpg"), dst)[1])
     from dataclasses import replace
 
-    settings = replace(settings, topic_mode="auto", min_days_between_long=0)  # development mode: research picks
+    settings = replace(settings, topic_mode="auto", min_days_between_long=0, creator_input_wait_hours=0)
     res = run_daily_v2(settings, store, today=TODAY, research_dir=rdir)
     assert res.topic == "Credit cards, interest and fees" and res.writer.startswith("free")
     assert [j[1] for j in res.jobs] == ["long", "short", "short"]
@@ -135,5 +136,8 @@ def test_daily_v2_orchestration_with_stubbed_render(settings, store, tmp_path, m
     meta = json.loads((settings.output_dir / res.jobs[0][0] / "metadata.json").read_text())
     assert "Chapters:" in meta["description"] and meta["voice"].startswith("Kokoro")
     # next day: the same topic is not repeated
+    import shutil
+
+    shutil.copy(rdir / "2026-11-18.json", rdir / "2026-11-19.json")
     res2 = run_daily_v2(settings, store, today=date(2026, 11, 19), research_dir=rdir)
     assert res2.topic == "Mortgages"

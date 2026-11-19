@@ -58,7 +58,8 @@ if [ "$SKIP_SYSTEMD" != "1" ]; then
   cp deploy/systemd/*.service deploy/systemd/*.timer /etc/systemd/system/
   cp deploy/logrotate-glivarao /etc/logrotate.d/glivarao
   systemctl daemon-reload
-  systemctl enable --now glivarao-daily.timer glivarao-poll.timer glivarao-backup.timer glivarao-propose.timer
+  systemctl disable --now glivarao-propose.timer 2>/dev/null || true   # weekly ideas are only for TOPIC_MODE=queue
+  systemctl enable --now glivarao-daily.timer glivarao-poll.timer glivarao-backup.timer glivarao-plan.timer
   systemctl list-timers 'glivarao-*' --no-pager
 fi
 echo "Done. Nothing is ever uploaded automatically. Manual upload: sudo -u glivarao $APP_DIR/.venv/bin/python -m glivarao publish <job_id>"

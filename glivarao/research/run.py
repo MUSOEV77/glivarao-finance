@@ -21,10 +21,21 @@ def run_research(today: date, out_dir: Path, store: JobStore | None = None, sess
     stamp = today.isoformat()
     raw = out_dir / "raw" / stamp
     http = Http(raw_dir=raw, session=session)
+    from .signals import google_trends, official_news, search_questions
+
     results = [stackexchange(http, today), cfpb(http, today), wiki_top(http, today),
                youtube_unavailable("not configured: no YouTube Data API key")]
     se, cf, wt = (r.items if r.ok else [] for r in results[:3])
-    cands, rejected = build_candidates(se, cf, wt)
+    news_r, trends_r = official_news(http, today), google_trends(http)
+    results += [news_r, trends_r]
+    cands, rejected = build_candidates(se, cf, wt, news_r.items, trends_r.items)
+
+    # common questions people search for: concept topics that already have some evidence
+    concept_cands = [c for c in cands.values() if c.concept is not None][:40]
+    sq = search_questions(http, {c.key: c.label for c in concept_cands})
+    results.append(sq)
+    for key, qs in (sq.items[0] if sq.items else {}).items():
+        cands[key].searches = qs
 
     # demand history from Wikipedia for candidates that have at least one other signal
     fetched = 0
@@ -78,6 +89,10 @@ def _card(c: Candidate, rank: int) -> dict:
                                  "year_ago": i["year_ago"], "top_sub_issue": i["top_sub_issue"], "link": i["link"]}
                                 for i in top_issues],
         "specific_angles": _angles(c),
+        "official_news": sorted(c.news, key=lambda n: n.get("date", ""), reverse=True)[:5],
+        "trending_searches": [{"query": t["query"], "traffic": t["traffic"], "geo": t["geo"], "url": t["url"],
+                               "news": t.get("news", [])[:2]} for t in c.trends[:3]],
+        "search_questions": c.searches[:10],
         "wikipedia": (f"https://en.wikipedia.org/wiki/{c.concept.wiki}" if c.concept and c.concept.wiki else
                       (f"https://en.wikipedia.org/wiki/{c.key[5:]}" if c.key.startswith("wiki:") else None)),
     }

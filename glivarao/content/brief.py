@@ -71,6 +71,8 @@ class Brief:
     problems: list[dict]
     facts: list[Fact] = field(default_factory=list)
     calcs: dict = field(default_factory=dict)
+    news: list = field(default_factory=list)        # fresh official releases (each with its URL)
+    search_questions: list = field(default_factory=list)
 
     def to_json(self) -> str:
         return json.dumps(asdict(self), indent=2, default=str)
@@ -102,8 +104,28 @@ def build_brief(card: dict, today: date) -> Brief:
         angle = f"Answer the question people keep asking: \"{card['viewer_questions'][0]['title']}\""
     else:
         angle = f"A clear, practical guide to {card['topic'].lower()}."
+    news = [n for n in card.get("official_news", []) if n.get("date") and
+            (today - date.fromisoformat(n["date"])).days <= 21]
+    if news and not (growing and growing[0]["complaints_90d"] / growing[0]["year_ago"] > 1.15):
+        angle = f"Fresh official news: {news[0]['source']} ({news[0]['date']}): \"{news[0]['title']}\". " \
+                "Explain what changed, what it means and what to do."
+    questions = card.get("viewer_questions", [])[:4]
+    if not questions and card.get("search_questions"):  # questions people type into Google
+        from ..research.signals import search_url
+
+        questions = [{"title": q[:1].upper() + q[1:] + ("" if q.endswith("?") else "?"), "views": 0,
+                      "link": search_url(q), "source": "Google search suggestions"}
+                     for q in card["search_questions"][:4]]
     b = Brief(today.isoformat(), key, card["topic"], card["category"], card["market"], fam, card["score"],
-              card["confidence"], card["why"], angle, card.get("viewer_questions", [])[:4], problems[:3])
+              card["confidence"], card["why"], angle, questions, problems[:3], news=news[:3],
+              search_questions=card.get("search_questions", [])[:10])
+    for n in news[:3]:
+        b.facts.append(Fact("DATA", f"{n['source']}, {n['date']}: {n['title']}. {n.get('summary', '')}".strip(),
+                            n["source"], n["url"]))
+    for q in questions:
+        if q.get("link"):
+            b.facts.append(Fact("DATA", f"Real question people ask: \"{q['title']}\"",
+                                q.get("source", "Stack Exchange Personal Finance & Money"), q["link"]))
     for p in problems[:3]:
         if p.get("year_ago"):
             b.facts.append(Fact("DATA", f"{p['complaints_90d']:,} CFPB complaints about \"{p['issue']}\" "
