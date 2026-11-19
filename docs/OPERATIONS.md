@@ -36,6 +36,7 @@ python -m glivarao list --status pending_approval
 python -m glivarao events <job_id>              # audit trail
 python -m glivarao decide <job_id> --approve --reason "reviewed locally"   # record a decision without Telegram
 python -m glivarao publish <job_id>             # MANUAL, interactive, private-only upload
+python -m glivarao pack <job_id>                # resend the upload pack (file, titles, description, tags, thumbnail, time) to Telegram
 ```
 
 ## Optional production schedule (renders and Telegram only, never uploads)

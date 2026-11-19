@@ -121,7 +121,14 @@ Approving uploads nothing.
    links. Optionally reply with your own take (text or voice note).
 2. **Next morning:** the video is written, fact-checked (every number with its source URL) and rendered.
 3. **Review:** the message starts with the topic and why it was picked. Approve, or reject the whole video.
-4. Upload manually when you want.
+4. After you approve, the **upload pack** arrives:
+   - the full-quality video file;
+   - three titles, the description and the tags (tap to copy);
+   - the thumbnail;
+   - the suggested publish time in New York and Tashkent time.
+
+   Save the video and upload it from the YouTube Studio app with **Schedule**. For long videos, set up large files
+   once: `docs/TELEGRAM_LARGE_FILES.md`.
 
 Send `/queue` to the bot any time. Full explanation: `docs/AUTHENTICITY.md`.
 
@@ -135,7 +142,7 @@ cd /opt/glivarao/app && sudo -u glivarao .venv/bin/python -m glivarao plan-next
 
 **What runs by itself:**
 - Next topic picked and announced every evening at 17:37 New York time (when the pace allows a video).
-- Production at 04:17 New York time (3 long videos a week by default, at least 2 days apart).
+- Production at 04:17 New York time: 16 long videos a month (spread evenly) and 3 Shorts every day.
 - Telegram approval check every 5 minutes.
 - Backup at 03:40.
 
@@ -159,10 +166,11 @@ df -h / && free -h
 cd /root/glivarao-src && git pull && bash deploy/install.sh
 ```
 
-**Upload an approved video to YouTube (manual, always private).** Replace `JOB_ID`. It asks you to retype the job ID:
+**Resend the upload pack of an approved video** (full-quality file, titles, description, tags, thumbnail, publish
+time). Replace `JOB_ID`:
 
 ```
-cd /opt/glivarao/app && sudo -u glivarao .venv/bin/python -m glivarao publish JOB_ID
+cd /opt/glivarao/app && sudo -u glivarao .venv/bin/python -m glivarao pack JOB_ID
 ```
 
 **List recent jobs:**

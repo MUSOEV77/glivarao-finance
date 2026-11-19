@@ -217,7 +217,7 @@ def test_daily_run_uses_only_your_picked_topics_with_your_input(settings, store,
     from glivarao.daily_v2 import run_daily_v2
 
     _stub_render(monkeypatch)
-    settings = replace(settings, topic_mode="queue")  # manual mode
+    settings = replace(settings, topic_mode="queue", min_days_between_long=2)  # manual mode
     rdir = tmp_path / "r"
     rdir.mkdir()
     q = TopicQueue(store)
@@ -227,7 +227,7 @@ def test_daily_run_uses_only_your_picked_topics_with_your_input(settings, store,
     assert res.jobs == [] and "Waiting for your take" in res.note       # no input -> nothing is made
     q.add_input(it.id, TAKE)
     res = run_daily_v2(settings, store, today=DAY, research_dir=rdir, send=False)
-    assert [j[1] for j in res.jobs] == ["long", "short", "short"] and all(j[2] == "rendered" for j in res.jobs)
+    assert [j[1] for j in res.jobs] == ["long", "short", "short", "short"] and all(j[2] == "rendered" for j in res.jobs)
     out = settings.output_dir / res.jobs[0][0]
     meta = json.loads((out / "metadata.json").read_text())
     assert meta["format"] == "case_study" and meta["creator_input"] == TAKE and meta["picked_by_you"]
@@ -242,18 +242,24 @@ def test_daily_run_uses_only_your_picked_topics_with_your_input(settings, store,
     q.pick(it2.id, "explainer")
     q.add_input(it2.id, "My own mortgage story.")
     res = run_daily_v2(settings, store, today=DAY + timedelta(days=1), research_dir=rdir, send=False)
-    assert res.jobs == [] and "day(s) ago" in res.note
+    assert res.jobs == [] and ("day(s) ago" in res.note or "on pace" in res.note)
 
 
-def test_pace_weekly_quota(settings, store):
+def test_pace_monthly_quota_spread_evenly(settings, store):
     from glivarao.daily_v2 import pace_check
 
-    s = replace(settings, long_videos_per_week=3, min_days_between_long=0)
-    monday = date(2026, 11, 16)
-    store.kv_set("long_dates", json.dumps([str(monday), str(monday + timedelta(days=2)), str(monday + timedelta(days=4))]))
-    ok, why = pace_check(store, monday + timedelta(days=5), s)
-    assert not ok and "3/3" in why
-    assert pace_check(store, monday + timedelta(days=7), s)[0]  # new week
+    s = replace(settings, long_videos_per_month=16, min_days_between_long=1)
+    nov = [date(2026, 11, d) for d in range(1, 31)]
+    made = []
+    for d in nov:  # simulate a month: produce whenever the pace allows
+        store.kv_set("long_dates", json.dumps([str(x) for x in made]))
+        if pace_check(store, d, s)[0]:
+            made.append(d)
+    assert len(made) == 16                                       # exactly 16 long videos
+    assert all((b - a).days >= 1 for a, b in zip(made, made[1:]))
+    assert made[7] <= date(2026, 11, 16)                         # spread through the month, not front-loaded
+    store.kv_set("long_dates", json.dumps([str(x) for x in made]))
+    assert "monthly pace reached" in pace_check(store, date(2026, 11, 30), s)[1]
 
 
 def test_supervised_run_does_not_mark_day_done_when_nothing_was_made(settings, store, monkeypatch):

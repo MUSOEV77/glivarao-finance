@@ -131,7 +131,7 @@ def test_daily_v2_orchestration_with_stubbed_render(settings, store, tmp_path, m
     settings = replace(settings, topic_mode="auto", min_days_between_long=0, creator_input_wait_hours=0)
     res = run_daily_v2(settings, store, today=TODAY, research_dir=rdir)
     assert res.topic == "Credit cards, interest and fees" and res.writer.startswith("free")
-    assert [j[1] for j in res.jobs] == ["long", "short", "short"]
+    assert [j[1] for j in res.jobs] == ["long", "short", "short", "short"]
     assert all(j[2] == "rendered" for j in res.jobs)  # Telegram not configured -> stays rendered, nothing uploaded
     meta = json.loads((settings.output_dir / res.jobs[0][0] / "metadata.json").read_text())
     assert "Chapters:" in meta["description"] and meta["voice"].startswith("Kokoro")

@@ -46,12 +46,13 @@ def _recent_categories(store: JobStore, today: date, days: int = 7) -> list[str]
     return [h[2] for h in hist if len(h) > 2 and h[0] > cutoff]
 
 
-def _mark_used(store: JobStore, today: date, key: str, category: str = "", family: str = "", angle: str = "") -> None:
-    hist = json.loads(store.kv_get("used_topics", "[]"))
-    if any(h[1] == key and h[0] == today.isoformat() for h in hist):
+def _mark_used(store: JobStore, today: date, topic_key: str, category: str = "", family: str = "", angle: str = "",
+               key: str = "used_topics") -> None:
+    hist = json.loads(store.kv_get(key, "[]"))
+    if any(h[1] == topic_key and h[0] == today.isoformat() for h in hist):
         return
-    hist.append([today.isoformat(), key, category, family, angle])
-    store.kv_set("used_topics", json.dumps(hist[-500:]))
+    hist.append([today.isoformat(), topic_key, category, family, angle])
+    store.kv_set(key, json.dumps(hist[-500:]))
 
 
 def finance_only_check(script: Script) -> tuple[bool, str]:
@@ -61,13 +62,20 @@ def finance_only_check(script: Script) -> tuple[bool, str]:
 
 
 def pace_check(store: JobStore, today: date, settings: Settings) -> tuple[bool, str]:
-    """Quality over quantity: at most LONG_VIDEOS_PER_WEEK long videos per ISO week, spaced
-    MIN_DAYS_BETWEEN_LONG days apart."""
+    """Quality over quantity: LONG_VIDEOS_PER_MONTH long videos, spread evenly through the month (never more than
+    the month's share so far), at least MIN_DAYS_BETWEEN_LONG days apart."""
+    import calendar
+    import math
+
     dates = [date.fromisoformat(d) for d in json.loads(store.kv_get("long_dates", "[]"))]
-    week = today.isocalendar()[:2]
-    this_week = [d for d in dates if d.isocalendar()[:2] == week]
-    if len(this_week) >= settings.long_videos_per_week:
-        return False, f"weekly pace reached ({len(this_week)}/{settings.long_videos_per_week} long videos this week)"
+    month = [d for d in dates if (d.year, d.month) == (today.year, today.month)]
+    target = settings.long_videos_per_month
+    days = calendar.monthrange(today.year, today.month)[1]
+    due = min(target, math.ceil(target * today.day / days))
+    if len(month) >= target:
+        return False, f"monthly pace reached ({len(month)}/{target} long videos this month)"
+    if len(month) >= due:
+        return False, f"on pace: {len(month)} of {target} long videos so far this month (next one is due later)"
     if dates and (today - max(dates)).days < settings.min_days_between_long:
         return False, f"last long video was {(today - max(dates)).days} day(s) ago (minimum gap " \
                       f"{settings.min_days_between_long})"
@@ -144,11 +152,12 @@ def run_daily_v2(settings: Settings, store: JobStore, today: date | None = None,
     from .studio.queue import TopicQueue
 
     today = today or date.today()
-    shorts = settings.shorts_per_long if shorts is None else shorts
+    shorts = settings.shorts_per_day if shorts is None else shorts
     research_dir = research_dir or Path("reports/research")
     cached = research_dir / f"{today.isoformat()}.json"
     paid = paid_writer_allowed(settings)
     item, creator, style = None, "", None
+    shorts_only, pace_note, short_why = False, "", []
     if settings.topic_mode == "queue":  # manual mode: only topics YOU picked from the weekly ideas
         ok, why = pace_check(store, today, settings)
         if not ok:
@@ -162,16 +171,36 @@ def run_daily_v2(settings: Settings, store: JobStore, today: date | None = None,
         from .studio.planner import input_window_over, plan_next
 
         ok, why = pace_check(store, today, settings)
-        if not ok:
-            return DailyResult("", "skipped", note=why)
-        item = plan_next(settings, store, today, research_dir, send)
-        if item is None:
-            return DailyResult("", "waiting", note="no topic passed today's checks (no repeats, rotation)")
-        if item.status == "awaiting_input" and not input_window_over(item, settings):
-            return DailyResult("", "waiting", note=f"waiting up to {settings.creator_input_wait_hours:g} h for "
-                                                   f"your take on \"{item.topic}\" (announced in Telegram)")
-    card, creator, style = item.card, item.creator_input, item.format
-    report = json.loads(cached.read_text()) if cached.exists() else {"ranked": []}
+        if ok:
+            item = plan_next(settings, store, today, research_dir, send)
+            if item is None:
+                ok, why = False, "no long-video topic passed today's checks (no repeats, rotation)"
+            elif item.status == "awaiting_input" and not input_window_over(item, settings):
+                ok, why = False, (f"waiting up to {settings.creator_input_wait_hours:g} h for your take on "
+                                  f"\"{item.topic}\" (announced in Telegram)")
+        if not ok:  # no long video today: today's Shorts get their own topic
+            item = None
+            if settings.shorts_per_day <= 0:
+                return DailyResult("", "skipped", note=why)
+            shorts_only = True
+            pace_note = why
+    if not shorts_only:
+        card, creator, style = item.card, item.creator_input, item.format
+        report = json.loads(cached.read_text()) if cached.exists() else {"ranked": []}
+    else:
+        from .studio.autopick import pick_topic
+
+        report = json.loads(cached.read_text()) if cached.exists() else run_research(today, research_dir, store)
+        from .studio.planner import active_item
+
+        planned = active_item(store)  # never collide with the long video that is waiting for your take
+        recent_long = {h[1] for h in json.loads(store.kv_get("used_topics", "[]"))[-3:]}
+        card, short_why, _ = pick_topic(report, store, free_writer=not paid, history_key="used_short_topics",
+                                        recent_videos=10, family_gap=0,
+                                        exclude=recent_long | ({planned.key} if planned else set()))
+        if card is None:
+            return DailyResult("", "skipped", note=f"{pace_note}; no Shorts topic passed today's checks")
+        style = "explainer"
     brief = build_brief(card, today)
     if not style:
         style = choose_format(brief, format_history(store))
@@ -179,34 +208,45 @@ def run_daily_v2(settings: Settings, store: JobStore, today: date | None = None,
     used = originality.used_lines(store)
     writer = "claude" if paid else "free (format templates + research data + exact math)"
     history = originality.load_history(store)
-    long_script, long_sim = _originality_gate(
-        _write_long(brief, style, creator, used, paid, settings), brief, today, history, settings, paid, used,
-        lambda k: _write_long(brief, style if k < 2 else choose_format(brief, [style]), creator, used, paid,
-                              settings, variant=k))
-    drafts = [(long_script, long_sim)]
+    if shorts_only:
+        long_script, drafts = None, []
+    else:
+        long_script, long_sim = _originality_gate(
+            _write_long(brief, style, creator, used, paid, settings), brief, today, history, settings, paid, used,
+            lambda k: _write_long(brief, style if k < 2 else choose_format(brief, [style]), creator, used, paid,
+                                  settings, variant=k))
+        drafts = [(long_script, long_sim)]
+    lead_style = long_script.style if long_script is not None else style
+    lead_hook = long_script.hook if long_script is not None else ""
     # Shorts are checked against past videos and each other. Sharing a line with their own companion long video
     # is normal (they point to it); their own hook and point are enforced below and by the writer.
     session = list(history)
-    for sh in _write_shorts(brief, long_script.style or style, shorts, used + [long_script.hook], paid, settings):
+    for sh in _write_shorts(brief, lead_style, shorts, used + [lead_hook], paid, settings):
         alternates: list = []
 
         def regen(k, sh=sh, alternates=alternates):  # free writer only (paid drafts are rewritten by Claude)
             if not alternates:
                 taken = {d[0].style for d in drafts}
-                alternates += [x for x in _write_shorts(brief, long_script.style or style, 5, used + [sh.hook],
+                alternates += [x for x in _write_shorts(brief, lead_style, 5, used + [sh.hook],
                                                         False, settings) if x.style not in taken]
             return alternates.pop(0) if alternates else sh
 
         sh, sim = _originality_gate(sh, brief, today, session, settings, paid, used, regen)
-        if sh.hook and sh.hook.strip().lower() == (long_script.hook or "").strip().lower():
+        if sh.hook and lead_hook and sh.hook.strip().lower() == lead_hook.strip().lower():
             sim.ok = False
             sim.reasons.append("the Short reuses the long video's opening line")
         drafts.append((sh, sim))
         session.append(originality.entry(sh, brief.topic_key, today))
-    result = DailyResult(brief.topic, writer, style=FORMATS.get(long_script.style or style, FORMATS["explainer"]).label)
+    result = DailyResult(brief.topic, writer, style=("Shorts only" if shorts_only else
+                                                     FORMATS.get(lead_style or "", FORMATS["explainer"]).label),
+                         note=pace_note)
     from .studio.autopick import angle_text
 
-    _mark_used(store, today, brief.topic_key, brief.category, brief.family, angle_text(card))
+    if shorts_only:
+        _mark_used(store, today, brief.topic_key, brief.category, brief.family, angle_text(card),
+                   key="used_short_topics")
+    else:
+        _mark_used(store, today, brief.topic_key, brief.category, brief.family, angle_text(card))
 
     for script, sim in drafts:
         job = store.create(script.format, brief.topic)
@@ -246,13 +286,17 @@ def run_daily_v2(settings: Settings, store: JobStore, today: date | None = None,
             disc = disclosure.disclosure_for(res.voice)
             desc = factcheck.add_sources_to_description(script.description, claims)
             desc = disclosure.add_note(desc, disc)
+            from .content.packaging import add_affiliate_disclosure, title_options
+
+            desc = add_affiliate_disclosure(desc, settings.affiliate_disclosure)
             script = script.model_copy(update={"description": finalize_description(
                 desc, [s.heading for s in script.scenes], res.scene_starts or [], script.format == "long")})
             Path(job.script_path).write_text(script.model_dump_json(indent=2))
             thumb = make_thumbnail(script, out / "thumbnail.jpg", portrait=script.format == "short",
                                    theme=getattr(settings, "theme", "editorial"))
             (out / "metadata.json").write_text(json.dumps(
-                {"title": script.title, "description": script.description, "tags": script.tags,
+                {"title": script.title, "title_options": title_options(brief, script),
+                 "description": script.description, "tags": script.tags,
                  "topic_key": brief.topic_key, "category": brief.category, "market": brief.market,
                  "format": script.style, "creator_input": creator, "picked_by_you": item is not None,
                  "research_score": brief.score, "confidence": brief.confidence, "writer": writer,

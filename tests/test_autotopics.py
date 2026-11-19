@@ -110,13 +110,15 @@ def test_daily_auto_waits_for_take_then_produces(settings, store, tmp_path, monk
     from glivarao.daily_v2 import run_daily_v2
 
     _stub_render(monkeypatch)
-    rdir = _report_file(tmp_path, card())
+    rdir = _report_file(tmp_path, card(), card("retirement_401k", "401(k) plans", "Saving and Wealth Building"))
     res = run_daily_v2(settings, store, today=DAY, research_dir=rdir, send=False)
-    assert res.jobs == [] and "waiting up to 10 h" in res.note
+    # waiting for your take on the long video -> today is a Shorts day on a DIFFERENT topic
+    assert [j[1] for j in res.jobs] == ["short"] * 3 and "waiting up to 10 h" in res.note
+    assert res.topic == "401(k) plans" and TopicQueue(store).items()[0].topic.startswith("Credit cards")
     it = TopicQueue(store).items()[0]
     TopicQueue(store).add_input(it.id, "I once found a charge I never made on my statement.")
     res = run_daily_v2(settings, store, today=DAY, research_dir=rdir, send=False)
-    assert [j[1] for j in res.jobs] == ["long", "short", "short"]
+    assert [j[1] for j in res.jobs] == ["long", "short", "short", "short"]
     meta = json.loads((settings.output_dir / res.jobs[0][0] / "metadata.json").read_text())
     assert meta["creator_input"] and not meta["picked_by_you"] is False
 
@@ -126,13 +128,14 @@ def test_daily_auto_produces_without_take_after_window(settings, store, tmp_path
 
     _stub_render(monkeypatch)
     rdir = _report_file(tmp_path, card())
-    run_daily_v2(settings, store, today=DAY, research_dir=rdir, send=False)
+    first = run_daily_v2(settings, store, today=DAY, research_dir=rdir, send=False)
+    assert first.jobs == [] and "no Shorts topic" in first.note   # the only topic is reserved for the long video
     q = TopicQueue(store)
     it = q.items()[0]
     q.update(it.id, picked_at=(datetime.now(timezone.utc) - timedelta(hours=11)).isoformat(timespec="seconds"))
     assert input_window_over(q.get(it.id), settings)
     res = run_daily_v2(settings, store, today=DAY, research_dir=rdir, send=False)
-    assert [j[2] for j in res.jobs] == ["rendered"] * 3
+    assert [j[2] for j in res.jobs] == ["rendered"] * 4
     script = json.loads((settings.output_dir / res.jobs[0][0] / "script.json").read_text())
     assert not any(sc.get("beat") == "creator" for sc in script["scenes"])
 

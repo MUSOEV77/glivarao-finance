@@ -11,7 +11,7 @@ checked facts. These are not tricks: they are the human input and editorial stan
 | **Every evening ~17:37 ET** (when the pace allows a video) | Fresh research picks the next topic and format, then Telegram announces it with **why it was picked and the source links** | Nothing. *Optionally* reply with your take (text or voice note) |
 | Next morning, 04:17 ET | The long video + 2 Shorts are written, fact-checked and rendered. Your take is included if it arrived within 10 hours (`CREATOR_INPUT_WAIT_HOURS`) | — |
 | After rendering | The review arrives. It **starts with the topic and why it was picked**, then the fact check (every claim with its source URL), the originality report and the AI disclosure | Approve, or **reject the whole video** if you don't like the topic |
-| When you choose | — | Upload manually (always private) and publish in YouTube Studio |
+| After you approve | The **upload pack** arrives: full-quality video file, 3 titles, description (sources, AI note, affiliate disclosure), tags, thumbnail, suggested publish time (New York + Tashkent) | Save the file, upload in the YouTube Studio app and use **Schedule** |
 
 On the announcement you can tap **🔁 Other format** or **⏭ Skip this topic** (another one is picked on the next run).
 Send **/queue** to see what's planned.
@@ -80,10 +80,11 @@ The manual mode with weekly ideas still exists (`TOPIC_MODE=queue`) if you ever 
    - Each Short gets a different kind (one number, myth, mistake, viewer question, or tip), its own hook, and its
      own single point. It is not a cut of the long video.
    - The two Shorts never share a hook, and never reuse the long video's opening.
-7. **Pace: quality over quantity.**
-   - Default: 3 long videos a week, at least 2 days apart, plus 2 Shorts each.
-   - To change it, set these in `.env` (see the commands below): `LONG_VIDEOS_PER_WEEK`, `MIN_DAYS_BETWEEN_LONG`,
-     `SHORTS_PER_LONG` and `TOPIC_IDEAS_PER_WEEK`.
+7. **Pace.**
+   - Default: 16 long videos a month, spread evenly, and 3 Shorts every day (90 a month).
+   - On days without a long video, the Shorts get their own topic. They never reuse the topic of the long video
+     waiting for your take, or of the last 3 long videos.
+   - Settings: `LONG_VIDEOS_PER_MONTH`, `SHORTS_PER_DAY`, `MIN_DAYS_BETWEEN_LONG`.
 8. **AI disclosure.**
    - **YouTube:** the "altered or synthetic content" setting is **No** for our videos. They are illustrated, show
      no realistic people or events, and use a generic narrator voice that imitates nobody. YouTube's rules target
@@ -118,9 +119,9 @@ The manual mode with weekly ideas still exists (`TOPIC_MODE=queue`) if you ever 
 TOPIC_MODE=auto             # auto = research picks topics (default); queue = you pick from weekly ideas
 CREATOR_INPUT_WAIT_HOURS=10 # auto: how long to wait for your optional take
 REQUIRE_CREATOR_INPUT=true  # queue mode only: no video without your take
-LONG_VIDEOS_PER_WEEK=3
-MIN_DAYS_BETWEEN_LONG=2
-SHORTS_PER_LONG=2
+LONG_VIDEOS_PER_MONTH=16
+MIN_DAYS_BETWEEN_LONG=1
+SHORTS_PER_DAY=3
 TOPIC_IDEAS_PER_WEEK=6      # 5-7
 SIMILARITY_MAX_PHRASE=0.25
 SIMILARITY_MAX_STRUCTURE=0.85

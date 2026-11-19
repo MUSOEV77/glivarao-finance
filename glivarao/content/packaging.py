@@ -106,3 +106,56 @@ def finalize_description(description: str, scene_headings: list[str], scene_star
         head, _, rest = description.partition("\n\n")
         description = f"{head}\n\n{{CHAPTERS}}{rest}" if rest else f"{head}\n\n{{CHAPTERS}}"
     return description.replace("{CHAPTERS}", block).replace("\n\n\n", "\n\n").rstrip() + "\n"
+
+
+FORMAT_TITLES = {
+    "myth_vs_fact": ["{t}: 3 Myths That Cost You Money", "Myth or Fact? {t}, Tested"],
+    "case_study": ["One Household, Two Choices: {t}", "What Would You Do? A {t} Case Study"],
+    "viewer_question": ["{q}", "You Asked: {q}"],
+    "comparison": ["{t}: Which Option Costs Less?", "Side by Side: {t}"],
+    "news_breakdown": ["{n}: What It Means for You", "What Just Changed With {t}"],
+    "explainer": ["{t}, Explained Simply", "How {t} Really Works"],
+}
+
+
+SMALL = {"a", "an", "and", "as", "at", "but", "by", "for", "in", "of", "on", "or", "the", "to", "vs", "with"}
+
+
+def title_case(text: str) -> str:
+    words = text.split()
+    out = []
+    for i, w in enumerate(words):
+        if w.isupper() and len(w) > 1 or any(ch.isdigit() for ch in w):  # APR, 401(k), 2027
+            out.append(w)
+        elif i and w.lower() in SMALL:
+            out.append(w.lower())
+        else:
+            out.append(w[:1].upper() + w[1:])
+    return " ".join(out)
+
+
+def title_options(b: Brief, script: Script) -> list[str]:
+    """The chosen title plus two honest alternatives (for YouTube Studio), all under 100 characters."""
+    t = b.topic.split(",")[0].strip()
+    q = (b.viewer_questions[0]["title"] if b.viewer_questions else f"Is {t} Worth It?").rstrip("?") + "?"
+    n = (b.news[0]["title"].split(",")[0] if getattr(b, "news", None) else t)
+    style = (script.style or "explainer")
+    pool = [script.title]
+    if script.format == "long":
+        pool += [x.format(t=t, q=q, n=n) for x in FORMAT_TITLES.get(style, FORMAT_TITLES["explainer"])]
+        pool += [titles_for(b)[0], titles_for(b, "the mistake")[0]]
+    else:
+        base = script.title.replace(" #Shorts", "")
+        pool += [f"{q}", f"{t} in 60 Seconds", f"The {t} Rule Nobody Explains", base]
+    out = []
+    for x in pool:
+        x = title_case(x.strip())[:100]
+        if x and x.lower() not in {o.lower() for o in out}:
+            out.append(x)
+    return out[:3]
+
+
+def add_affiliate_disclosure(description: str, text: str) -> str:
+    if not text or text in description:
+        return description
+    return description.rstrip() + "\n\n" + text + "\n"

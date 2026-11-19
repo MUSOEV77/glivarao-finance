@@ -4,6 +4,7 @@ After=network-online.target
 
 [Service]
 Type=oneshot
+TimeoutStartSec=45min
 User=glivarao
 WorkingDirectory=/opt/glivarao/app
 ExecStart=/opt/glivarao/app/.venv/bin/python -m glivarao poll-approvals

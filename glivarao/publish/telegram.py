@@ -61,7 +61,11 @@ class TelegramClient:
 
 
     def download(self, file_path: str, dst: Path) -> Path:
-        """Download a file sent to the bot (e.g. a voice note). Errors never include the URL/token."""
+        """Download a file sent to the bot (e.g. a voice note). Errors never include the URL/token.
+        With the local Bot API server (--local), getFile returns an absolute path on this machine."""
+        if file_path.startswith("/") and Path(file_path).is_file():
+            Path(dst).write_bytes(Path(file_path).read_bytes())
+            return Path(dst)
         try:
             resp = self.http.get(f"{self._base}/file/bot{self._token}/{file_path}", timeout=120)
         except requests.RequestException as exc:
@@ -176,6 +180,17 @@ def poll_decisions(store: JobStore, settings: Settings, client: TelegramClient |
             client.call("answerCallbackQuery", callback_query_id=cq["id"], text="Not authorized")
             continue
         action, _, job_id = cq.get("data", "").partition(":")
+        if action == "pack":  # resend an upload pack
+            try:
+                from ..studio.uploadpack import send_pack
+
+                job = store.get(job_id)
+                client.call("answerCallbackQuery", callback_query_id=cq["id"], text="Sending the upload pack")
+                send_pack(job, settings, store, client)
+                decisions.append((job_id, "pack"))
+            except Exception as exc:  # noqa: BLE001
+                log.warning("could not resend upload pack: %s", exc)
+            continue
         if action in bot.PREFIXES:  # topic picks, drops and format changes
             try:
                 decisions.append((job_id, "topic:" + bot.handle_callback(cq, store, settings, client)))
@@ -202,6 +217,19 @@ def poll_decisions(store: JobStore, settings: Settings, client: TelegramClient |
                 log.warning("could not remove buttons for %s: %s", job_id, exc)
         client.call("sendMessage", chat_id=chat_id, text=f"{job_id}: {to.value.upper()}")
         decisions.append((job_id, to.value))
+        if to == JobStatus.APPROVED:  # deliver the full-quality file + copy-paste upload pack (no upload here)
+            try:
+                from ..studio.uploadpack import send_pack
+
+                result = send_pack(store.get(job_id), settings, store, client)
+                log.info("upload pack sent for %s: %s", job_id, result)
+            except Exception as exc:  # noqa: BLE001  approval is recorded even if the pack fails to send
+                log.warning("upload pack failed for %s: %s", job_id, exc)
+                try:
+                    client.call("sendMessage", chat_id=chat_id, text=f"⚠️ Approved, but the upload pack for {job_id} "
+                                f"could not be sent ({type(exc).__name__}). Use the 'pack' command to retry.")
+                except Exception:  # noqa: BLE001
+                    pass
     return decisions
 
 

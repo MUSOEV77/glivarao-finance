@@ -39,15 +39,19 @@ def angle_text(card: dict) -> str:
     return " ".join(parts)
 
 
-def recent(store, n: int = RECENT_VIDEOS) -> list[list]:
+def recent(store, n: int = RECENT_VIDEOS, key: str = "used_topics") -> list[list]:
     """Last n picks: [date, key, category, family, angle]."""
-    return json.loads(store.kv_get("used_topics", "[]"))[-n:]
+    return json.loads(store.kv_get(key, "[]"))[-n:]
 
 
-def pick_topic(report: dict, store, free_writer: bool) -> tuple[dict | None, list[str], dict]:
-    hist = recent(store)
-    keys = {h[1] for h in hist}
-    fams = [h[3] for h in hist[-FAMILY_GAP:] if len(h) > 3]
+def pick_topic(report: dict, store, free_writer: bool, history_key: str = "used_topics",
+               recent_videos: int = RECENT_VIDEOS, family_gap: int = FAMILY_GAP,
+               exclude: set[str] | None = None) -> tuple[dict | None, list[str], dict]:
+    """history_key/recent_videos: long videos use the last 30 long topics; Shorts days use their own history
+    (last 10 Shorts topics) because 90 Shorts a month can't all have a topic unused for 30 videos."""
+    hist = recent(store, recent_videos, history_key)
+    keys = {h[1] for h in hist} | set(exclude or ())
+    fams = [h[3] for h in hist[-family_gap:] if len(h) > 3] if family_gap else []
     cats = [h[2] for h in hist[-7:] if len(h) > 2]
     last_cat = cats[-1] if cats else None
     angles = [h[4] for h in hist if len(h) > 4 and h[4]]
@@ -61,7 +65,7 @@ def pick_topic(report: dict, store, free_writer: bool) -> tuple[dict | None, lis
     for c in ranked:
         fam = family_of(c["key"])
         if c["key"] in keys:
-            skip(f"covered in the last {RECENT_VIDEOS} videos")
+            skip(f"covered in the last {recent_videos} videos")
             continue
         if free_writer and fam == "generic":
             skip("needs the Claude writer")

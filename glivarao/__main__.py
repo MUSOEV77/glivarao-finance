@@ -167,14 +167,36 @@ def cmd_plan(args, s):
 
     from .studio.planner import plan_next
 
+    from datetime import timedelta
+
+    from .daily_v2 import pace_check
+
     day = date.fromisoformat(args.date) if args.date else None
-    it = plan_next(s, _store(s), today=day, send=not args.no_telegram)
+    store = _store(s)
+    tomorrow = (day or date.today()) + timedelta(days=1)
+    ok, why = pace_check(store, tomorrow, s)
+    if not ok and not args.force:
+        print(f"no long video due tomorrow ({why}); tomorrow is a Shorts day")
+        return
+    it = plan_next(s, store, today=day, send=not args.no_telegram)
     if it is None:
         print("no topic passed today's checks")
         return
     print(f"next video: {it.topic} [{it.format}] status={it.status}")
     for w in it.why:
         print(f"  - {w}")
+
+
+def cmd_pack(args, s):
+    """(Re)send the upload pack of an approved video to Telegram: full-quality file, titles, description, tags,
+    thumbnail and suggested publish time. Uploads nothing."""
+    from .studio.uploadpack import send_pack
+
+    store = _store(s)
+    job = store.get(args.job_id)
+    if job.status not in (JobStatus.APPROVED, JobStatus.PUBLISHED):
+        raise SystemExit(f"{job.id} is {job.status.value}: approve it in Telegram first")
+    print(send_pack(job, s, store))
 
 
 def cmd_queue(args, s):
@@ -361,8 +383,12 @@ def main(argv=None):
     pn = sub.add_parser("plan-next", help="pick the next topic automatically and announce it in Telegram")
     pn.add_argument("--date", help="YYYY-MM-DD (default today)")
     pn.add_argument("--no-telegram", action="store_true")
+    pn.add_argument("--force", action="store_true", help="plan even if no long video is due tomorrow")
     pn.set_defaults(fn=cmd_plan)
     sub.add_parser("queue", help="show the topic queue").set_defaults(fn=cmd_queue)
+    pk = sub.add_parser("pack", help="send the upload pack of an approved video to Telegram (uploads nothing)")
+    pk.add_argument("job_id")
+    pk.set_defaults(fn=cmd_pack)
     ai = sub.add_parser("add-input", help="add your own take to a picked topic")
     ai.add_argument("item_id")
     ai.add_argument("text")

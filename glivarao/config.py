@@ -65,10 +65,20 @@ class Settings:
     # Auto mode: after a topic is announced, wait this long for your take before producing without it
     creator_input_wait_hours: float = field(default_factory=lambda: float(_env("CREATOR_INPUT_WAIT_HOURS", "10")))
     require_creator_input: bool = field(default_factory=lambda: _bool("REQUIRE_CREATOR_INPUT", True))
-    long_videos_per_week: int = field(default_factory=lambda: int(_env("LONG_VIDEOS_PER_WEEK", "3")))
-    shorts_per_long: int = field(default_factory=lambda: int(_env("SHORTS_PER_LONG", "2")))
-    min_days_between_long: int = field(default_factory=lambda: int(_env("MIN_DAYS_BETWEEN_LONG", "2")))
+    long_videos_per_month: int = field(default_factory=lambda: int(_env("LONG_VIDEOS_PER_MONTH", "16")))
+    shorts_per_day: int = field(default_factory=lambda: int(_env("SHORTS_PER_DAY", "3")))  # 3 x 30 = 90 a month
+    min_days_between_long: int = field(default_factory=lambda: int(_env("MIN_DAYS_BETWEEN_LONG", "1")))
     topic_ideas_per_week: int = field(default_factory=lambda: int(_env("TOPIC_IDEAS_PER_WEEK", "6")))
+    # Upload pack (sent to Telegram after you approve; you upload and schedule in YouTube Studio yourself)
+    publish_times_long_weekday: str = field(default_factory=lambda: _env("PUBLISH_TIMES_LONG_WEEKDAY", "14:00"))
+    publish_times_long_weekend: str = field(default_factory=lambda: _env("PUBLISH_TIMES_LONG_WEEKEND", "11:00"))
+    publish_times_shorts: str = field(default_factory=lambda: _env("PUBLISH_TIMES_SHORTS", "11:00,15:00,19:30"))
+    publish_lead_hours: float = field(default_factory=lambda: float(_env("PUBLISH_LEAD_HOURS", "2")))
+    affiliate_disclosure: str = field(default_factory=lambda: _env(
+        "AFFILIATE_DISCLOSURE",
+        "Disclosure: some links on this channel may be affiliate links. If you sign up or buy through them, "
+        "GLIVARAO Finance may earn a commission at no extra cost to you. This never affects what we cover or "
+        "how; there are no paid sponsorships in this video."))
     similarity_max_phrase: float = field(default_factory=lambda: float(_env("SIMILARITY_MAX_PHRASE", "0.25")))
     similarity_max_structure: float = field(default_factory=lambda: float(_env("SIMILARITY_MAX_STRUCTURE", "0.85")))
     elevenlabs_api_key: str = field(default_factory=lambda: _env("ELEVENLABS_API_KEY"))

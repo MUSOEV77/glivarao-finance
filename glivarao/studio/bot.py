@@ -35,7 +35,7 @@ def send_proposals(items, settings, client, store) -> None:
     q = TopicQueue(store)
     client.call("sendMessage", chat_id=chat, text=(
         f"💡 This week's topic ideas ({len(items)}). Tap ✅ on the ones you want made "
-        f"(about {settings.long_videos_per_week} long videos a week). After you pick one, I'll ask for your own take."))
+        f"(about {settings.long_videos_per_month} long videos a month). After you pick one, I'll ask for your own take."))
     for n, it in enumerate(items, 1):
         why = (it.card.get("why") or [""])[0]
         text = f"{n}. {it.topic}\n{it.category} · research score {it.card.get('score', '?')}\n{why}"[:1000]
@@ -137,7 +137,7 @@ def handle_message(msg: dict, store, settings, client, workdir: Path | None = No
         f"✅ Saved your take for \"{it.topic}\" ({FORMATS[it.format].label}).\n"
         + (f"I heard: \"{shown}\"\nIf I got something wrong, just send a correction.\n" if kind == "voice" else "")
         + "It will be used in the next production run (pace: "
-        f"{settings.long_videos_per_week} long videos a week)."))
+        f"{settings.long_videos_per_month} long videos a month)."))
     return "saved"
 
 
