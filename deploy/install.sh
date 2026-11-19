@@ -9,7 +9,8 @@ SKIP_SYSTEMD="${SKIP_SYSTEMD:-0}"
 
 echo "==> system packages"
 apt-get update -q
-apt-get install -y -q python3 python3-venv python3-pip ffmpeg git sqlite3 curl fonts-dejavu-core
+apt-get install -y -q python3 python3-venv python3-pip ffmpeg git sqlite3 curl fonts-dejavu-core util-linux
+apt-get install -y -q tesseract-ocr || echo "   tesseract-ocr not installed: competitor thumbnail text is skipped"
 
 echo "==> service user"
 id glivarao >/dev/null 2>&1 || adduser --system --group --home /opt/glivarao glivarao
@@ -36,6 +37,7 @@ sudo -u glivarao .venv/bin/pip install -q \
 
 echo "==> voice-note transcription (optional, local and free; model downloads on first use)"
 sudo -u glivarao .venv/bin/pip install -q faster-whisper || echo "   faster-whisper not installed: send your input as text"
+sudo -u glivarao .venv/bin/pip install -q pytesseract || true
 
 echo "==> voice model (Kokoro-82M, Apache-2.0, ~350 MB)"
 B=https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0
@@ -60,6 +62,7 @@ if [ "$SKIP_SYSTEMD" != "1" ]; then
   systemctl daemon-reload
   systemctl disable --now glivarao-propose.timer 2>/dev/null || true   # weekly ideas are only for TOPIC_MODE=queue
   systemctl enable --now glivarao-daily.timer glivarao-poll.timer glivarao-backup.timer glivarao-plan.timer \
+    glivarao-health.timer glivarao-competitors.timer \
     glivarao-voice-retry.timer
   systemctl list-timers 'glivarao-*' --no-pager
 fi

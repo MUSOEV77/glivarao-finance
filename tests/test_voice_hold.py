@@ -72,7 +72,7 @@ def test_budget_alert_at_80_percent_and_at_the_cap(settings, store, monkeypatch,
     assert len(alerts) == 1 and "$16.20 of $20.00" in alerts[0] and "81%" in alerts[0]
     led.add(3.8, 0)
     daily_v2._budget_alert(s, store, True)
-    assert len(alerts) == 2 and "cap is reached" in alerts[1]
+    assert len(alerts) == 2 and "Cap reached" in alerts[1]
 
 
 def test_doctor_shows_voice_lock(settings, store, capsys, monkeypatch):

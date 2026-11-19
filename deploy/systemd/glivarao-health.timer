@@ -1,0 +1,9 @@
+[Unit]
+Description=Health report at 09:05 Tashkent
+
+[Timer]
+OnCalendar=*-*-* 09:05:00 Asia/Tashkent
+Persistent=true
+
+[Install]
+WantedBy=timers.target

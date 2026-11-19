@@ -23,6 +23,7 @@ SECRET_FIELDS = {
     "gemini_api_key",
     "fred_api_key",
     "telegram_bot_token",
+    "youtube_api_key",
 }
 
 
@@ -63,7 +64,7 @@ class Settings:
     # auto = research picks topics (default); queue = only topics you pick from weekly ideas
     topic_mode: str = field(default_factory=lambda: _env("TOPIC_MODE", "auto"))
     # Auto mode: after a topic is announced, wait this long for your take before producing without it
-    creator_input_wait_hours: float = field(default_factory=lambda: float(_env("CREATOR_INPUT_WAIT_HOURS", "10")))
+    creator_input_wait_hours: float = field(default_factory=lambda: float(_env("CREATOR_INPUT_WAIT_HOURS", "4")))
     require_creator_input: bool = field(default_factory=lambda: _bool("REQUIRE_CREATOR_INPUT", True))
     long_videos_per_month: int = field(default_factory=lambda: int(_env("LONG_VIDEOS_PER_MONTH", "16")))
     shorts_per_day: int = field(default_factory=lambda: int(_env("SHORTS_PER_DAY", "3")))  # 3 x 30 = 90 a month
@@ -74,6 +75,24 @@ class Settings:
     publish_times_long_weekend: str = field(default_factory=lambda: _env("PUBLISH_TIMES_LONG_WEEKEND", "11:00"))
     publish_times_shorts: str = field(default_factory=lambda: _env("PUBLISH_TIMES_SHORTS", "11:00,15:00,19:30"))
     publish_lead_hours: float = field(default_factory=lambda: float(_env("PUBLISH_LEAD_HOURS", "2")))
+    # Buffer: approved videos ready ahead of their publish slot; production runs PRODUCTION_LEAD_DAYS ahead
+    buffer_long: int = field(default_factory=lambda: int(_env("BUFFER_LONG", "2")))
+    buffer_shorts: int = field(default_factory=lambda: int(_env("BUFFER_SHORTS", "6")))
+    production_lead_days: int = field(default_factory=lambda: int(_env("PRODUCTION_LEAD_DAYS", "3")))
+    shorts_per_month: int = field(default_factory=lambda: int(_env("SHORTS_PER_MONTH", "90")))
+    # Your time zone: no Telegram messages during quiet hours (they are delivered at QUIET_END)
+    local_tz: str = field(default_factory=lambda: _env("LOCAL_TZ", "Asia/Tashkent"))
+    quiet_start: str = field(default_factory=lambda: _env("QUIET_START", "23:00"))
+    quiet_end: str = field(default_factory=lambda: _env("QUIET_END", "08:00"))
+    # Stability alerts
+    spend_alert_ratio: float = field(default_factory=lambda: float(_env("SPEND_ALERT_RATIO", "0.8")))
+    disk_alert_gb: float = field(default_factory=lambda: float(_env("DISK_ALERT_GB", "10")))
+    # Competitor research (YouTube Data API, read-only)
+    youtube_api_key: str = field(default_factory=lambda: _env("YOUTUBE_API_KEY"))
+    competitor_channels: str = field(default_factory=lambda: _env(
+        "COMPETITOR_CHANNELS", "Casual Finance,How Money Works,Economics Explained,Money & Macro,The Plain Bagel,"
+        "Two Cents"))
+    competitor_days: int = field(default_factory=lambda: int(_env("COMPETITOR_DAYS", "90")))
     affiliate_disclosure: str = field(default_factory=lambda: _env(
         "AFFILIATE_DISCLOSURE",
         "Disclosure: some links on this channel may be affiliate links. If you sign up or buy through them, "

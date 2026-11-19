@@ -1,0 +1,9 @@
+[Unit]
+Description=GLIVARAO: Telegram alert when %i fails
+
+[Service]
+Type=oneshot
+User=glivarao
+WorkingDirectory=/opt/glivarao/app
+ExecStart=/opt/glivarao/app/.venv/bin/python -m glivarao alert "service %i failed; it retries automatically. Check: journalctl -u %i -n 50"
+NoNewPrivileges=true

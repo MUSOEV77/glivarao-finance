@@ -1,6 +1,10 @@
 [Unit]
 Description=GLIVARAO: back up the job database and prune old renders
 
+OnFailure=glivarao-alert@%n.service
+StartLimitIntervalSec=6h
+StartLimitBurst=3
+
 [Service]
 Type=oneshot
 User=glivarao

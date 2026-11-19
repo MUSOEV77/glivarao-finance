@@ -118,9 +118,13 @@ def build_brief(card: dict, today: date) -> Brief:
         questions = [{"title": q[:1].upper() + q[1:] + ("" if q.endswith("?") else "?"), "views": 0,
                       "link": search_url(q), "source": "Google search suggestions"}
                      for q in card["search_questions"][:4]]
+    if card.get("angle"):  # launch list / planned videos carry their own angle
+        angle = card["angle"]
     b = Brief(today.isoformat(), key, card["topic"], card["category"], card["market"], fam, card["score"],
               card["confidence"], card["why"], angle, questions, problems[:3], news=news[:3],
               search_questions=card.get("search_questions", [])[:10])
+    for f in card.get("launch_facts", []):  # official facts checked for the launch list (with source URLs)
+        b.facts.append(Fact("DATA", f["text"], f["source"], f["url"]))
     for n in news[:3]:
         b.facts.append(Fact("DATA", f"{n['source']}, {n['date']}: {n['title']}. {n.get('summary', '')}".strip(),
                             n["source"], n["url"]))

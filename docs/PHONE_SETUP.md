@@ -5,6 +5,22 @@ How to use this guide:
 - Paste it into Termius (long-press, then Paste) and press Enter.
 - Wait until you see the prompt again (`root@...#`) before pasting the next block.
 
+## What to have ready before you start
+
+| # | Item | Where to get it | Used for |
+|---|---|---|---|
+| 1 | Contabo VPS IP + root password | Contabo email | logging in (Termius) |
+| 2 | **Telegram bot token** | @BotFather → /newbot | reviews, alerts, upload packs |
+| 3 | **Anthropic API key** + spending limit set | console.anthropic.com → API keys / Limits | the script writer (capped at $30/month in code) |
+| 4 | **Gemini API key** on a billing-enabled project + budget alert | aistudio.google.com → API keys; Google Cloud Billing → Budgets | the Charon voice (capped at $20/month, alert at 80%) |
+| 5 | **YouTube Data API key** (you have it) | Google Cloud Console → APIs & Services → Credentials | competitor research (read-only, free quota) |
+| 6 | Telegram **api_id + api_hash** (optional, for long videos in full quality) | my.telegram.org → API development tools | files up to 2 GB in Telegram |
+| 7 | Affiliate links (later, when approved) | each program | `/affiliate <program> <link>` in Telegram |
+
+**Order:** Steps 1 → 3 (server + install, about 20 min) → Step 4 (keys) → Step 5 (switch on paid voice + writer) →
+Step 6 (`doctor`: everything must show `[x]`) → Step 7 (first run) → optional: large files
+(`docs/TELEGRAM_LARGE_FILES.md`, about 45 min) and competitor research (`competitors` command below).
+
 ## Step 0: let Claude push the code (phone browser)
 
 1. Open https://github.com/apps/claude/installations/select_target
@@ -27,7 +43,7 @@ passwd
 ## Step 2: prepare the server (≈ 3 min)
 
 ```
-apt-get update && apt-get -y upgrade && timedatectl set-timezone America/New_York && ufw allow OpenSSH && ufw --force enable && ([ -f /swapfile ] || (fallocate -l 4G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile && echo '/swapfile none swap sw 0 0' >> /etc/fstab)) && echo READY
+apt-get update && apt-get -y upgrade && timedatectl set-timezone Asia/Tashkent && ufw allow OpenSSH && ufw --force enable && ([ -f /swapfile ] || (fallocate -l 4G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile && echo '/swapfile none swap sw 0 0' >> /etc/fstab)) && echo READY
 ```
 
 If a purple screen asks about restarting services, press **Enter**.
@@ -71,10 +87,16 @@ bash /opt/glivarao/app/deploy/set-key.sh TELEGRAM_APPROVER_CHAT_ID
 bash /opt/glivarao/app/deploy/set-key.sh ANTHROPIC_API_KEY
 ```
 
-**Gemini key.** This gives the premium Charon voice.
+**Gemini key.** This is the channel voice (Charon).
 
 ```
 bash /opt/glivarao/app/deploy/set-key.sh GEMINI_API_KEY
+```
+
+**YouTube Data API key.** Read-only, for competitor research.
+
+```
+bash /opt/glivarao/app/deploy/set-key.sh YOUTUBE_API_KEY
 ```
 
 ## Step 5: switch on paid services (needed: the channel voice is Gemini "Charon")
@@ -142,7 +164,9 @@ Approving uploads nothing.
 After uploading, **reply to the upload pack with the video's YouTube link**, so the next episodes of the series
 can link to it.
 
-Send `/help` to the bot for all commands: `/queue`, `/series`, `/playlist`, `/affiliate`. Full explanations:
+Send `/help` to the bot for all commands: `/queue`, `/series`, `/playlist`, `/affiliate`.
+Affiliate programs start as placeholders: when you're approved, send for example
+`/affiliate rocketmoney https://your-link`. Full explanations:
 `docs/AUTHENTICITY.md` and `docs/CHANNEL_FOCUS.md` (the 5 pillars, series and affiliate links).
 
 To pick and announce the next topic right now:
@@ -153,12 +177,18 @@ cd /opt/glivarao/app && sudo -u glivarao .venv/bin/python -m glivarao plan-next
 
 ## Every day after that (automatic)
 
-**What runs by itself:**
-- Next topic picked and announced every evening at 17:37 New York time (when the pace allows a video).
-- Production at 04:17 New York time: 16 long videos a month (spread evenly) and 3 Shorts every day.
-- Telegram approval check every 5 minutes.
-- Videos on hold (voice unavailable) retried every hour.
-- Backup at 03:40.
+**What runs by itself (Tashkent time):**
+- **09:00:** the next topic is announced. The first 16 come from your launch list, then automatic research picks.
+- **09:05:** health report.
+- **13:17:** production, 2–3 days ahead of publishing:
+  - 16 long videos a month and 3 Shorts a day;
+  - extra Shorts (up to 6) or an early long video when the buffer of 2 approved long + 6 Shorts is low.
+- **Every 5 minutes:** approvals are checked, and messages held during quiet hours are delivered.
+- **Every hour:** videos on hold (voice unavailable) are retried.
+- **Mondays 08:31:** competitor research.
+- **03:40:** backup.
+- **Quiet hours 23:00–08:00:** no messages; anything that comes up is delivered at 08:00.
+- **If a service fails:** it restarts automatically, and you get a Telegram alert.
 
 Check the schedule:
 
@@ -174,10 +204,30 @@ systemctl list-timers 'glivarao-*' --no-pager
 df -h / && free -h
 ```
 
-**Update to the newest version** (after Claude pushes changes):
+**Update to the newest version** (after Claude pushes changes). This is a safe update: it waits for any running
+production to finish, takes a snapshot, installs, runs a self-test, and **rolls back automatically** (with a
+Telegram alert) if anything fails:
 
 ```
-cd /root/glivarao-src && git pull && bash deploy/install.sh
+sudo bash /root/glivarao-src/deploy/update.sh
+```
+
+**Health report now** (it also arrives every day at 09:05):
+
+```
+cd /opt/glivarao/app && sudo -u glivarao .venv/bin/python -m glivarao health
+```
+
+**Competitor research now** (it also runs every Monday):
+
+```
+cd /opt/glivarao/app && sudo -u glivarao .venv/bin/python -m glivarao competitors
+```
+
+**Re-check the launch list's numbers on the official pages:**
+
+```
+cd /opt/glivarao/app && sudo -u glivarao .venv/bin/python -m glivarao verify-facts
 ```
 
 **Resend the upload pack of an approved video** (full-quality file, titles, description, tags, thumbnail, publish

@@ -1,6 +1,15 @@
 # Channel focus: 5 pillars, series and affiliate links
 
+**One channel:** English, US finance. A Spanish channel is postponed.
+
 **Niche:** everyday US personal finance for people aged 25–45 who struggle with money.
+
+**Main focus for the next 12 months: debt and credit**, in the style *"the big economic story → what it means for
+YOUR money"*.
+- At least 60% of long videos are debt and credit: 3 of every 5, checked on every pick.
+- Other pillars (taxes, ACA health costs, scams, budgeting, retirement) are used only when tied to a money impact.
+- **News-driven videos: at most 1 in 4 long videos.** Evergreen topics get a ranking boost.
+- **The first 16 long videos are your launch list** (`docs/LAUNCH_PLAN.md`). The automatic rules start after it.
 
 ## The 5 pillars
 
@@ -18,9 +27,10 @@ and general news.
 
 ## Rotation (automatic)
 
-- **Never the same pillar twice in a row.**
-- **At most 2 of the last 5 videos per pillar.** With about 4 long videos a week, each week covers 3–4 different
-  pillars.
+- **Debt and credit: at least 3 of every 5 long videos.** It may run twice in a row, as long as the topic family
+  differs. A debt topic may come back after 8 videos with a new angle; other topics need 30 videos.
+- **Every other pillar: at most once in 5 long videos, and never twice in a row.** Taxes: twice in 5 in tax
+  season.
 - Pillars that haven't been covered for a while get a boost in the ranking.
 - **Taxes, December–April:** a strong boost, and up to 3 of the last 5 videos. Taxes still never run twice in a
   row. The rest of the year, taxes get a small penalty.
@@ -47,27 +57,32 @@ You upload the videos yourself, so the bot needs the YouTube link of each video 
 
 `/series` shows each series, its approved episodes, and which ones still need a link.
 
-## Affiliate links per pillar
+## Affiliate programs
 
-Only links **you** add are ever used. Nothing is signed up for automatically. The names below are ideas to look into;
-I haven't checked their current program terms.
+**Programs:** Rocket Money, Monarch Money, Wise, Rocket Dollar, TurboTax and FreeTaxUSA. YNAB comes later.
 
-| Pillar | Ideas to look into | Rule |
-|---|---|---|
-| Debt and credit | Experian (free report/score), Self (credit-builder loan), credit-union consolidation loans | No payday lenders, debt-settlement companies or high-APR cards |
-| Budgeting and saving | YNAB, Rocket Money, an FDIC-insured high-yield savings account | Only FDIC-insured savings products |
-| Taxes | TurboTax, H&R Block, FreeTaxUSA | Always mention the IRS free filing options first |
-| Retirement and investing | Fidelity / Schwab / Vanguard IRAs, Betterment, Wealthfront, M1 | No single stocks, trading apps, options or crypto |
-| Scams and protection | Aura, LifeLock, DeleteMe | Always give the free steps first (credit freeze, IdentityTheft.gov) |
+**All are placeholders until you're approved.** A placeholder never appears in a description. The upload pack only
+lists which placeholders would fit that video.
 
-**Add a link in Telegram:** `/affiliate taxes FreeTaxUSA https://your-affiliate-link`
+| Program | Used for |
+|---|---|
+| Rocket Money | subscriptions, bills, budgeting; debt and budget pillars |
+| Monarch Money | budgets and debt payoff |
+| Wise | only money-transfer topics |
+| Rocket Dollar | retirement (IRA, 401(k)) |
+| FreeTaxUSA, then TurboTax | taxes (the IRS free options are mentioned first) |
+| YNAB | later |
 
-**See or remove:** `/affiliate` lists the links you've added and the ideas for each pillar;
-`/affiliate taxes clear` removes all links for a pillar.
+**Rules:**
+- 1–2 links per **long** video: the best topic match first, then the pillar.
+- **No links in Shorts.**
+- Links sit directly above the affiliate disclosure (an FTC requirement).
+- No payday lenders, debt-settlement companies or high-APR cards.
 
-**In the description:** the pillar's links appear under "Helpful tools (affiliate links: I may earn a commission
-at no extra cost to you):", directly above the channel's affiliate disclosure (an FTC requirement: the disclosure
-must sit next to the links).
-**If a video ever mentions or shows an affiliate product in the video itself** (not just in the description),
-tick **"Paid promotion"** in YouTube Studio. Videos made today don't do this: the links appear only in the
-description.
+**Telegram:**
+- When you're approved: `/affiliate rocketmoney https://your-link`
+- Status of every program: `/affiliate`
+- Back to placeholder: `/affiliate rocketmoney clear`
+
+If a video ever mentions or shows an affiliate product in the video itself, tick **"Paid promotion"** in YouTube
+Studio.

@@ -81,7 +81,7 @@ def test_candidates_scoring_and_rejections():
     cc = cands["credit_card"]
     assert cc.metrics["se_questions_365d"] == 4 and cc.metrics["cfpb_yoy_change"] == pytest.approx(0.6)
     assert cc.market == "both" and cc.scores["demand"][1] == "MEASURED"
-    assert cc.scores["potential_views"] == (None, "UNAVAILABLE", "needs YouTube Data API key")
+    assert cc.scores["potential_views"][:2] == (None, "UNAVAILABLE") and "competitors" in cc.scores["potential_views"][2]
     assert cc.confidence != "high"  # can't be high without YouTube data
     assert cands["ira_roth"].market == "US" and eligible(cc)[0]
     assert all(0 <= c.total <= 100 for c in cands.values())

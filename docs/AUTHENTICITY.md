@@ -8,8 +8,8 @@ checked facts. These are not tricks: they are the human input and editorial stan
 
 | When | What happens | What you do |
 |---|---|---|
-| **Every evening ~17:37 ET** (when the pace allows a video) | Fresh research picks the next topic and format, then Telegram announces it with **why it was picked and the source links** | Nothing. *Optionally* reply with your take (text or voice note) |
-| Next morning, 04:17 ET | The long video + 2 Shorts are written, fact-checked and rendered. Your take is included if it arrived within 10 hours (`CREATOR_INPUT_WAIT_HOURS`) | — |
+| **09:00 Tashkent** (when the pace allows a video) | Fresh research picks the next topic and format, then Telegram announces it with **why it was picked and the source links** | Nothing. *Optionally* reply with your take (text or voice note) |
+| 13:17 Tashkent | The long video + 3 Shorts are written, fact-checked and rendered. Your take is included if it arrived within 4 hours (`CREATOR_INPUT_WAIT_HOURS`) | — |
 | After rendering | The review arrives. It **starts with the topic and why it was picked**, then the fact check (every claim with its source URL), the originality report and the AI disclosure | Approve, or **reject the whole video** if you don't like the topic |
 | After you approve | The **upload pack** arrives: full-quality video file, 3 titles, description (sources, AI note, affiliate disclosure), tags, thumbnail, suggested publish time (New York + Tashkent) | Save the file, upload in the YouTube Studio app and use **Schedule** |
 
@@ -123,7 +123,7 @@ The manual mode with weekly ideas still exists (`TOPIC_MODE=queue`) if you ever 
 
 ```
 TOPIC_MODE=auto             # auto = research picks topics (default); queue = you pick from weekly ideas
-CREATOR_INPUT_WAIT_HOURS=10 # auto: how long to wait for your optional take
+CREATOR_INPUT_WAIT_HOURS=4  # auto: how long to wait for your optional take
 REQUIRE_CREATOR_INPUT=true  # queue mode only: no video without your take
 LONG_VIDEOS_PER_MONTH=16
 MIN_DAYS_BETWEEN_LONG=1

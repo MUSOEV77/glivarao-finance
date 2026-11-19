@@ -47,6 +47,13 @@ def announce(item, settings, client=None) -> None:
                    "Otherwise the video is made without it.") if wait > 0 else
               "Reply with your own take any time before production to include it.",
               "You can still reject the whole video when the review arrives."]
+    from . import quiet
+
+    if quiet.is_quiet(settings):  # announced at 09:00 normally; a night-time plan waits for the morning
+        from ..storage import JobStore
+
+        quiet.queue_text(JobStore(settings.db_path), "\n".join(lines)[:3800])
+        return None
     c = _client(settings, client)
     msg = c.call("sendMessage", chat_id=settings.telegram_approver_chat_id, text="\n".join(lines)[:4000],
                  disable_web_page_preview=True, reply_markup={"inline_keyboard": [[
@@ -67,8 +74,21 @@ def plan_next(settings, store, today: date | None = None, research_dir: Path | N
     today = today or date.today()
     research_dir = research_dir or Path("reports/research")
     cached = research_dir / f"{today.isoformat()}.json"
-    report = json.loads(cached.read_text()) if cached.exists() else run_research(today, research_dir, store)
-    card, why, skipped = pick_topic(report, store, free_writer=not paid_writer_allowed(settings), today=today)
+    from . import launch_plan
+    from .pillars import is_news
+
+    launch = launch_plan.next_video(store)
+    if launch is not None:  # your launch list comes first (16 long videos), facts re-checked on official pages
+        from dataclasses import replace as _replace
+
+        kept, notes = launch_plan.verify_facts(launch)
+        card = _replace(launch, facts=kept).card()  # a copy: the launch list itself is never modified
+        why = list(card["why"]) + [f"Official facts: {len(kept)} checked on the source pages"]
+        why += [f"⚠ {f.text[:90]}… — {note}" for f, note in notes]
+        skipped = {}
+    else:
+        report = json.loads(cached.read_text()) if cached.exists() else run_research(today, research_dir, store)
+        card, why, skipped = pick_topic(report, store, free_writer=not paid_writer_allowed(settings), today=today)
     if card is None:
         log.warning("no eligible topic today (%s)", skipped)
         if send:
@@ -76,14 +96,20 @@ def plan_next(settings, store, today: date | None = None, research_dir: Path | N
                               f"Skipped: {skipped}. I'll try again with tomorrow's research.")
         return None
     brief = build_brief(card, today)
-    style = choose_format(brief, format_history(store))
+    from .formats import eligible
+
+    style = (launch.format if launch is not None and launch.format in eligible(brief)
+             else choose_format(brief, format_history(store)))
     push_format(store, style)
     q = TopicQueue(store)
     item = q.add_proposals([card], today)[0]
     status = "awaiting_input" if settings.creator_input_wait_hours > 0 else "ready"
     item = q.update(item.id, status=status, format=style, auto=True, why=why,
                     picked_at=datetime.now(timezone.utc).isoformat(timespec="seconds"))
-    _mark_used(store, today, card["key"], card["category"], family_of(card["key"]), angle_text(card))
+    _mark_used(store, today, card["key"], card["category"], family_of(card["key"]), angle_text(card),
+               news=is_news(card))
+    if launch is not None:
+        launch_plan.mark_done(store, launch.n)
     if send:
         try:
             msg = announce(item, settings, client)

@@ -28,15 +28,64 @@ def _store(settings):
 
 
 def cmd_doctor(args, s):
+    """Production checklist. Keys show as set/missing, never their values. --strict exits 1 only when the
+    installation itself is broken (used by deploy/update.sh to decide on a rollback), not for missing keys."""
     import shutil
+    import time as _time
 
-    print(f"mode: {s.mode} ({'DRY RUN — no network calls, placeholder voice' if s.dry_run else 'PRODUCTION'})")
-    print(f"ffmpeg: {'ok' if shutil.which('ffmpeg') else 'MISSING'}   espeak-ng: "
-          f"{'ok' if shutil.which('espeak-ng') else 'missing (optional, dev only)'}")
-    for name, (ok, hint) in s.readiness().items():
-        print(f"  [{'x' if ok else ' '}] {name:32s} {'' if ok else '-> ' + hint}")
-    print("\nconfig (secrets redacted):")
-    print(json.dumps(s.redacted(), indent=2))
+    from .studio.health import disk_free_gb, failed_units
+    from .tts import voice_lock
+
+    broken, todo = [], []
+
+    def row(ok, name, hint="", critical=False):
+        print(f"  [{'x' if ok else ' '}] {name:44s} {'' if ok else '-> ' + hint}")
+        if not ok:
+            (broken if critical else todo).append(name)
+
+    print("GLIVARAO doctor\n\nINSTALLATION")
+    row(bool(shutil.which("ffmpeg")), "ffmpeg", "apt-get install ffmpeg", True)
+    try:
+        st = _store(s)
+        st.kv_set("doctor_ping", str(_time.time()))
+        row(True, "database writable")
+    except Exception as exc:  # noqa: BLE001
+        row(False, "database writable", str(exc)[:80], True)
+        st = None
+    try:
+        voice_lock.check_model(s.gemini_tts_model)
+        voice_lock.style_prompt(s)
+        row(s.tts_provider == "gemini_tts", f"voice locked: {s.gemini_tts_voice} on {s.gemini_tts_model}",
+            "set TTS_PROVIDER=gemini_tts")
+    except voice_lock.VoiceUnavailable as exc:
+        row(False, "voice settings", str(exc), True)
+    free = disk_free_gb(Path(s.output_dir))
+    row(free >= s.disk_alert_gb, f"disk free ({free:.0f} GB)", f"below {s.disk_alert_gb:g} GB")
+    fails = failed_units()
+    row(not fails, "systemd services", "failed: " + ", ".join(fails))
+    print("\nKEYS (values never shown)")
+    row(bool(s.telegram_bot_token), "TELEGRAM_BOT_TOKEN", "deploy/set-key.sh TELEGRAM_BOT_TOKEN")
+    row(bool(s.telegram_approver_chat_id), "TELEGRAM_APPROVER_CHAT_ID", "deploy/set-key.sh TELEGRAM_APPROVER_CHAT_ID")
+    row(bool(s.anthropic_api_key), "ANTHROPIC_API_KEY (script writer)", "deploy/set-key.sh ANTHROPIC_API_KEY")
+    row(bool(s.gemini_api_key), "GEMINI_API_KEY (Charon voice)", "deploy/set-key.sh GEMINI_API_KEY")
+    row(bool(s.youtube_api_key), "YOUTUBE_API_KEY (competitor research)", "deploy/set-key.sh YOUTUBE_API_KEY")
+    row(s.allow_paid_apis, "ALLOW_PAID_APIS=true (voice + Claude, capped)", "deploy/set-key.sh ALLOW_PAID_APIS true")
+    row(not s.youtube_publish_enabled, "YouTube auto-publishing OFF", "must stay false", True)
+    print("\nSCHEDULE")
+    print(f"  time zone {s.local_tz}: topic 09:00 · health 09:05 · production 13:17 · quiet {s.quiet_start}-"
+          f"{s.quiet_end}")
+    print(f"  pace {s.long_videos_per_month} long + {s.shorts_per_month} Shorts a month · buffer {s.buffer_long} long + "
+          f"{s.buffer_shorts} Shorts · lead {s.production_lead_days} days")
+    if st is not None:
+        from .studio import launch_plan
+
+        print(f"  launch list: {16 - launch_plan.remaining(st)}/16 planned")
+    print(f"\nmode: {s.mode} ({'DRY RUN — no network calls, placeholder voice' if s.dry_run else 'PRODUCTION'})")
+    print(("BROKEN: " + ", ".join(broken)) if broken else "installation OK" + (f"; to do: {len(todo)} item(s)" if todo else ""))
+    if getattr(args, "verbose_config", False):
+        print(json.dumps(s.redacted(), indent=2))
+    if getattr(args, "strict", False) and broken:
+        raise SystemExit(1)
 
 
 def cmd_produce(args, s):
@@ -168,16 +217,15 @@ def cmd_plan(args, s):
 
     from .studio.planner import plan_next
 
-    from datetime import timedelta
 
     from .daily_v2 import pace_check
 
     day = date.fromisoformat(args.date) if args.date else None
     store = _store(s)
-    tomorrow = (day or date.today()) + timedelta(days=1)
-    ok, why = pace_check(store, tomorrow, s)
+    today = day or date.today()  # announced 09:00 Tashkent, produced 13:17 the same day
+    ok, why = pace_check(store, today, s)
     if not ok and not args.force:
-        print(f"no long video due tomorrow ({why}); tomorrow is a Shorts day")
+        print(f"no long video due today ({why}); today is a Shorts day")
         return
     it = plan_next(s, store, today=day, send=not args.no_telegram)
     if it is None:
@@ -250,6 +298,59 @@ def cmd_retry_held(args, s):
             return
         for r in retry_held_videos(s, store, send=not args.no_telegram):
             print(r[0], r[2], r[4] or "")
+
+
+def cmd_competitors(args, s):
+    """Competitor research: patterns from similar channels' last 90 days (YouTube Data API, read-only)."""
+    from .research.competitors import YouTubeAPIError, render_markdown, run
+
+    try:
+        rep = run(s, _store(s))
+    except YouTubeAPIError as exc:
+        raise SystemExit(f"competitor research failed: {exc}")
+    print(render_markdown(rep))
+    if not args.no_telegram and s.telegram_bot_token and s.telegram_approver_chat_id:
+        from .publish.telegram import notify
+
+        t, ln = rep["titles"], rep["length"]
+        top = ", ".join(f"{k} ({v['score']})" for k, v in list(rep["topics"].items())[:6])
+        notify(s, f"🔎 Competitor patterns ({rep['date']}): {rep['long_videos']} long videos from "
+                  f"{len(rep['channels'])} channels. Median length {ln['median_minutes']} min; titles: numbers "
+                  f"{t['with_number']:.0%}, $ {t['with_dollar']:.0%}, questions {t['question']:.0%}. Topics: {top}. "
+                  f"Full report: reports/competitors/{rep['date']}.md (patterns only, nothing copied).")
+
+
+def cmd_verify_facts(args, s):
+    """Re-check every launch-list fact on its official page (numbers must still be there)."""
+    from .studio.launch_plan import LAUNCH, done, verify_facts
+
+    finished = set(done(_store(s)))
+    for v in LAUNCH:
+        kept, notes = verify_facts(v)
+        state = "done" if v.n in finished else "to do"
+        print(f"#{v.n:2} [{state}] {v.topic}: {len(kept)} facts ok" + "".join(f"\n     ⚠ {n}: {f.text[:80]}"
+                                                                            for f, n in notes))
+
+
+def cmd_health(args, s):
+    """Health report (buffer, pace, spend, disk, voice, failed services) + current alerts; sent to Telegram."""
+    from .studio import health
+
+    store = _store(s)
+    alerts = health.alerts(s, store)
+    text = ("\n\n".join(alerts) + "\n\n" if alerts else "") + health.report(s, store)
+    print(text)
+    if not args.no_telegram:
+        from .publish.telegram import notify
+
+        notify(s, text)
+
+
+def cmd_alert(args, s):
+    """Send one alert to Telegram (used by systemd OnFailure=). Queued during quiet hours."""
+    from .publish.telegram import notify
+
+    notify(s, "🔴 GLIVARAO: " + " ".join(args.text)[:3500])
 
 
 def cmd_queue(args, s):
@@ -340,8 +441,16 @@ def cmd_list(args, s):
 
 def cmd_poll(args, s):
     from .publish.telegram import poll_decisions
+    from .studio import quiet
 
-    decisions = poll_decisions(_store(s), s)
+    store = _store(s)
+    try:
+        delivered = quiet.flush(s, store)  # alerts and reviews held during quiet hours
+        if delivered:
+            print(f"delivered {delivered} queued message(s)")
+    except Exception as exc:  # noqa: BLE001  never block approvals
+        print(f"could not flush queued messages: {exc}")
+    decisions = poll_decisions(store, s)
     print(decisions or "no new decisions")
     # Approval never triggers an upload. Uploading is a separate, manual, interactive step.
 
@@ -396,7 +505,10 @@ def main(argv=None):
     p = argparse.ArgumentParser(prog="glivarao", description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("-v", "--verbose", action="store_true")
     sub = p.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("doctor").set_defaults(fn=cmd_doctor)
+    dr = sub.add_parser("doctor", help="production checklist (keys shown as set/missing only)")
+    dr.add_argument("--strict", action="store_true", help="exit 1 if the installation is broken")
+    dr.add_argument("--config", dest="verbose_config", action="store_true", help="also print the redacted config")
+    dr.set_defaults(fn=cmd_doctor)
     pr = sub.add_parser("produce")
     pr.add_argument("--format", choices=["long", "short"], default="short")
     pr.add_argument("--topic")
@@ -425,7 +537,7 @@ def main(argv=None):
     d2.add_argument("--date", help="YYYY-MM-DD (default today)")
     d2.add_argument("--no-telegram", action="store_true")
     d2.add_argument("--workers", type=int)
-    d2.add_argument("--shorts", type=int, default=2)
+    d2.add_argument("--shorts", type=int, default=None, help="default: 3 a day (up to 6 when the buffer is low)")
     d2.add_argument("--force", action="store_true", help="produce again even if today already completed")
     d2.add_argument("--retries", type=int, default=1, help="whole-run retries before alerting (default 1)")
     d2.set_defaults(fn=cmd_daily_v2)
@@ -439,6 +551,17 @@ def main(argv=None):
     pn.add_argument("--force", action="store_true", help="plan even if no long video is due tomorrow")
     pn.set_defaults(fn=cmd_plan)
     sub.add_parser("queue", help="show the topic queue").set_defaults(fn=cmd_queue)
+    cp = sub.add_parser("competitors", help="competitor research: patterns from similar channels (YouTube API)")
+    cp.add_argument("--no-telegram", action="store_true")
+    cp.set_defaults(fn=cmd_competitors)
+    hl = sub.add_parser("health", help="health report: buffer, pace, spend, disk, voice, failed services")
+    hl.add_argument("--no-telegram", action="store_true")
+    hl.set_defaults(fn=cmd_health)
+    al = sub.add_parser("alert", help="send an alert to Telegram (systemd OnFailure)")
+    al.add_argument("text", nargs="+")
+    al.set_defaults(fn=cmd_alert)
+    sub.add_parser("verify-facts", help="re-check the launch list's facts on official pages").set_defaults(
+        fn=cmd_verify_facts)
     vl = sub.add_parser("voice-lock", help="show the locked voice, budget and held videos")
     vl.add_argument("--reset", action="store_true", help="accept changed voice settings in .env as the new lock")
     vl.set_defaults(fn=cmd_voice_lock)

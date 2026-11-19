@@ -3,6 +3,10 @@ Description=GLIVARAO: pick the next topic automatically (fresh research) and ann
 After=network-online.target
 Wants=network-online.target
 
+OnFailure=glivarao-alert@%n.service
+StartLimitIntervalSec=6h
+StartLimitBurst=3
+
 [Service]
 Type=oneshot
 User=glivarao
@@ -11,5 +15,7 @@ ExecStart=/opt/glivarao/app/.venv/bin/python -m glivarao -v plan-next
 StandardOutput=append:/opt/glivarao/app/logs/plan.log
 StandardError=append:/opt/glivarao/app/logs/plan.log
 TimeoutStartSec=45min
+Restart=on-failure
+RestartSec=15min
 NoNewPrivileges=true
 PrivateTmp=true

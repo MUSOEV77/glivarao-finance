@@ -74,12 +74,11 @@ def test_no_repeats_and_rotation(store):
     assert first["key"] == "credit_card" and any("Ranked #1" in w for w in why)
     store.kv_set("used_topics", json.dumps([[str(DAY), "credit_card", "Credit and Debt", "card", "credit card fees"]]))
     nxt, why, skipped = pick_topic(rep, store, free_writer=True)
-    # credit_card: repeat; debt_payoff: same family (card) ; mortgage: debt pillar just used -> 401(k)
-    assert nxt["key"] == "retirement_401k"
+    # credit_card: repeat; debt_payoff: same family (card); debt/credit is the main focus -> mortgage
+    assert nxt["key"] == "mortgage" and any("Channel focus: debt and credit" in w for w in why)
     none, _, skipped = pick_topic(report(card(), card("debt_payoff", "Paying off debt")), store, free_writer=True)
-    assert none is None and any("covered in the last 30" in r for r in skipped)
-    assert any("same topic family" in r or "same pillar" in r for r in skipped)
-    assert any(w.startswith("Pillar: Retirement") for w in why)  # a pillar not covered recently comes first
+    assert none is None and any("covered in the last 8" in r for r in skipped)
+    assert any("same topic family" in r for r in skipped)
 
 
 def test_similar_angle_is_skipped(store):
@@ -115,7 +114,7 @@ def test_daily_auto_waits_for_take_then_produces(settings, store, tmp_path, monk
     rdir = _report_file(tmp_path, card(), card("retirement_401k", "401(k) plans", "Saving and Wealth Building"))
     res = run_daily_v2(settings, store, today=DAY, research_dir=rdir, send=False)
     # waiting for your take on the long video -> today is a Shorts day on a DIFFERENT topic
-    assert [j[1] for j in res.jobs] == ["short"] * 3 and "waiting up to 10 h" in res.note
+    assert [j[1] for j in res.jobs] == ["short"] * 3 and "waiting up to 4 h" in res.note
     assert res.topic == "401(k) plans" and TopicQueue(store).items()[0].topic.startswith("Credit cards")
     it = TopicQueue(store).items()[0]
     TopicQueue(store).add_input(it.id, "I once found a charge I never made on my statement.")

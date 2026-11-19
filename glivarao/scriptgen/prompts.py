@@ -15,6 +15,10 @@ No crypto, no single stocks or trading, no politics, elections, parties or polit
 commentary, no general macroeconomics. Be practical and non-judgmental: assume the viewer is stretched thin, give
 free options before paid ones, and never push debt or risky products.
 
+Channel style: "the big economic story -> what it means for YOUR money". Open with the bigger picture in two or
+three sentences (a national number or change, from the fact sheet only), then pivot quickly to the viewer's own
+money and spend most of the video on concrete, doable steps. Every topic must end in a money impact for the viewer.
+
 Voice: one American English male narrator, warm, confident, curious, lightly humorous. Write for the ear:
 short sentences, contractions, concrete dollar examples, no jargon without an immediate plain explanation.
 

@@ -39,7 +39,7 @@ PRACTICAL = {
     # 10: everyday decisions that save or cost real money
     "credit_card": 10, "credit_score": 10, "budgeting": 10, "emergency_fund": 10, "hysa": 10, "income_tax": 10,
     "debt_payoff": 10, "bank_fees": 10, "retirement_401k": 10, "scams": 10, "tax_refund": 10, "tax_credits": 10,
-    "tax_filing": 9, "tax_withholding": 9, "side_income_tax": 8,
+    "tax_filing": 9, "tax_withholding": 9, "side_income_tax": 8, "aca_marketplace": 9,
     # 9: high practical value
     "credit_report": 9, "debt_collection": 9, "student_loan": 9, "ira_roth": 9, "rrsp": 9, "tfsa": 9, "fhsa": 9,
     "index_funds": 9, "compound": 9, "identity_theft": 9, "paycheck": 9, "fees_expense": 9, "money_mistakes": 9,
@@ -278,6 +278,9 @@ def score_all(cands: list[Candidate]) -> None:
     ident = lambda v: v  # noqa: E731
     r_mom = {k: ranks(k, ident) for k in ("wiki_change_vs_prev_30d", "wiki_change_vs_year_ago", "cfpb_yoy_change")}
 
+    from .competitors import load_latest, potential_score
+
+    comp = load_latest()
     for c in cands:
         c.category = category_of([c.concept] if c.concept else match_concepts(c.label), c.label)
         text = c.label + " " + " ".join(q["title"] + " " + " ".join(q["tags"]) for q in c.se[:30])
@@ -289,7 +292,10 @@ def score_all(cands: list[Candidate]) -> None:
         sc["demand"] = (round(statistics.mean(dem), 1), "MEASURED",
                         f"avg percentile of {len(dem)} demand signal(s)") if dem else \
             (NO_EVIDENCE, "MEASURED", "no demand signal found for this topic")
-        sc["potential_views"] = (None, "UNAVAILABLE", "needs YouTube Data API key")
+        pv = potential_score(c.concept.key if c.concept else c.key, comp)
+        sc["potential_views"] = (pv[0], "MEASURED", pv[1]) if pv else \
+            ((None, "UNAVAILABLE", "run `python -m glivarao competitors` (YouTube Data API key)") if comp is None
+             else (4.0, "MEASURED", "competitors: no recent videos on this topic"))
         sc["competition"] = (None, "UNAVAILABLE", "needs YouTube Data API key")
         if c.se:
             cur = 10 * c.metrics["se_question_share"] * 0.5 + r_se_avg.get(c.key, 5) * 0.5

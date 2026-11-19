@@ -2,6 +2,10 @@
 Description=GLIVARAO: re-render videos held because the Gemini Charon voice was unavailable (never uploads)
 After=network-online.target
 
+OnFailure=glivarao-alert@%n.service
+StartLimitIntervalSec=6h
+StartLimitBurst=3
+
 [Service]
 Type=oneshot
 TimeoutStartSec=3h
@@ -10,4 +14,6 @@ WorkingDirectory=/opt/glivarao/app
 ExecStart=/opt/glivarao/app/.venv/bin/python -m glivarao retry-held
 StandardOutput=append:/opt/glivarao/app/logs/voice-retry.log
 StandardError=append:/opt/glivarao/app/logs/voice-retry.log
+Restart=on-failure
+RestartSec=15min
 NoNewPrivileges=true

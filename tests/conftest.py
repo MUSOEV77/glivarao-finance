@@ -9,12 +9,17 @@ def settings(tmp_path):
     return Settings(mode="dry-run", output_dir=tmp_path / "out", db_path=tmp_path / "db.sqlite3", fps=6,
                     tts_provider="silent", anthropic_api_key="", telegram_bot_token="",
                     telegram_approver_chat_id="", youtube_publish_enabled=False,
-                    youtube_client_secrets_file=tmp_path / "none.json", youtube_token_file=tmp_path / "tok.json")
+                    youtube_client_secrets_file=tmp_path / "none.json", youtube_token_file=tmp_path / "tok.json",
+                    buffer_long=0, buffer_shorts=0)  # buffer rules are tested in test_buffer_schedule.py
 
 
 @pytest.fixture
 def store(settings):
-    return JobStore(settings.db_path)
+    import json
+
+    st = JobStore(settings.db_path)
+    st.kv_set("launch_done", json.dumps(list(range(1, 17))))  # research-driven by default; launch tests reset this
+    return st
 
 
 class FakeResponse:

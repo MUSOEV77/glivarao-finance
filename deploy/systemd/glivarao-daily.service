@@ -1,7 +1,11 @@
 [Unit]
-Description=GLIVARAO daily research + production (1 long + 2 Shorts) -> Telegram review. Never uploads.
+Description=GLIVARAO daily production (long video when due + 3 Shorts) -> Telegram review. Never uploads.
 After=network-online.target
 Wants=network-online.target
+
+OnFailure=glivarao-alert@%n.service
+StartLimitIntervalSec=6h
+StartLimitBurst=3
 
 [Service]
 Type=oneshot
@@ -12,5 +16,7 @@ StandardOutput=append:/opt/glivarao/app/logs/daily.log
 StandardError=append:/opt/glivarao/app/logs/daily.log
 TimeoutStartSec=4h
 Nice=5
+Restart=on-failure
+RestartSec=15min
 NoNewPrivileges=true
 PrivateTmp=true

@@ -1,0 +1,9 @@
+[Unit]
+Description=Competitor research every Monday 08:31 Tashkent
+
+[Timer]
+OnCalendar=Mon *-*-* 08:31:00 Asia/Tashkent
+Persistent=true
+
+[Install]
+WantedBy=timers.target

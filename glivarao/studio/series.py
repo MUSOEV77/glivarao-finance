@@ -4,7 +4,7 @@
 * After you upload, reply to the upload pack with the YouTube link (or just send the link): later episodes then
   link to it in their description, and the pack tells you which video to put on the end screen.
 * /playlist <series> <link>  saves the series playlist (created once by you in YouTube Studio).
-* /affiliate <pillar> <name> <link>  adds YOUR affiliate link for a pillar; only links you add are ever used.
+* Affiliate links: see studio/affiliates.py (/affiliate <program> <link>).
 """
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ import json
 import re
 from datetime import date
 
-from .pillars import PILLARS, all_series_names
+from .pillars import all_series_names
 
 YOUTUBE_VIDEO = re.compile(r"^https?://(?:www\.|m\.)?(?:youtube\.com/(?:watch\?v=|shorts/)|youtu\.be/)[\w\-?=&]+$")
 YOUTUBE_PLAYLIST = re.compile(r"^https?://(?:www\.|m\.)?youtube\.com/playlist\?list=[\w\-]+$")
@@ -89,29 +89,8 @@ def set_playlist(store, series: str, url: str) -> None:
     _set(store, "series_playlists", pl)
 
 
-def affiliate_links(store) -> dict[str, list[list[str]]]:
-    return _get(store, "affiliate_links", {})
 
 
-def add_affiliate(store, pillar: str, name: str, url: str) -> None:
-    links = affiliate_links(store)
-    cur = [x for x in links.get(pillar, []) if x[0].lower() != name.lower()]
-    links[pillar] = (cur + [[name, url]])[-5:]
-    _set(store, "affiliate_links", links)
-
-
-def clear_affiliates(store, pillar: str) -> None:
-    links = affiliate_links(store)
-    links.pop(pillar, None)
-    _set(store, "affiliate_links", links)
-
-
-def resolve_pillar(word: str) -> str | None:
-    w = word.lower().strip()
-    for k, p in PILLARS.items():
-        if w == k or w == p.name.lower() or w in p.name.lower().split():
-            return k
-    return None
 
 
 def resolve_series(store, text: str, today: date) -> str | None:
@@ -122,8 +101,12 @@ def resolve_series(store, text: str, today: date) -> str | None:
 
 
 # ------------------------------------------------------------------------------------------------ text blocks
-def description_blocks(store, job_id: str, series: str | None, pillar: str | None, fmt: str) -> tuple[str, str]:
-    """(series block, affiliate block) to insert in the description. Either may be empty."""
+def description_blocks(store, job_id: str, series: str | None, pillar: str | None, fmt: str,
+                       topic_key: str = "") -> tuple[str, str]:
+    """(series block, affiliate block) to insert in the description. Either may be empty.
+    Affiliates: 1-2 approved programs for long videos only (studio/affiliates.py)."""
+    from . import affiliates
+
     series_txt = ""
     if series:
         lines = [f"📺 Series: {series}"]
@@ -136,7 +119,7 @@ def description_blocks(store, job_id: str, series: str | None, pillar: str | Non
             lines.append(f"Full playlist: {pl}")
         series_txt = "\n".join(lines) if (prev or pl or fmt == "long") else ""
     aff_txt = ""
-    links = affiliate_links(store).get(pillar or "", [])
+    links, _ = affiliates.for_video(store, topic_key, pillar, fmt)
     if links:
         aff_txt = "\n".join(["Helpful tools (affiliate links: I may earn a commission at no extra cost to you):"]
                             + [f"• {n}: {u}" for n, u in links])
@@ -194,22 +177,7 @@ def status_text(store, today: date) -> str:
     return "\n".join(lines)
 
 
-def affiliate_text(store) -> str:
-    links = affiliate_links(store)
-    lines = ["💵 Affiliate links by pillar (only YOUR links are used; the names are ideas to look into)"]
-    for k, p in PILLARS.items():
-        mine = links.get(k, [])
-        lines.append(f"\n{p.name} (/affiliate {k} …)")
-        lines += [f"  ✓ {n}: {u}" for n, u in mine] or ["  (no links yet)"]
-        lines.append("  Ideas: " + "; ".join(p.affiliate_ideas))
-        if p.avoid:
-            lines.append(f"  Rule: {p.avoid}")
-    lines += ["", "Add:  /affiliate debt Experian https://your-affiliate-link",
-              "Remove all for a pillar:  /affiliate debt clear"]
-    return "\n".join(lines)
-
 
 __all__ = ["record_episode", "set_link", "episodes", "linked_episodes", "next_episode_number", "description_blocks",
-           "insert_blocks", "end_screen_advice", "status_text", "affiliate_text", "add_affiliate",
-           "clear_affiliates", "set_playlist", "playlists", "affiliate_links", "resolve_pillar", "unlinked_target",
+           "insert_blocks", "end_screen_advice", "status_text", "set_playlist", "playlists", "unlinked_target",
            "YOUTUBE_VIDEO", "YOUTUBE_PLAYLIST", "HTTPS_URL"]

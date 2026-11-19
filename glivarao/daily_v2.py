@@ -47,11 +47,11 @@ def _recent_categories(store: JobStore, today: date, days: int = 7) -> list[str]
 
 
 def _mark_used(store: JobStore, today: date, topic_key: str, category: str = "", family: str = "", angle: str = "",
-               key: str = "used_topics") -> None:
+               key: str = "used_topics", news: bool = False) -> None:
     hist = json.loads(store.kv_get(key, "[]"))
     if any(h[1] == topic_key and h[0] == today.isoformat() for h in hist):
         return
-    hist.append([today.isoformat(), topic_key, category, family, angle])
+    hist.append([today.isoformat(), topic_key, category, family, angle, bool(news)])
     store.kv_set(key, json.dumps(hist[-500:]))
 
 
@@ -62,20 +62,20 @@ def finance_only_check(script: Script) -> tuple[bool, str]:
 
 
 def pace_check(store: JobStore, today: date, settings: Settings) -> tuple[bool, str]:
-    """Quality over quantity: LONG_VIDEOS_PER_MONTH long videos, spread evenly through the month (never more than
-    the month's share so far), at least MIN_DAYS_BETWEEN_LONG days apart."""
-    import calendar
-    import math
+    """LONG_VIDEOS_PER_MONTH long videos, spread evenly through the month and produced PRODUCTION_LEAD_DAYS ahead
+    (never more than the month's share so far), at least MIN_DAYS_BETWEEN_LONG days apart. When the buffer of
+    approved long videos is low, the next one may be made early (still within the monthly total)."""
+    from .studio import buffer
 
     dates = [date.fromisoformat(d) for d in json.loads(store.kv_get("long_dates", "[]"))]
-    month = [d for d in dates if (d.year, d.month) == (today.year, today.month)]
+    made, due = buffer.long_due(store, today, settings)
     target = settings.long_videos_per_month
-    days = calendar.monthrange(today.year, today.month)[1]
-    due = min(target, math.ceil(target * today.day / days))
-    if len(month) >= target:
-        return False, f"monthly pace reached ({len(month)}/{target} long videos this month)"
-    if len(month) >= due:
-        return False, f"on pace: {len(month)} of {target} long videos so far this month (next one is due later)"
+    low = buffer.status(store, settings)
+    behind = low["low_long"] and low["ready_long"] + low["review_long"] < settings.buffer_long
+    if made >= target:
+        return False, f"monthly pace reached ({made}/{target} long videos this month)"
+    if made >= due and not behind:
+        return False, f"on pace: {made} of {target} long videos so far this month (next one is due later)"
     if dates and (today - max(dates)).days < settings.min_days_between_long:
         return False, f"last long video was {(today - max(dates)).days} day(s) ago (minimum gap " \
                       f"{settings.min_days_between_long})"
@@ -152,7 +152,10 @@ def run_daily_v2(settings: Settings, store: JobStore, today: date | None = None,
     today = today or date.today()
     if held_videos(store):  # videos held for the voice go first (they are already scripted and approved by checks)
         retry_held_videos(settings, store, send=send, workers=workers)
-    shorts = settings.shorts_per_day if shorts is None else shorts
+    from .studio import buffer as _buffer
+
+    if shorts is None:
+        shorts = _buffer.shorts_quota(store, today, settings, _buffer.status(store, settings))
     research_dir = research_dir or Path("reports/research")
     cached = research_dir / f"{today.isoformat()}.json"
     paid = paid_writer_allowed(settings)
@@ -246,7 +249,9 @@ def run_daily_v2(settings: Settings, store: JobStore, today: date | None = None,
         _mark_used(store, today, brief.topic_key, brief.category, brief.family, angle_text(card),
                    key="used_short_topics")
     else:
-        _mark_used(store, today, brief.topic_key, brief.category, brief.family, angle_text(card))
+        from .studio.pillars import is_news
+
+        _mark_used(store, today, brief.topic_key, brief.category, brief.family, angle_text(card), news=is_news(card))
 
     for script, sim in drafts:
         job = store.create(script.format, brief.topic)
@@ -289,6 +294,9 @@ def run_daily_v2(settings: Settings, store: JobStore, today: date | None = None,
                                              report=report, item=item))
 
     produced = [j for j in result.jobs if j[2] in ("rendered", "pending_approval", "held")]  # held = made later
+    made_shorts = sum(j[1] == "short" for j in produced)
+    if made_shorts:
+        _buffer.record_shorts(store, today, made_shorts)
     if any(j[1] == "long" for j in produced):
         dates = json.loads(store.kv_get("long_dates", "[]")) + [today.isoformat()]
         store.kv_set("long_dates", json.dumps(dates[-200:]))
@@ -333,8 +341,14 @@ def render_and_review(job, script, brief, claims, ctx: dict, settings: Settings,
         Path(job.script_path).write_text(script.model_dump_json(indent=2))
         thumb = make_thumbnail(script, out / "thumbnail.jpg", portrait=script.format == "short",
                                theme=getattr(settings, "theme", "editorial"))
+        from .research.competitors import load_latest, too_similar
+
+        comp = load_latest()
+        opts = title_options(brief, script)
+        own = [t for t in opts if not too_similar(t, comp)] or opts  # never close to a competitor's title
         (out / "metadata.json").write_text(json.dumps(
-            {"title": script.title, "title_options": title_options(brief, script),
+            {"title": own[0], "title_options": own,
+             "titles_dropped_as_too_close_to_competitors": [t for t in opts if t not in own],
              "description": script.description, "tags": script.tags,
              "topic_key": brief.topic_key, "category": brief.category, "market": brief.market,
              "pillar": getattr(pillar_of(brief.topic_key), "key", None),
@@ -384,11 +398,20 @@ def render_and_review(job, script, brief, claims, ctx: dict, settings: Settings,
             preview = preview_clip(res.video, out / "preview.mp4")
         checks = "\n\n".join([_topic_block(brief, item, script, store, today), ctx["compliance"], sim.summary(),
                                factcheck.report(claims), disc.review_text()])
-        request_approval(job, store, settings, script, checks, preview=preview,
-                         attachments=[(why_md, "Why this topic (research evidence)"),
-                                      (out / "fact_check.md", "Fact check: every number and its source"),
-                                      (out / "fact_sheet.md", "Fact sheet (sources and calculations)")])
-        note = "sent to Telegram"
+        attachments = [(why_md, "Why this topic (research evidence)"),
+                       (out / "fact_check.md", "Fact check: every number and its source"),
+                       (out / "fact_sheet.md", "Fact sheet (sources and calculations)")]
+        from .studio import quiet
+
+        if quiet.is_quiet(settings):  # no messages at night: the review is delivered when quiet hours end
+            (out / "review_checks.txt").write_text(checks)
+            quiet.queue_review(store, job.id, {"checks": str(out / "review_checks.txt"),
+                                               "preview": str(preview) if preview else "",
+                                               "attachments": [[str(p), cap] for p, cap in attachments]})
+            note = f"review queued until {settings.quiet_end} ({settings.local_tz})"
+        else:
+            request_approval(job, store, settings, script, checks, preview=preview, attachments=attachments)
+            note = "sent to Telegram"
     elif send:
         note = "Telegram not configured: review files in the output folder"
     job = store.get(job.id)
@@ -451,24 +474,12 @@ def retry_held_videos(settings: Settings, store: JobStore, send: bool = True, wo
 
 
 def _budget_alert(settings: Settings, store: JobStore, send: bool) -> None:
-    """One Telegram alert per month at 80% of the voice budget, and one when the cap is reached."""
-    if settings.tts_provider != "gemini_tts":
-        return
-    from .tts.gemini_tts import SpendLedger
+    """One Telegram alert per month at 80% of each budget (voice, Claude), and one when a cap is reached."""
+    from .studio.health import spend_alerts
 
-    month = date.today().strftime("%Y-%m")
-    spent, cap = SpendLedger(Path(settings.tts_spend_ledger_path)).spent(month), settings.tts_monthly_budget_usd
-    if cap <= 0:
-        return
-    level = 100 if spent >= cap * 0.995 else (80 if spent >= cap * settings.tts_alert_ratio else 0)
-    key = f"tts_budget_alert:{month}"
-    if level and int(store.kv_get(key, "0")) < level:
-        store.kv_set(key, str(level))
+    for text in spend_alerts(settings, store):
         if send:
-            _notify(settings, f"💰 GLIVARAO voice budget: ${spent:.2f} of ${cap:.2f} used this month ({spent / cap:.0%})."
-                    + (" The cap is reached: new videos are held until next month (no other voice is used)."
-                       if level == 100 else " Videos continue; the hard cap stops paid voice use at 100%."))
-
+            _notify(settings, text)
 
 def _render_with_retry(render_animated, script, out, settings, workers):
     """One retry with a single worker: the usual cause of a failed render is memory pressure or a crashed worker.
@@ -489,7 +500,7 @@ class AlreadyRunning(RuntimeError):
 
 
 def supervised_daily(settings: Settings, store: JobStore, today: date | None = None, send: bool = True,
-                     workers: int | None = None, shorts: int = 2, force: bool = False, retries: int = 1,
+                     workers: int | None = None, shorts: int | None = None, force: bool = False, retries: int = 1,
                      retry_delay: float = 120.0, lock_path: Path | None = None, notifier=None) -> DailyResult | None:
     """Production entry point used by the systemd timer.
 
@@ -539,6 +550,13 @@ def supervised_daily(settings: Settings, store: JobStore, today: date | None = N
         if bad:
             notifier(settings, f"GLIVARAO {today}: {len(bad)} of {len(res.jobs)} videos need attention:\n" +
                      "\n".join(f"- {j[0]} ({j[1]}): {j[2]}: {j[4]}" for j in bad))
+        try:  # buffer low / disk / spend alerts after every run
+            from .studio.health import alerts
+
+            for text in alerts(settings, store):
+                notifier(settings, text)
+        except Exception:  # noqa: BLE001
+            log.exception("health alerts failed")
         return res
     finally:
         fcntl.flock(fh, fcntl.LOCK_UN)

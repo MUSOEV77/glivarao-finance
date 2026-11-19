@@ -2,6 +2,10 @@
 Description=GLIVARAO: record Telegram Approve/Reject decisions (never uploads)
 After=network-online.target
 
+OnFailure=glivarao-alert@%n.service
+StartLimitIntervalSec=6h
+StartLimitBurst=3
+
 [Service]
 Type=oneshot
 TimeoutStartSec=45min

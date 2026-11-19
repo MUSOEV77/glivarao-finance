@@ -1,8 +1,8 @@
 [Unit]
-Description=Pick and announce the next video's topic every evening (America/New_York)
+Description=Pick and announce the next topic at 09:00 Tashkent
 
 [Timer]
-OnCalendar=*-*-* 17:37:00 America/New_York
+OnCalendar=*-*-* 09:00:00 Asia/Tashkent
 Persistent=true
 
 [Install]

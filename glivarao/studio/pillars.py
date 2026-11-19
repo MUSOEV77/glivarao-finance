@@ -30,27 +30,25 @@ PILLARS: dict[str, Pillar] = {p.key: p for p in [
     Pillar("debt", "Debt and credit", "credit cards, loans, credit score", frozenset({
         "credit_card", "credit_report", "credit_score", "debt_collection", "student_loan", "mortgage", "auto_loan",
         "personal_loan", "bnpl", "debt_payoff", "bankruptcy"}),
-        ("Experian (free credit report and score)", "Self (credit-builder loan)",
-         "a credit-union or bank debt-consolidation loan partner"),
+        ("Rocket Money", "Monarch Money"),
         avoid="No payday lenders, debt-settlement companies or high-APR cards: this audience is already struggling."),
     Pillar("budget", "Budgeting and saving", "budgets, subscriptions, saving money", frozenset({
-        "budgeting", "cost_of_living", "spending_psych", "money_relationships", "paycheck", "inflation_personal",
+        "aca_marketplace", "budgeting", "cost_of_living", "spending_psych", "money_relationships", "paycheck", "inflation_personal",
         "bank_account", "bank_fees", "debit_prepaid", "emergency_fund", "hysa", "cd_gic"}),
-        ("YNAB (budgeting app)", "Rocket Money (subscription cancelling)",
-         "an FDIC-insured high-yield savings account partner"),
+        ("Rocket Money", "Monarch Money", "YNAB (later)"),
         avoid="Only FDIC-insured savings products; never \"get rich\" apps."),
     Pillar("taxes", "Taxes", "filing, IRS changes, refunds", frozenset({
         "income_tax", "capital_gains", "tax_refund", "tax_credits", "tax_filing", "tax_withholding", "side_income_tax"}),
-           ("TurboTax", "H&R Block", "FreeTaxUSA (low-cost filing)"),
+           ("FreeTaxUSA", "TurboTax"),
            avoid="Always mention IRS Free File / Direct File where it applies, before any paid software."),
     Pillar("retire", "Retirement and investing basics", "401(k), IRA, index funds", frozenset({
         "retirement_401k", "ira_roth", "retirement_planning", "hsa", "education_saving", "index_funds", "compound",
         "fees_expense", "bonds", "robo", "fire", "net_worth"}),
-        ("Fidelity / Schwab / Vanguard (low-cost IRAs)", "Betterment", "Wealthfront", "M1 Finance"),
+        ("Rocket Dollar",),
         avoid="No single-stock picks, trading apps, options or crypto."),
     Pillar("scams", "Scams and consumer protection", "scams, identity theft, your rights", frozenset({
         "scams", "identity_theft", "money_transfer", "deposit_insurance", "money_mistakes"}),
-        ("Aura (identity theft protection)", "LifeLock (Norton)", "DeleteMe (data broker removal)"),
+        ("Wise (only for money-transfer topics)",),
         avoid="Always give the free steps first (credit freeze, IdentityTheft.gov, ReportFraud.ftc.gov)."),
 ]}
 ORDER = list(PILLARS)
@@ -63,6 +61,12 @@ TAX_SEASON_MONTHS = {12, 1, 2, 3, 4}
 RECENT_WINDOW = 5         # at most MAX_IN_WINDOW videos per pillar in the last RECENT_WINDOW
 MAX_IN_WINDOW = 2
 TAX_SEASON_MAX = 3        # taxes may take 3 of the last 5 in tax season (still never twice in a row)
+# Main focus for the first 12 months: debt and credit. Long videos: at least 3 of every 5 are debt/credit (60%).
+FOCUS_PILLAR = "debt"
+FOCUS_MIN_IN_5 = 3
+OTHER_MAX_IN_5 = 1        # each other pillar at most once in 5 long videos (taxes: 2 in tax season)
+NEWS_EVERY = 4            # long videos: at most 1 news-driven video in 4
+EVERGREEN_BONUS = 5.0
 
 
 def pillar_of(topic_key: str) -> Pillar | None:
@@ -90,8 +94,28 @@ def filing_year(today: date) -> int:
     return today.year + 1 if today.month == 12 else today.year
 
 
-def rotation_block(pillar: Pillar, recent_pillars: list[str], today: date) -> str | None:
-    """Hard rotation rules. recent_pillars: oldest first."""
+def needs_focus(recent_pillars: list[str]) -> bool:
+    """True when the next long video must be debt/credit to keep >= 60% (3 of every 5)."""
+    return recent_pillars[-(5 - 1):].count(FOCUS_PILLAR) < FOCUS_MIN_IN_5
+
+
+def is_news(card: dict) -> bool:
+    return bool(card.get("news")) or card.get("type") == "timely"
+
+
+def rotation_block(pillar: Pillar, recent_pillars: list[str], today: date, focus: bool = False) -> str | None:
+    """Hard rotation rules. recent_pillars: oldest first.
+    focus=True (long videos): debt/credit may repeat; every other pillar at most once in 5 (taxes: twice in tax
+    season) and never twice in a row. focus=False (Shorts days): plain rotation."""
+    if focus:
+        if pillar.key == FOCUS_PILLAR:
+            return None
+        if recent_pillars and recent_pillars[-1] == pillar.key:
+            return "same pillar as the previous video"
+        cap = 2 if (pillar.key == "taxes" and tax_season(today)) else OTHER_MAX_IN_5
+        if recent_pillars[-RECENT_WINDOW:].count(pillar.key) >= cap:
+            return f"pillar already used {cap}× in the last {RECENT_WINDOW} videos"
+        return None
     if recent_pillars and recent_pillars[-1] == pillar.key:
         return "same pillar as the previous video"
     window = recent_pillars[-RECENT_WINDOW:]
@@ -135,6 +159,7 @@ SERIES = [
                                                   "mortgage"}), "getting out of debt, one plan at a time"),
     Series("Money Traps", "budget", frozenset({"bank_fees", "cost_of_living", "debit_prepaid"}),
            "the costly traps lenders and stores count on"),
+    Series("Health Costs", "budget", frozenset({"aca_marketplace"}), "what health coverage really costs you"),
     Series("Savings That Work", "budget", frozenset({"emergency_fund", "hysa", "cd_gic", "bank_account"}),
            "where to keep money so it actually grows"),
     Series("Budget Reset", "budget", frozenset({"budgeting", "spending_psych", "paycheck", "money_relationships",

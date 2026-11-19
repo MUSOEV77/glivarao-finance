@@ -1,0 +1,20 @@
+[Unit]
+Description=GLIVARAO: daily health report to Telegram
+After=network-online.target
+Wants=network-online.target
+OnFailure=glivarao-alert@%n.service
+StartLimitIntervalSec=6h
+StartLimitBurst=3
+
+[Service]
+Type=oneshot
+User=glivarao
+WorkingDirectory=/opt/glivarao/app
+ExecStart=/opt/glivarao/app/.venv/bin/python -m glivarao health
+StandardOutput=append:/opt/glivarao/app/logs/health.log
+StandardError=append:/opt/glivarao/app/logs/health.log
+TimeoutStartSec=10min
+Restart=on-failure
+RestartSec=15min
+NoNewPrivileges=true
+PrivateTmp=true

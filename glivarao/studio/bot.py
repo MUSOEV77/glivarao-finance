@@ -24,8 +24,9 @@ HELP = """GLIVARAO commands
 /queue — what's planned
 /series — series and which videos have their YouTube link
 /playlist <series> <playlist link> — save a series playlist
-/affiliate — your affiliate links per pillar (+ ideas)
-/affiliate <pillar> <name> <https link> — add one (pillars: debt, budget, taxes, retire, scams)
+/affiliate — affiliate programs and their status
+/affiliate <program> <https link> — add your link once approved (rocketmoney, monarch, wise, rocketdollar,
+  turbotax, freetaxusa, ynab)
 After uploading a video, reply to its upload pack with the YouTube link.
 Reply to a topic announcement with text or a voice note to add your take."""
 
@@ -130,23 +131,27 @@ def _channel_command(text: str, reply_to, store, settings, client) -> str | None
         say(f"✅ Playlist saved for \"{name}\". New descriptions and end-screen tips will use it.")
         return "playlist"
     if low.startswith("/affiliate"):
+        from . import affiliates
+
         parts = text.split()
         if len(parts) == 1:
-            say(S.affiliate_text(store))
+            say(affiliates.status_text(store))
             return "affiliate_list"
-        pillar = S.resolve_pillar(parts[1])
-        if pillar and len(parts) == 3 and parts[2].lower() == "clear":
-            S.clear_affiliates(store, pillar)
-            say(f"✅ Removed all affiliate links for {pillar}.")
-            return "affiliate_clear"
-        if not (pillar and len(parts) >= 4 and S.HTTPS_URL.match(parts[-1])):
-            say("Usage: /affiliate <pillar> <name> <https link>\nPillars: debt, budget, taxes, retire, scams\n"
-                "Example: /affiliate taxes FreeTaxUSA https://your-link\nSee all: /affiliate")
+        key = parts[1].lower()
+        if key not in affiliates.PROGRAMS:
+            say("Unknown program. Programs: " + ", ".join(affiliates.PROGRAMS) + "\nSee all: /affiliate")
             return "affiliate_help"
-        name = " ".join(parts[2:-1])[:60]
-        S.add_affiliate(store, pillar, name, parts[-1])
-        say(f"✅ Added \"{name}\" to the {pillar} pillar. It appears (with the disclosure) in the next upload packs "
-            "for that pillar.")
+        name = affiliates.PROGRAMS[key].name
+        if len(parts) == 3 and parts[2].lower() == "clear":
+            affiliates.set_link(store, key, None)
+            say(f"✅ {name} is a placeholder again (not used in descriptions).")
+            return "affiliate_clear"
+        if not (len(parts) == 3 and S.HTTPS_URL.match(parts[2])):
+            say(f"Usage: /affiliate {key} <https link>   (or /affiliate {key} clear)")
+            return "affiliate_help"
+        affiliates.set_link(store, key, parts[2])
+        say(f"✅ {name} link saved. It appears (right above the disclosure) in upload packs of long videos it fits; "
+            "never in Shorts; at most 2 links per video.")
         return "affiliate_add"
     if S.YOUTUBE_VIDEO.match(text):
         packs = json.loads(store.kv_get("pack_messages", "{}"))

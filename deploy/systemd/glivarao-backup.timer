@@ -1,8 +1,8 @@
 [Unit]
-Description=Daily GLIVARAO backup
+Description=Nightly backup 03:40 Tashkent
 
 [Timer]
-OnCalendar=*-*-* 03:40:00
+OnCalendar=*-*-* 03:40:00 Asia/Tashkent
 Persistent=true
 
 [Install]

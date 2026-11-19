@@ -233,8 +233,14 @@ def poll_decisions(store: JobStore, settings: Settings, client: TelegramClient |
     return decisions
 
 
-def notify(settings: Settings, text: str, client: TelegramClient | None = None) -> None:
+def notify(settings: Settings, text: str, client: TelegramClient | None = None, now=None) -> None:
+    """Send an alert, or queue it during quiet hours (delivered when they end; see studio/quiet.py)."""
     if not (settings.telegram_bot_token and settings.telegram_approver_chat_id):
+        return
+    from ..studio import quiet
+
+    if quiet.is_quiet(settings, now):
+        quiet.queue_text(JobStore(settings.db_path), text)
         return
     _client(settings, client).call(
         "sendMessage", chat_id=settings.telegram_approver_chat_id, text=text[:4000])

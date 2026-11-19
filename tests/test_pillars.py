@@ -53,11 +53,66 @@ def test_never_the_same_pillar_twice_in_a_row(store):
     assert got["key"] == "scams"
 
 
-def test_pillar_cap_in_last_five_and_week_rotation(store):
-    hist(store, "credit_card", "hysa", "credit_score", "scams")   # debt twice in the last 5
-    r = rep(c("student_loan", "Student loans", 99), c("index_funds", "Index funds and ETFs", 30))
+def test_debt_and_credit_at_least_60_percent_of_long_videos(store):
+    hist(store, "credit_card", "hysa", "credit_score", "scams")   # only 2 debt in the last 4 -> must be debt
+    r = rep(c("index_funds", "Index funds and ETFs", 99), c("student_loan", "Student loans", 30))
+    got, why, _ = pick_topic(r, store, free_writer=False, today=NOV)
+    assert got["key"] == "student_loan" and any("Channel focus" in w for w in why)
+    hist(store, "credit_card", "student_loan", "credit_score", "hysa")   # 3 debt in last 4 -> others allowed
+    assert pick_topic(r, store, free_writer=False, today=NOV)[0]["key"] == "index_funds"
+    # simulate 30 picks from a varied pool: >= 60% debt in every 5-video window
+    pool = [c(k, k, 90 - i) for i, k in enumerate(
+        ["hysa", "index_funds", "scams", "budgeting", "credit_card", "bnpl", "credit_score", "student_loan",
+         "personal_loan", "auto_loan", "mortgage", "debt_payoff", "credit_report", "debt_collection",
+         "emergency_fund", "ira_roth", "identity_theft", "tax_refund"])]
+    store.kv_set("used_topics", "[]")
+    seq = []
+    for n in range(30):
+        got, _, _ = pick_topic(rep(*pool), store, free_writer=False, today=NOV)
+        assert got is not None, n
+        h = json.loads(store.kv_get("used_topics", "[]")) + [["2026-11-01", got["key"], "", "", "", False]]
+        store.kv_set("used_topics", json.dumps(h))
+        seq.append(P.pillar_of(got["key"]).key)
+    assert all(seq[i:i + 5].count("debt") >= 3 for i in range(len(seq) - 4)), seq
+    assert len(set(seq)) >= 4                                      # other pillars still appear
+
+
+def test_other_pillars_capped_and_never_twice_in_a_row(store):
+    hist(store, "credit_card", "credit_score", "hysa", "bnpl")
+    r = rep(c("budgeting", "Budgeting", 99), c("scams", "Scams and fraud", 50))
     got, _, skipped = pick_topic(r, store, free_writer=False, today=NOV)
-    assert got["key"] == "index_funds" and any("2× in the last 5" in s for s in skipped)
+    assert got["key"] == "scams" and any("1× in the last 5" in k for k in skipped)
+
+
+def test_news_videos_at_most_one_in_four(store):
+    store.kv_set("used_topics", json.dumps([["2026-11-01", "credit_card", "", "", "", False],
+                                            ["2026-11-03", "bnpl", "", "", "", True],
+                                            ["2026-11-05", "credit_score", "", "", "", False]]))
+    news = dict(c("student_loan", "Student loans", 99), type="timely")
+    calm = dict(c("auto_loan", "Car loans", 60), type="evergreen")
+    got, why, skipped = pick_topic(rep(news, calm), store, free_writer=False, today=NOV)
+    assert got["key"] == "auto_loan" and any("news limit" in k for k in skipped)
+    assert any("evergreen" in w for w in why)
+
+
+def test_launch_list_comes_first_with_checked_facts(settings, store, monkeypatch, tmp_path):
+    from glivarao.studio import launch_plan
+    from glivarao.studio.planner import plan_next
+
+    store.kv_set("launch_done", "[]")
+    monkeypatch.setattr(launch_plan, "verify_facts", lambda v, session=None: (
+        v.facts[1:], [(v.facts[0], "DROPPED: '15,960' is no longer on the page")]))
+    item = plan_next(settings, store, NOV, tmp_path, send=False)
+    assert item.topic == "ACA 2027: the subsidy cliff is back" and item.card["launch"] == 1
+    assert any("DROPPED" in w for w in item.why)
+    first = launch_plan.LAUNCH[0].facts[0].text
+    assert first not in [f["text"] for f in item.card["launch_facts"]]     # a dropped fact never reaches the script
+    assert launch_plan.done(store) == [1] and launch_plan.remaining(store) == 15
+    assert len(launch_plan.LAUNCH) == 16 and len({v.slug for v in launch_plan.LAUNCH}) == 16
+    for v in launch_plan.LAUNCH:                              # every number in the list has an official URL
+        for f in v.facts:
+            assert f.url.startswith("https://") and any(d in f.url for d in (
+                ".gov", "annualcreditreport.com")), (v.slug, f.url)
 
 
 def test_taxes_favoured_in_tax_season_and_series_name():
@@ -102,12 +157,13 @@ def test_series_links_end_screen_and_affiliates_in_pack(settings, store, tmp_pat
     # you upload, then reply to the pack with the link
     assert handle_message({"text": "https://youtu.be/abc123", "reply_to_message": {"message_id": pack_msg}},
                           store, s, tg) == "link"
-    assert handle_message({"text": "/affiliate debt Experian https://aff.example/exp"}, store, s, tg) == "affiliate_add"
+    assert handle_message({"text": "/affiliate monarch https://aff.example/exp"}, store, s, tg) == "affiliate_add"
     assert handle_message({"text": "/playlist money traps https://www.youtube.com/playlist?list=PL123"},
                           store, s, tg) == "playlist"
     tg2 = RecTG()
     ep2 = approved_job(s, store, tmp_path)
-    _meta(ep2, series="Money Traps", pillar="debt", description="Body two\n\nDisclosure: some links may be affiliate links.")
+    _meta(ep2, series="Money Traps", pillar="debt", topic_key="credit_card",
+          description="Body two\n\nDisclosure: some links may be affiliate links.")
     send_pack(ep2, s, store, tg2)
     texts = "\n".join(tg2.texts())
     assert "episode 2" in texts
@@ -115,6 +171,7 @@ def test_series_links_end_screen_and_affiliates_in_pack(settings, store, tmp_pat
     assert "https://youtu.be/abc123" in desc and "PL123" in desc and "aff.example/exp" in desc
     assert desc.index("aff.example/exp") < desc.index("Disclosure: some links")      # disclosure next to links
     assert "Choose specific video" in texts and "abc123" in texts
+    assert "Rocket Money" in texts and "placeholders" in texts      # not approved yet: listed, not in the text
 
 
 def test_links_without_reply_go_to_newest_unlinked_and_bad_input_is_explained(settings, store, tmp_path):
@@ -124,10 +181,24 @@ def test_links_without_reply_go_to_newest_unlinked_and_bad_input_is_explained(se
     S.record_episode(store, "J1", "Scam Alert", "scams", "Scam one", "long", NOV)
     assert handle_message({"text": "https://youtu.be/zzz"}, store, s, tg) == "link"
     assert S.episodes(store)[0]["url"] == "https://youtu.be/zzz"
-    assert handle_message({"text": "/affiliate crypto Coin https://x.example"}, store, s, tg) == "affiliate_help"
-    assert handle_message({"text": "/affiliate debt Bad http://insecure.example"}, store, s, tg) == "affiliate_help"
+    assert handle_message({"text": "/affiliate coinbase https://x.example"}, store, s, tg) == "affiliate_help"
+    assert handle_message({"text": "/affiliate wise http://insecure.example"}, store, s, tg) == "affiliate_help"
     assert handle_message({"text": "/affiliate"}, store, s, tg) == "affiliate_list"
-    assert "Ideas:" in tg.texts()[-1]
+    assert "placeholder" in tg.texts()[-1] and "Rocket Dollar" in tg.texts()[-1]
+
+
+def test_affiliates_one_or_two_per_long_video_none_in_shorts(store):
+    from glivarao.studio import affiliates as A
+
+    for k in ("rocketmoney", "monarch", "freetaxusa", "turbotax"):
+        A.set_link(store, k, f"https://aff.example/{k}")
+    links, _ = A.for_video(store, "cost_of_living", "budget", "long")
+    assert [n for n, _ in links] == ["Rocket Money", "Monarch Money"]           # max 2, topic match first
+    assert A.for_video(store, "tax_filing", "taxes", "long")[0][0][0] == "FreeTaxUSA"
+    assert A.for_video(store, "cost_of_living", "budget", "short") == ([], [])  # never in Shorts
+    assert A.for_video(store, "scams", "scams", "long") == ([], [])             # nothing fits: no link
+    A.set_link(store, "monarch", None)
+    assert len(A.for_video(store, "budgeting", "budget", "long")[0]) == 1
 
 
 def test_free_writer_can_make_tax_videos_without_unsourced_claims(store):

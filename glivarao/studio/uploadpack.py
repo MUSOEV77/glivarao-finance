@@ -62,10 +62,13 @@ def build_pack(job, settings, store) -> dict:
     if series:
         episode = S.record_episode(store, job.id, series, pillar or "", titles[0], job.format,
                                    slot.date() if slot else date.today())
-    blocks = S.description_blocks(store, job.id, series, pillar, job.format)
+    blocks = S.description_blocks(store, job.id, series, pillar, job.format, meta.get("topic_key", ""))
+    from . import affiliates
+
+    _, pending_aff = affiliates.for_video(store, meta.get("topic_key", ""), pillar, job.format)
     description = S.insert_blocks(meta["description"], list(blocks), settings.affiliate_disclosure)
     return {"job": job.id, "format": job.format, "titles": titles, "description": description,
-            "series": series, "episode": episode, "end_screen": S.end_screen_advice(store, job.id, series, job.format),
+            "series": series, "episode": episode, "pending_affiliates": pending_aff, "end_screen": S.end_screen_advice(store, job.id, series, job.format),
             "tags": tags_line(meta.get("tags", [])), "video": Path(job.video_path),
             "thumbnail": Path(job.thumbnail_path) if job.thumbnail_path else None, "slot": slot,
             "when": describe(slot), "duration": job.duration_sec}
@@ -115,6 +118,9 @@ def send_pack(job, settings, store, client=None) -> dict:
         send(f"<b>{label}</b>\n<pre>{_e(part)}</pre>")
     send(f"<b>TAGS</b> ({len(p['tags'])}/500 characters)\n<pre>{_e(p['tags'])}</pre>")
     send(f"🔗 <b>{'END SCREEN' if p['format'] == 'long' else 'RELATED VIDEO'}</b>\n{_e(p['end_screen'])}")
+    if p["pending_affiliates"]:
+        send("💵 Affiliate slots for this video (placeholders, not in the description yet): "
+             + ", ".join(_e(n) for n in p["pending_affiliates"]) + ". When you're approved: /affiliate <program> <link>")
     last = send(f"🕒 <b>PUBLISH TIME</b>\n{_e(p['when'])}\nIn YouTube Studio: Visibility → Schedule → set this date "
                 "and time (Studio shows your phone's time zone).\n\n"
                 "After uploading, <b>reply to this message with the YouTube link</b> so the next episodes can link "
