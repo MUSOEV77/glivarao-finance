@@ -57,6 +57,9 @@ class Settings:
     # (Anthropic Console key) | free (offline templates). Gemini Pro (same GEMINI_API_KEY) takes over automatically
     # if the Claude writer fails. One shared Claude cap (CLAUDE_MONTHLY_BUDGET_USD) covers both Claude backends.
     writer: str = field(default_factory=lambda: _env("WRITER", "claude_vertex"))
+    # none (default): Claude only; if Claude can't write, production is held, you get an alert, it retries hourly.
+    # gemini: Gemini Pro writes instead when Claude fails.
+    writer_fallback: str = field(default_factory=lambda: _env("WRITER_FALLBACK", "none"))
     vertex_project_id: str = field(default_factory=lambda: _env("VERTEX_PROJECT_ID"))
     vertex_region: str = field(default_factory=lambda: _env("VERTEX_REGION", "global"))
     vertex_model: str = field(default_factory=lambda: _env("VERTEX_MODEL", "claude-sonnet-5-5"))
@@ -142,6 +145,11 @@ class Settings:
     # audition so the narrator lands at TTS_TARGET_WPM; locked with the voice.
     gemini_tts_speed: float = field(default_factory=lambda: float(_env("GEMINI_TTS_SPEED", "1.0")))
     tts_target_wpm: int = field(default_factory=lambda: int(_env("TTS_TARGET_WPM", "170")))
+    # Shorts length: script capped before voicing; real audio measured after; never sent over SHORT_MAX_SECONDS
+    short_max_words: int = field(default_factory=lambda: int(_env("SHORT_MAX_WORDS", "110")))
+    short_redo_seconds: float = field(default_factory=lambda: float(_env("SHORT_REDO_SECONDS", "58")))
+    short_target_seconds: float = field(default_factory=lambda: float(_env("SHORT_TARGET_SECONDS", "50")))
+    short_max_seconds: float = field(default_factory=lambda: float(_env("SHORT_MAX_SECONDS", "60")))
     gemini_tts_retries: int = field(default_factory=lambda: int(_env("GEMINI_TTS_RETRIES", "5")))
     gemini_tts_backoff_sec: float = field(default_factory=lambda: float(_env("GEMINI_TTS_BACKOFF_SEC", "5")))
     tts_alert_ratio: float = field(default_factory=lambda: float(_env("TTS_ALERT_RATIO", "0.8")))

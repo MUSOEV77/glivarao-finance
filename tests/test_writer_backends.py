@@ -55,7 +55,8 @@ def vs(settings, tmp_path):
     key = tmp_path / "secrets" / "vertex-sa.json"
     key.parent.mkdir()
     key.write_text("{}")
-    return replace(settings, allow_paid_apis=True, writer="claude_vertex", vertex_project_id="proj-1",
+    return replace(settings, allow_paid_apis=True, writer="claude_vertex", writer_fallback="gemini",
+                   vertex_project_id="proj-1",
                    vertex_credentials_file=str(key), gemini_api_key="GKEY",
                    claude_spend_ledger_path=str(tmp_path / "c.json"),
                    gemini_writer_ledger_path=str(tmp_path / "g.json"), db_path=tmp_path / "db.sqlite3")

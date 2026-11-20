@@ -20,7 +20,7 @@ from .prompts import (SCRIPT_SCHEMA, SYSTEM_PROMPT, WORDS_PER_MINUTE, normalize_
 
 log = logging.getLogger(__name__)
 
-DEFAULT_MINUTES = {"long": 16.5, "short": 0.85}
+DEFAULT_MINUTES = {"long": 16.5, "short": 0.6}   # Shorts: ~100 words at 170 wpm (hard cap 110 words, 60 s)
 # spoken-word targets used for the revision step (kept in step with compliance.LENGTH_RULES)
 from ..compliance import LENGTH_RULES as TARGET_WORDS  # noqa: E402  same ranges as the compliance check
 # worst-case output tokens assumed by the pre-flight budget check (thinking + JSON)
@@ -30,6 +30,11 @@ MAX_TOKENS = 64000
 
 class ScriptGenerationError(RuntimeError):
     pass
+
+
+class ClaudeUnavailable(ScriptGenerationError):
+    """Claude can't write right now (quota, outage, key, cap, refusal) and no fallback writer is allowed:
+    production is held and retried hourly."""
 
 
 class ClaudeBudgetExceeded(ScriptGenerationError):
@@ -142,6 +147,9 @@ def _ask(settings: Settings, prompt: str, fmt: str, client=None, ledger: ClaudeS
         why = f"{type(exc).__name__}: {getattr(exc, 'status_code', '')}".strip()
     except Exception as exc:  # noqa: BLE001  e.g. google-auth token refresh failures
         why = f"{type(exc).__name__}"
+    if getattr(settings, "writer_fallback", "none") != "gemini":
+        log.warning("Claude writer failed (%s); no fallback writer (Claude only): holding production", why)
+        raise ClaudeUnavailable(why)
     log.warning("Claude writer failed (%s); using the Gemini Pro fallback", why)
     try:
         data = gemini_write(settings, SYSTEM_PROMPT, prompt, SCRIPT_SCHEMA, fmt)

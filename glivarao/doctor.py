@@ -127,7 +127,14 @@ def check_settings(s, store) -> Report:
             r.check(perm in ("600", "400"), "key file permissions", "600 (owner only)", f"{perm} -> chmod 600 {kf}")
     elif s.writer == "claude_api":
         _key(r, "ANTHROPIC_API_KEY", s.anthropic_api_key, re.compile(r"^sk-ant-"), "deploy/set-key.sh ANTHROPIC_API_KEY")
-    r.row("info", "fallback writer", f"Gemini {s.gemini_writer_model} (automatic if Claude fails)")
+    r.check(s.writer_fallback in ("none", "gemini"), "WRITER_FALLBACK",
+            "none: Claude only (held + hourly retry if Claude can't write)" if s.writer_fallback == "none"
+            else f"gemini: Gemini {s.gemini_writer_model} writes if Claude fails", f"{s.writer_fallback!r} -> none | gemini")
+    held = json.loads(store.kv_get("writer_held", "{}"))
+    if held:
+        r.row("warn", "production", f"on hold since {held.get('since')}: Claude unavailable ({held.get('reason', '')[:80]})")
+    r.row("info", "Shorts length", f"max {s.short_max_words} words; re-voiced if over {s.short_redo_seconds:g} s; "
+          f"never sent over {s.short_max_seconds:g} s")
 
     print("\nVOICE (locked)")
     try:

@@ -100,6 +100,10 @@ def report(settings, store) -> str:
     nxt = active_item(store)
     lines += ["NEXT", f"{nxt.topic} ({nxt.status})" if nxt else "Next topic is picked at 09:00", ""]
     held = held_videos(store)
+    wh = json.loads(store.kv_get("writer_held", "{}"))
+    if wh:
+        lines += ["⏸ PRODUCTION ON HOLD", f"Claude can't write since {wh.get('since')}: {wh.get('reason', '')[:150]}",
+                  "Retried every hour.", ""]
     lines += ["SPEND"] + [f"{n}: ${s:.2f} of ${c:.2f} ({s / c:.0%})" if c else f"{n}: ${s:.2f}"
                           for n, s, c in _spend(settings)]
     lines += ["", "SYSTEM", f"Disk free: {disk_free_gb(Path(settings.output_dir)):.1f} GB",

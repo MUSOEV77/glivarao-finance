@@ -92,6 +92,16 @@ class Brief:
         return "\n".join(L) + "\n"
 
 
+def load_brief(path) -> Brief:
+    """Rebuild a Brief saved with Brief.to_json() (facts and exact calculations included)."""
+    from pathlib import Path
+
+    d = json.loads(Path(path).read_text())
+    d["facts"] = [Fact(**f) for f in d.get("facts", [])]
+    d["calcs"] = {k: (calc.Calc(**v) if isinstance(v, dict) else v) for k, v in d.get("calcs", {}).items()}
+    return Brief(**d)
+
+
 def build_brief(card: dict, today: date) -> Brief:
     key = card["key"]
     fam = family_of(key)

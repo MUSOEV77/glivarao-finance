@@ -201,41 +201,47 @@ def run_daily_v2(settings: Settings, store: JobStore, today: date | None = None,
     used = originality.used_lines(store)
     writer = "claude" if paid else "free (format templates + research data + exact math)"
     history = originality.load_history(store)
-    if shorts_only:
-        long_script, drafts = None, []
-    else:
-        long_script, long_sim = _originality_gate(
-            _write_long(brief, style, creator, used, paid, settings), brief, today, history, settings, paid, used,
-            lambda k: _write_long(brief, style if k < 2 else choose_format(brief, [style]), creator, used, paid,
-                                  settings, variant=k))
-        drafts = [(long_script, long_sim)]
-        if paid:  # which backend actually wrote it (Claude on Vertex / Anthropic API, or the Gemini fallback)
-            from .scriptgen.claude import LAST_WRITER
+    from .scriptgen.claude import ClaudeUnavailable
 
-            if LAST_WRITER.get("name"):
-                writer = LAST_WRITER["name"] + (f" — Claude failed: {LAST_WRITER['note'][:120]}"
-                                                if LAST_WRITER.get("note") else "")
-    lead_style = long_script.style if long_script is not None else style
-    lead_hook = long_script.hook if long_script is not None else ""
-    # Shorts are checked against past videos and each other. Sharing a line with their own companion long video
-    # is normal (they point to it); their own hook and point are enforced below and by the writer.
-    session = list(history)
-    for sh in _write_shorts(brief, lead_style, shorts, used + [lead_hook], paid, settings):
-        alternates: list = []
+    try:
+        if shorts_only:
+            long_script, drafts = None, []
+        else:
+            long_script, long_sim = _originality_gate(
+                _write_long(brief, style, creator, used, paid, settings), brief, today, history, settings, paid, used,
+                lambda k: _write_long(brief, style if k < 2 else choose_format(brief, [style]), creator, used, paid,
+                                      settings, variant=k))
+            drafts = [(long_script, long_sim)]
+            if paid:  # which backend actually wrote it (Claude on Vertex / Anthropic API, or the Gemini fallback)
+                from .scriptgen.claude import LAST_WRITER
 
-        def regen(k, sh=sh, alternates=alternates):  # free writer only (paid drafts are rewritten by Claude)
-            if not alternates:
-                taken = {d[0].style for d in drafts}
-                alternates += [x for x in _write_shorts(brief, lead_style, 5, used + [sh.hook],
-                                                        False, settings) if x.style not in taken]
-            return alternates.pop(0) if alternates else sh
+                if LAST_WRITER.get("name"):
+                    writer = LAST_WRITER["name"] + (f" — Claude failed: {LAST_WRITER['note'][:120]}"
+                                                    if LAST_WRITER.get("note") else "")
+        lead_style = long_script.style if long_script is not None else style
+        lead_hook = long_script.hook if long_script is not None else ""
+        # Shorts are checked against past videos and each other. Sharing a line with their own companion long video
+        # is normal (they point to it); their own hook and point are enforced below and by the writer.
+        session = list(history)
+        for sh in _write_shorts(brief, lead_style, shorts, used + [lead_hook], paid, settings):
+            alternates: list = []
 
-        sh, sim = _originality_gate(sh, brief, today, session, settings, paid, used, regen)
-        if sh.hook and lead_hook and sh.hook.strip().lower() == lead_hook.strip().lower():
-            sim.ok = False
-            sim.reasons.append("the Short reuses the long video's opening line")
-        drafts.append((sh, sim))
-        session.append(originality.entry(sh, brief.topic_key, today))
+            def regen(k, sh=sh, alternates=alternates):  # free writer only (paid drafts are rewritten by Claude)
+                if not alternates:
+                    taken = {d[0].style for d in drafts}
+                    alternates += [x for x in _write_shorts(brief, lead_style, 5, used + [sh.hook],
+                                                            False, settings) if x.style not in taken]
+                return alternates.pop(0) if alternates else sh
+
+            sh, sim = _originality_gate(sh, brief, today, session, settings, paid, used, regen)
+            if sh.hook and lead_hook and sh.hook.strip().lower() == lead_hook.strip().lower():
+                sim.ok = False
+                sim.reasons.append("the Short reuses the long video's opening line")
+            drafts.append((sh, sim))
+            session.append(originality.entry(sh, brief.topic_key, today))
+    except ClaudeUnavailable as exc:  # Claude only: hold today's production, alert once, retry hourly
+        return _hold_for_writer(settings, store, today, brief.topic, str(exc), send)
+    _release_writer_hold(settings, store, send)
     result = DailyResult(brief.topic, writer, style=("Shorts only" if shorts_only else
                                                      FORMATS.get(lead_style or "", FORMATS["explainer"]).label),
                          note=pace_note)
@@ -258,11 +264,14 @@ def run_daily_v2(settings: Settings, store: JobStore, today: date | None = None,
         claims = factcheck.check_claims(script, brief, creator)
         missing = factcheck.needs_source(claims)
         if missing and paid:  # every claim needs a source URL: ask Claude to source or remove the rest
-            from .scriptgen.claude import rewrite_for_sources
+            from .scriptgen.claude import ClaudeUnavailable, rewrite_for_sources
 
-            script = rewrite_for_sources(script, [c.text for c in missing], settings)
-            claims = factcheck.check_claims(script, brief, creator)
-            missing = factcheck.needs_source(claims)
+            try:
+                script = rewrite_for_sources(script, [c.text for c in missing], settings)
+                claims = factcheck.check_claims(script, brief, creator)
+                missing = factcheck.needs_source(claims)
+            except ClaudeUnavailable as exc:  # keep the draft; it is rejected below for the unsourced claims
+                log.warning("source rewrite skipped for %s: Claude unavailable (%s)", job.id, exc)
         (out / "fact_check.md").write_text("# " + factcheck.report(claims, limit=500).replace("\n", "\n\n") + "\n")
         job.script_path = str(out / "script.json")
         Path(job.script_path).write_text(script.model_dump_json(indent=2))
@@ -329,7 +338,23 @@ def render_and_review(job, script, brief, claims, ctx: dict, settings: Settings,
             from .art.ai_visuals import illustrate_scenes
 
             script, art_stats = illustrate_scenes(script, out, settings, store)
+        from .content.short_fit import ShortTooLong, trim_to_words, words_for
+
+        if script.format == "short":  # 1. cap the words before voicing
+            script = trim_to_words(script, settings.short_max_words)
         res = _render_with_retry(render_animated, script, out, settings, workers)
+        tries = 0
+        while script.format == "short" and res.duration > settings.short_redo_seconds and tries < 2:
+            tries += 1  # 2. measured too long: trim in proportion and voice again (max 2 times)
+            log.warning("Short %s is %.1f s (> %.0f s); trimming and re-voicing (try %d)", job.id, res.duration,
+                        settings.short_redo_seconds, tries)
+            script = trim_to_words(script, words_for(res.duration, script.word_count, settings.short_target_seconds))
+            res = _render_with_retry(render_animated, script, out, settings, workers)
+        if script.format == "short" and res.duration > settings.short_max_seconds:  # 3. never send it
+            raise ShortTooLong(f"Short is {res.duration:.0f} s after {tries} shortening tries (limit "
+                               f"{settings.short_max_seconds:.0f} s); not sent")
+        if script.format == "short":
+            claims = factcheck.check_claims(script, brief, creator)  # the fact check matches the final words
         disc = disclosure.disclosure_for(res.voice)
         desc = factcheck.add_sources_to_description(script.description, claims)
         desc = disclosure.add_note(desc, disc)
@@ -387,6 +412,15 @@ def render_and_review(job, script, brief, claims, ctx: dict, settings: Settings,
                               f"{exc}\nNo other voice is used. I'll retry every hour and send the review as soon "
                               "as the Charon voice works again. Your buffer of approved videos covers the schedule.")
         return (job.id, script.format, "held", None, str(exc)[:200])
+    except ShortTooLong as exc:
+        log.warning("%s: %s", job.id, exc)
+        job = store.get(job.id)
+        if JobStatus.FAILED in ALLOWED[job.status]:
+            store.transition(job, JobStatus.FAILED, str(exc)[:500])
+        if send:
+            _notify(settings, f"✂️ GLIVARAO: Short {job.id} (\"{brief.topic}\") was still too long and was NOT sent: "
+                              f"{exc}. Remake it with: python -m glivarao remake {job.id}")
+        return (job.id, script.format, "failed", None, str(exc)[:200])
     except Exception as exc:  # one failed render must not stop the other videos
         log.exception("render failed for %s", job.id)
         job = store.get(job.id)
@@ -407,7 +441,8 @@ def render_and_review(job, script, brief, claims, ctx: dict, settings: Settings,
             from .render.video import preview_clip
 
             preview = preview_clip(res.video, out / "preview.mp4")
-        checks = "\n\n".join([_topic_block(brief, item, script, store, today, writer), ctx["compliance"], sim.summary(),
+        checks = "\n\n".join([_topic_block(brief, item, script, store, today, writer, res.duration),
+                               ctx["compliance"], sim.summary(),
                                factcheck.report(claims), disc.review_text()])
         attachments = [(why_md, "Why this topic (research evidence)"),
                        (out / "fact_check.md", "Fact check: every number and its source"),
@@ -457,6 +492,48 @@ def _release_held(store: JobStore, job_id: str) -> None:
         store.kv_set("voice_held", json.dumps(held))
 
 
+def remake_video(settings: Settings, store: JobStore, job_id: str, send: bool = True,
+                 workers: int | None = None) -> tuple:
+    """Make a finished video again from its saved script and facts, with the CURRENT voice and length rules
+    (e.g. a Short that came out too long). The old job is retired (rejected/failed) so it can't be uploaded."""
+    import shutil
+
+    from .content.brief import load_brief
+    from .models import Script
+    from .studio import factcheck
+
+    old = store.get(job_id)
+    if old.status == JobStatus.SCRIPTED and job_id in held_videos(store):
+        raise ValueError(f"{job_id} is on hold: it is re-made by the hourly retry (python -m glivarao retry-held)")
+    if old.status in (JobStatus.APPROVED, JobStatus.PUBLISHED):
+        raise ValueError(f"{job_id} is already {old.status.value}; nothing to remake")
+    src = settings.output_dir / old.id
+    script = Script.model_validate_json((src / "script.json").read_text())
+    brief = load_brief(src / "brief.json")
+    meta = json.loads((src / "metadata.json").read_text()) if (src / "metadata.json").exists() else {}
+    ctx_file = src / "held_render.json"
+    ctx = json.loads(ctx_file.read_text()) if ctx_file.exists() else {
+        "writer": meta.get("writer", "remake"), "creator": meta.get("creator_input", ""), "item_id": None,
+        "date": date.today().isoformat(), "compliance": f"Remade from {old.id} (same script, current voice).",
+        "sim": {"summary": f"Originality: same script as {old.id} (already checked).",
+                "phrase_overlap": 0.0, "structure_ratio": 0.0}}
+    ctx["date"] = date.today().isoformat()
+    new = store.create(script.format, old.topic)
+    out = settings.output_dir / new.id
+    out.mkdir(parents=True, exist_ok=True)
+    for name in ("brief.json", "fact_sheet.md", "fact_check.md"):
+        if (src / name).exists():
+            shutil.copy(src / name, out / name)
+    new.script_path = str(out / "script.json")
+    Path(new.script_path).write_text(script.model_dump_json(indent=2))
+    store.transition(new, JobStatus.SCRIPTED, f"remake of {old.id}")
+    retire = JobStatus.REJECTED if old.status == JobStatus.PENDING_APPROVAL else JobStatus.FAILED
+    if retire in ALLOWED[old.status]:
+        store.transition(old, retire, f"remade as {new.id}")
+    claims = factcheck.check_claims(script, brief, ctx.get("creator", ""))
+    return render_and_review(store.get(new.id), script, brief, claims, ctx, settings, store, send, workers)
+
+
 def retry_held_videos(settings: Settings, store: JobStore, send: bool = True, workers: int | None = None) -> list:
     """Re-render videos held because the voice was unavailable (systemd: hourly, and before every daily run)."""
     from .content.brief import build_brief
@@ -499,6 +576,35 @@ def _budget_alert(settings: Settings, store: JobStore, send: bool) -> None:
     for text in spend_alerts(settings, store):
         if send:
             _notify(settings, text)
+
+# ------------------------------------------------------------------------------------- held for the writer
+def _hold_for_writer(settings: Settings, store: JobStore, today: date, topic: str, why: str, send: bool) -> DailyResult:
+    """Claude couldn't write (quota, outage...): nothing is produced, the topic stays planned, the hourly retry
+    runs production again, and you get one alert per day."""
+    held = json.loads(store.kv_get("writer_held", "{}"))
+    first_today = held.get("alerted") != today.isoformat()
+    held.update(since=held.get("since") or today.isoformat(), reason=why[:300], topic=topic,
+                alerted=today.isoformat())
+    store.kv_set("writer_held", json.dumps(held))
+    if first_today and send:
+        _notify(settings, f"⏸ GLIVARAO: Claude can't write right now ({why[:200]}). Today's videos are on hold "
+                          f"(\"{topic}\"); no other writer is used. I retry every hour and tell you when it works. "
+                          "Check: python -m glivarao doctor --live")
+    return DailyResult(topic, "claude (held)", note=f"held: waiting for Claude ({why[:120]})")
+
+
+def _release_writer_hold(settings: Settings, store: JobStore, send: bool) -> None:
+    held = json.loads(store.kv_get("writer_held", "{}"))
+    if held:
+        store.kv_set("writer_held", "{}")
+        if send:
+            _notify(settings, f"▶️ GLIVARAO: Claude is writing again (held since {held.get('since')}); production "
+                              "continues.")
+
+
+def writer_held(store: JobStore) -> dict:
+    return json.loads(store.kv_get("writer_held", "{}"))
+
 
 def _render_with_retry(render_animated, script, out, settings, workers):
     """One retry with a single worker: the usual cause of a failed render is memory pressure or a crashed worker.
@@ -591,7 +697,8 @@ def _notify(settings: Settings, text: str) -> None:
         log.exception("could not send Telegram alert")
 
 
-def _topic_block(brief, item, script, store=None, today: date | None = None, writer: str = "") -> str:
+def _topic_block(brief, item, script, store=None, today: date | None = None, writer: str = "",
+                 duration: float | None = None) -> str:
     """First thing in the review message: what the topic is and why it was picked."""
     from .studio.formats import FORMATS
     from .studio.pillars import pillar_of, series_for
@@ -609,6 +716,11 @@ def _topic_block(brief, item, script, store=None, today: date | None = None, wri
     lines += [f"• {w}" for w in ((item.why if item is not None and item.why else brief.why)[:8])]
     take = (item.creator_input if item is not None else "") or ""
     lines.append(f"YOUR TAKE: \"{take[:300]}\"" if take else "YOUR TAKE: none received (made without \"My take\")")
+    if duration:
+        m, sec = divmod(int(round(duration)), 60)
+        lines.append(f"LENGTH: {m}:{sec:02d} ({script.word_count} words, "
+                     f"{script.word_count / max(duration, 1) * 60:.0f} words/min)"
+                     + (" — Short, limit 0:60" if script.format == "short" else ""))
     if writer:
         lines.append(f"WRITER: {writer}")
     lines.append("Don't like the topic? Tap ❌ Reject: the whole video is discarded and nothing is uploaded.")

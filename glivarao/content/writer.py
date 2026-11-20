@@ -194,7 +194,10 @@ def write_shorts_free(b: Brief) -> list[Script]:
           _s("Do this instead", f"Instead, {_lc(lib['actions'][1])}. And {_lc(lib['actions'][2])}. "
              f"{DISCLAIMER}", "target", "studio")]
     shorts.append(_wrap(b, "short", _fit_short(bq, lib, prefer="mistakes"), suffix="the mistake"))
-    return shorts
+    from ..compliance import LENGTH_RULES
+    from .short_fit import trim_to_words
+
+    return [trim_to_words(sh, LENGTH_RULES["short"][1]) for sh in shorts]  # Shorts: 110 words max
 
 
 SHORT_MIN_WORDS, SHORT_MAX_WORDS = 95, 150
@@ -283,6 +286,8 @@ def paid_writer_allowed(settings: Settings) -> bool:
     """A paid writer can run: Claude (Vertex or API, per WRITER) or, failing that, the Gemini Pro fallback."""
     if not settings.allow_paid_apis or settings.writer == "free":
         return False
+    if getattr(settings, "writer_fallback", "none") != "gemini":
+        return True  # Claude only: if it isn't usable, production is held (never the free template writer)
     from ..scriptgen.backends import claude_configured
 
     return claude_configured(settings) or bool(settings.gemini_api_key)

@@ -13,6 +13,7 @@ tts/voice_lock.py): pinned model `gemini-3.8-flash-tts`, prebuilt voice "Charon"
 from __future__ import annotations
 
 import base64
+import logging
 import hashlib
 import json
 import random
@@ -26,6 +27,7 @@ import requests
 from .kokoro import KOKORO_SR, Narration, Sentence, normalize_text, split_sentences
 from .voice_lock import PINNED_MODEL, VoiceUnavailable, check_model
 
+log = logging.getLogger(__name__)
 API = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 DEFAULT_MODEL = PINNED_MODEL
 DEFAULT_VOICE = "Charon"
@@ -33,6 +35,7 @@ DEFAULT_STYLE = ("Narrate as a warm, deep, confident American male documentary n
                  "finance. Clear numbers and money amounts; subtle emphasis on key figures; trustworthy, never "
                  "theatrical.")
 RETRYABLE = {408, 429, 500, 502, 503, 504}
+MIN_SANE_WPM = 90   # real narration is 140-190 wpm; far below means repeated/stretched audio
 PERMANENT = {402: "Gemini prepay balance is empty (buy credits on the AI Studio Billing page)",
              400: "the request was refused", 401: "the API key was rejected", 403: "the API key has no access "
              "(check billing / API enabled)", 404: "the pinned model was not found (retired?)"}
@@ -229,7 +232,17 @@ class GeminiTTSNarrator:
 
     def narrate(self, text: str, lead_in: float = 0.15, tail: float = 0.45) -> Narration:
         display = [s.replace("*", "") for s in split_sentences(" ".join(text.split()))]
-        audio = apply_tempo(self._scene_audio(self._prep(text)), self.speed)  # raw audio cached; tempo after
+        prepped = self._prep(text)
+        audio = apply_tempo(self._scene_audio(prepped), self.speed)  # raw audio cached; tempo after
+        n_words = len(text.split())
+        if n_words >= 12 and words_per_minute(text, audio) < MIN_SANE_WPM:
+            # far too much audio for the words (repeated or stretched speech): ask once more, never keep it
+            log.warning("scene audio abnormally slow (%.0f wpm); requesting it again", words_per_minute(text, audio))
+            self._key_for(prepped).unlink(missing_ok=True)
+            audio = apply_tempo(self._scene_audio(prepped), self.speed)
+            if words_per_minute(text, audio) < MIN_SANE_WPM:
+                raise VoiceUnavailable(f"speech came back abnormally slow twice ({words_per_minute(text, audio):.0f} "
+                                       "words/min); the video is held instead of using it")
         idx = np.where(np.abs(audio) > 0.004)[0]  # trim leading/trailing silence, keep GLIVARAO lead-in/tail
         if len(idx):
             audio = audio[max(0, idx[0] - 480): idx[-1] + 720]

@@ -220,7 +220,10 @@ def write_shorts_format(b: Brief, long_style: str, n: int = 2, used_lines: list[
         script = _wrap(b, "short", _fit_short(scenes, lib, avoid=taken),
                        suffix="the mistake" if kind in ("mistake", "myth") else "the number")
         out.append(script.model_copy(update={"style": f"short_{kind}", "hook": hook}))
-    return out
+    from .short_fit import trim_to_words
+    from ..compliance import LENGTH_RULES
+
+    return [trim_to_words(sh, LENGTH_RULES["short"][1]) for sh in out]  # Shorts: 110 words max
 
 
 __all__ = ["write_long_format", "write_shorts_format", "creator_scene", "clean_creator_text", "SHORT_HOOKS"]

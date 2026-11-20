@@ -250,28 +250,49 @@ def cmd_voice_lock(args, s):
 
 
 def cmd_retry_held(args, s):
-    """Re-render videos held because the locked voice was unavailable (systemd: hourly)."""
-    from .daily_v2 import held_videos, retry_held_videos
-
+    """Hourly (glivarao-voice-retry.timer): re-render videos held for the voice, and re-run today's production if
+    it was held because Claude couldn't write. Never crash-loops; the next hour tries again."""
     import fcntl
+    from datetime import date as _d
+
+    from .daily_v2 import AlreadyRunning, held_videos, retry_held_videos, supervised_daily, writer_held
 
     store = _store(s)
-    if not held_videos(store):
-        print("no held videos")
+    send = not args.no_telegram
+    if not held_videos(store) and not writer_held(store):
+        print("nothing on hold")
         return
-    lock = Path(s.db_path).with_name("daily.lock")  # the same lock as the daily run: never render twice at once
-    with open(lock, "w") as fh:
+    if held_videos(store):
+        lock = Path(s.db_path).with_name("daily.lock")  # the same lock as the daily run: never render twice at once
+        with open(lock, "w") as fh:
+            try:
+                fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                print("the daily run is busy; it retries held videos itself")
+                return
+            try:
+                for r in retry_held_videos(s, store, send=send):
+                    print(r[0], r[2], r[4] or "")
+            except Exception as exc:  # noqa: BLE001
+                logging.getLogger("glivarao").exception("retry of held videos failed")
+                print(f"retry failed ({type(exc).__name__}); trying again next hour")
+    if writer_held(store):  # production waited for Claude: try today's run again (it takes the lock itself)
         try:
-            fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            print("the daily run is busy; it retries held videos itself")
-            return
-        try:
-            for r in retry_held_videos(s, store, send=not args.no_telegram):
-                print(r[0], r[2], r[4] or "")
-        except Exception as exc:  # noqa: BLE001  hourly timer: never crash-loop; the next hour retries
-            logging.getLogger("glivarao").exception("retry of held videos failed")
-            print(f"retry failed ({type(exc).__name__}); trying again next hour")
+            res = supervised_daily(s, store, today=_d.today(), send=send, retries=0)
+            print("production:", (res.note or res.jobs) if res else "already done today")
+        except AlreadyRunning:
+            print("the daily run is busy")
+        except Exception as exc:  # noqa: BLE001
+            logging.getLogger("glivarao").exception("held production retry failed")
+            print(f"production retry failed ({type(exc).__name__}); trying again next hour")
+
+
+def cmd_remake(args, s):
+    """Make a finished video again with the current voice and length rules (the old one is retired)."""
+    from .daily_v2 import remake_video
+
+    r = remake_video(s, _store(s), args.job_id, send=not args.no_telegram)
+    print(r[0], r[2], r[4] or "")
 
 
 def cmd_competitors(args, s):
@@ -566,6 +587,10 @@ def main(argv=None):
     al.set_defaults(fn=cmd_alert)
     sub.add_parser("verify-facts", help="re-check the launch list's facts on official pages").set_defaults(
         fn=cmd_verify_facts)
+    rm = sub.add_parser("remake", help="make a video again with the current voice and length rules")
+    rm.add_argument("job_id")
+    rm.add_argument("--no-telegram", action="store_true")
+    rm.set_defaults(fn=cmd_remake)
     va = sub.add_parser("voice-audition", help="send voice samples to Telegram with pick buttons")
     va.add_argument("voices", nargs="*", help="default: Puck Sadachbia Fenrir Achird Charon")
     va.add_argument("--no-telegram", action="store_true")

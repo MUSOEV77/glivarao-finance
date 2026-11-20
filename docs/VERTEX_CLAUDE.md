@@ -3,8 +3,13 @@
 The long-script writer is **Claude Sonnet 5.5 on Google Vertex AI** (`WRITER=claude_vertex`, region `global`). It
 signs in with your service account `glivarao-vps@…`, not an Anthropic Console key.
 
-- **If Claude fails** (key problem, quota, outage, refusal, cap reached), **Gemini Pro takes over automatically**
-  with the same `GEMINI_API_KEY`. You get one Telegram alert per day when that happens.
+- **Claude only** (`WRITER_FALLBACK=none`, the default). If Claude can't write (key problem, quota, outage,
+  refusal, cap reached), **production is held**:
+  - nothing is written by another model;
+  - you get one Telegram alert per day;
+  - it retries every hour, and you get a "Claude is writing again" message when it works.
+
+  `WRITER_FALLBACK=gemini` would let Gemini Pro write instead.
 - **Claude cap:** $30/month, alert at 80%.
 - **Gemini Pro fallback cap:** $5/month.
 - **Billing:**
@@ -112,7 +117,7 @@ If `us` or `eu` already shows non-zero values, use that region right away on the
 bash /opt/glivarao/app/deploy/set-key.sh VERTEX_REGION us
 ```
 
-Until Claude has quota, the Gemini Pro fallback writes the scripts automatically.
+Until Claude has quota, production stays on hold and retries every hour (Claude only).
 
 **Common errors:**
 - **403 / PermissionDenied:** the role hasn't spread yet (wait 2–5 minutes), or Claude Sonnet 5.5 isn't enabled in

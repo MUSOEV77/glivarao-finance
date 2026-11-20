@@ -78,7 +78,7 @@ def test_chapters_inserted_for_long_videos():
 def test_paid_writer_requires_explicit_approval():
     def s(**kw):
         base = dict(allow_paid_apis=True, anthropic_api_key="", writer="claude_api", gemini_api_key="",
-                    vertex_project_id="", vertex_credentials_file="/nonexistent.json")
+                    vertex_project_id="", vertex_credentials_file="/nonexistent.json", writer_fallback="gemini")
         return SimpleNamespace(**{**base, **kw})
 
     assert not paid_writer_allowed(s(allow_paid_apis=False, anthropic_api_key="sk-x"))
@@ -87,6 +87,8 @@ def test_paid_writer_requires_explicit_approval():
     assert not paid_writer_allowed(s(writer="claude_vertex", vertex_project_id="p"))     # no key file yet
     assert paid_writer_allowed(s(writer="claude_vertex", gemini_api_key="G"))           # Gemini fallback alone
     assert not paid_writer_allowed(s(writer="free", anthropic_api_key="sk-x", gemini_api_key="G"))
+    # Claude only (default): the paid path always runs, so a Claude outage holds production (no template writer)
+    assert paid_writer_allowed(s(writer="claude_vertex", writer_fallback="none"))
 
 
 def test_audio_synthesis_and_ducking():
