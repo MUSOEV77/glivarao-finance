@@ -59,7 +59,8 @@ class Settings:
     writer: str = field(default_factory=lambda: _env("WRITER", "claude_vertex"))
     # none (default): Claude only; if Claude can't write, production is held, you get an alert, it retries hourly.
     # gemini: Gemini Pro writes instead when Claude fails.
-    writer_fallback: str = field(default_factory=lambda: _env("WRITER_FALLBACK", "none"))
+    writer_fallback: str = field(default_factory=lambda: {"off": "none", "none": "none", "gemini": "gemini"}.get(
+        _env("FALLBACK_WRITER", _env("WRITER_FALLBACK", "off")).lower(), "none"))   # FALLBACK_WRITER=off|gemini
     vertex_project_id: str = field(default_factory=lambda: _env("VERTEX_PROJECT_ID"))
     vertex_region: str = field(default_factory=lambda: _env("VERTEX_REGION", "global"))
     vertex_model: str = field(default_factory=lambda: _env("VERTEX_MODEL", "claude-sonnet-5-5"))

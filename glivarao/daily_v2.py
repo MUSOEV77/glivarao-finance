@@ -149,6 +149,10 @@ def run_daily_v2(settings: Settings, store: JobStore, today: date | None = None,
     research_dir = research_dir or Path("reports/research")
     cached = research_dir / f"{today.isoformat()}.json"
     paid = paid_writer_allowed(settings)
+    if settings.writer != "free" and not paid and not settings.dry_run:
+        # Claude only: never the template writer in production (Shorts included)
+        return _hold_for_writer(settings, store, today, "today's videos",
+                                "paid APIs are switched off (ALLOW_PAID_APIS=false)", send)
     item, creator, style = None, "", None
     shorts_only, pace_note, short_why = False, "", []
     if settings.topic_mode == "queue":  # manual mode: only topics YOU picked from the weekly ideas

@@ -3,13 +3,13 @@
 The long-script writer is **Claude Sonnet 5.5 on Google Vertex AI** (`WRITER=claude_vertex`, region `global`). It
 signs in with your service account `glivarao-vps@…`, not an Anthropic Console key.
 
-- **Claude only** (`WRITER_FALLBACK=none`, the default). If Claude can't write (key problem, quota, outage,
+- **Claude only** (`FALLBACK_WRITER=off`, the default). Gemini is used only for the voice and images. If Claude can't write (key problem, quota, outage,
   refusal, cap reached), **production is held**:
   - nothing is written by another model;
   - you get one Telegram alert per day;
   - it retries every hour, and you get a "Claude is writing again" message when it works.
 
-  `WRITER_FALLBACK=gemini` would let Gemini Pro write instead.
+  When Claude works again, production starts by itself (buffer and pace respected).
 - **Claude cap:** $30/month, alert at 80%.
 - **Gemini Pro fallback cap:** $5/month.
 - **Billing:**
@@ -110,6 +110,14 @@ This asks for 10 requests/min, 100,000 input tokens/min and 20,000 output tokens
 ```
 bash vq.sh status project-ca5f1248-f0b8-49cb-8fa
 ```
+
+**From Termius on the VPS** (a tiny real Claude call plus your limits and requests):
+
+```
+cd /opt/glivarao/app && sudo -u glivarao .venv/bin/python -m glivarao claude-quota
+```
+
+The first time, it may ask you to let the service account read quotas: one Cloud Shell command, printed for you.
 
 If `us` or `eu` already shows non-zero values, use that region right away on the VPS:
 

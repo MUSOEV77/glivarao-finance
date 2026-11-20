@@ -92,7 +92,8 @@ def test_doctor_lists_every_setting_and_runs_live_checks(settings, store, capsys
     out = capsys.readouterr().out
     assert "[MISSING] TELEGRAM_BOT_TOKEN" in out and "[  ok   ] GEMINI_API_KEY" in out
     assert "[INVALID] YOUTUBE_API_KEY" in out and "[MISSING] Vertex service-account key" in out
-    assert "AI Studio spend limit" in out and "Gemini test answer" in out and "gemini-3.1-pro-preview" in out
+    assert "AI Studio spend limit" in out and "Gemini test answer (voice)" in out and "FALLBACK_WRITER" in out
+    assert "gemini-3.1-pro-preview" not in out                     # the Gemini writer is off: not even tested
     assert "x" * 35 not in out                                   # key values are never printed
     assert not r.broken
     with pytest.raises(SystemExit):

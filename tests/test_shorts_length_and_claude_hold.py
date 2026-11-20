@@ -168,3 +168,52 @@ def test_abnormally_slow_tts_is_requested_again(tmp_path):
     with pytest.raises(VoiceUnavailable, match="abnormally slow"):
         GeminiTTSNarrator("K", session=SlowThenOK([60, 60]), cache_dir=tmp_path / "c2",
                           ledger=SpendLedger(tmp_path / "s2.json"), sleep=lambda s: None).narrate(text)
+
+
+def test_fallback_writer_setting_and_production_never_uses_templates(settings, store, monkeypatch):
+    from glivarao.config import Settings
+
+    monkeypatch.setenv("FALLBACK_WRITER", "off")
+    assert Settings().writer_fallback == "none"
+    monkeypatch.setenv("FALLBACK_WRITER", "gemini")
+    assert Settings().writer_fallback == "gemini"
+    monkeypatch.delenv("FALLBACK_WRITER")
+    monkeypatch.delenv("WRITER_FALLBACK", raising=False)
+    assert Settings().writer_fallback == "none"                      # default: off
+    alerts = []
+    monkeypatch.setattr(daily_v2, "_notify", lambda s, t: alerts.append(t))
+    prod = replace(settings, mode="production", allow_paid_apis=False, writer="claude_vertex")
+    res = daily_v2.run_daily_v2(prod, store, today=DAY, send=True)
+    assert res.jobs == [] and "ALLOW_PAID_APIS" in res.note and len(alerts) == 1
+
+
+def test_claude_quota_status_reads_limits_and_requests(settings, tmp_path):
+    from glivarao.scriptgen import vertex_quota as VQ
+
+    class R:
+        def __init__(self, body, status=200):
+            self._b, self.status_code, self.text = body, status, str(body)
+
+        def json(self):
+            return self._b
+
+    class Http:
+        def get(self, url, params=None, timeout=None):
+            if url.endswith("/quotaInfos"):
+                return R({"quotaInfos": [{"metric": "aiplatform.googleapis.com/global_online_prediction_requests_per_base_model",
+                                          "dimensionsInfos": [{"dimensions": {"base_model": "anthropic-claude-sonnet"},
+                                                               "details": {"value": "0"}}]}]})
+            return R({"quotaPreferences": [{"name": "projects/p/locations/global/quotaPreferences/glivarao-sonnet-global-requests",
+                                            "quotaId": "GlobalOnlinePredictionRequestsPerMinutePerProjectPerBaseModel",
+                                            "quotaConfig": {"preferredValue": "10"}, "reconciling": True}]})
+
+    s = replace(settings, vertex_project_id="proj-1", vertex_region="global")
+    lines = VQ.quota_status(s, session=Http())
+    assert any("requests" in ln and " 0" in ln for ln in lines)
+    assert any("glivarao-sonnet-global-requests" in ln and "PENDING" in ln for ln in lines)
+
+    class Denied(Http):
+        def get(self, url, params=None, timeout=None):
+            return R({"error": "denied"}, 403)
+
+    assert any("roles/cloudquotas.viewer" in ln for ln in VQ.quota_status(s, session=Denied()))

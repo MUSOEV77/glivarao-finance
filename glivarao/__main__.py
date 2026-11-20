@@ -287,6 +287,20 @@ def cmd_retry_held(args, s):
             print(f"production retry failed ({type(exc).__name__}); trying again next hour")
 
 
+def cmd_claude_quota(args, s):
+    """Is Claude on Vertex usable yet? One tiny real call + quota limits and your increase requests."""
+    from .daily_v2 import writer_held
+    from .scriptgen.vertex_quota import live_test, quota_status
+
+    ok, msg = live_test(s)
+    print(("OK   " if ok else "WAIT ") + msg)
+    for line in quota_status(s):
+        print(line)
+    held = writer_held(_store(s))
+    if held:
+        print(f"Production on hold since {held.get('since')}; it retries every hour and starts by itself.")
+
+
 def cmd_remake(args, s):
     """Make a finished video again with the current voice and length rules (the old one is retired)."""
     from .daily_v2 import remake_video
@@ -587,6 +601,8 @@ def main(argv=None):
     al.set_defaults(fn=cmd_alert)
     sub.add_parser("verify-facts", help="re-check the launch list's facts on official pages").set_defaults(
         fn=cmd_verify_facts)
+    sub.add_parser("claude-quota", help="is Claude on Vertex usable yet? (tiny real call + quota status)").set_defaults(
+        fn=cmd_claude_quota)
     rm = sub.add_parser("remake", help="make a video again with the current voice and length rules")
     rm.add_argument("job_id")
     rm.add_argument("--no-telegram", action="store_true")

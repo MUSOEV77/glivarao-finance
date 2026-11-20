@@ -127,9 +127,9 @@ def check_settings(s, store) -> Report:
             r.check(perm in ("600", "400"), "key file permissions", "600 (owner only)", f"{perm} -> chmod 600 {kf}")
     elif s.writer == "claude_api":
         _key(r, "ANTHROPIC_API_KEY", s.anthropic_api_key, re.compile(r"^sk-ant-"), "deploy/set-key.sh ANTHROPIC_API_KEY")
-    r.check(s.writer_fallback in ("none", "gemini"), "WRITER_FALLBACK",
-            "none: Claude only (held + hourly retry if Claude can't write)" if s.writer_fallback == "none"
-            else f"gemini: Gemini {s.gemini_writer_model} writes if Claude fails", f"{s.writer_fallback!r} -> none | gemini")
+    r.row("ok", "FALLBACK_WRITER",
+          "off: Claude only (held + hourly retry + one alert a day if Claude can't write)" if s.writer_fallback == "none"
+          else f"gemini: Gemini {s.gemini_writer_model} writes if Claude fails")
     held = json.loads(store.kv_get("writer_held", "{}"))
     if held:
         r.row("warn", "production", f"on hold since {held.get('since')}: Claude unavailable ({held.get('reason', '')[:80]})")
@@ -227,8 +227,10 @@ def live_checks(s, r: Report, session=None) -> None:
     if s.gemini_api_key:
         base = "https://generativelanguage.googleapis.com/v1beta/models/"
         hdr = {"x-goog-api-key": s.gemini_api_key}
-        for label, model in (("Gemini voice model", s.gemini_tts_model), ("Gemini image model", s.image_model),
-                             ("Gemini fallback writer", s.gemini_writer_model)):
+        models = [("Gemini voice model", s.gemini_tts_model), ("Gemini image model", s.image_model)]
+        if s.writer_fallback == "gemini":
+            models.append(("Gemini fallback writer", s.gemini_writer_model))
+        for label, model in models:
             try:
                 res = http.get(base + model, headers=hdr, timeout=30)
                 say(res.status_code == 200, label, f"{model} available", f"{model}: HTTP {res.status_code}")
@@ -236,17 +238,19 @@ def live_checks(s, r: Report, session=None) -> None:
                 say(False, label, "", f"network error {type(exc).__name__}")
         try:
             res = http.get(base.rstrip("/"), params={"pageSize": 200}, headers=hdr, timeout=30)
-            if res.status_code == 200:
+            if res.status_code == 200 and s.writer_fallback == "gemini":
                 pros = sorted(m["name"].split("/")[-1] for m in res.json().get("models", [])
                               if "pro" in m["name"] and "generateContent" in m.get("supportedGenerationMethods", []))
                 r.row("info", "Pro models for your key", ", ".join(pros[:8]) or "none")
-            res = http.post(base + s.gemini_writer_model + ":generateContent", headers=hdr, timeout=60, json={
-                "contents": [{"parts": [{"text": "Reply with the single word OK."}]}],
-                "generationConfig": {"maxOutputTokens": 64}})
+            # billing check on the VOICE model (Gemini is used only for voice and images): a one-word clip
+            res = http.post(base + s.gemini_tts_model + ":generateContent", headers=hdr, timeout=60, json={
+                "contents": [{"parts": [{"text": "OK."}]}],
+                "generationConfig": {"responseModalities": ["AUDIO"], "speechConfig": {"voiceConfig": {
+                    "prebuiltVoiceConfig": {"voiceName": s.gemini_tts_voice}}}}})
             hint = {402: "prepay balance is empty: buy credits on the AI Studio Billing page (a Cloud Billing "
                          "credit balance does not count)",
                     403: "key not allowed for this API/project", 429: "rate limit or quota"}.get(res.status_code, "")
-            say(res.status_code == 200, "Gemini test answer", "billing works",
+            say(res.status_code == 200, "Gemini test answer (voice)", "billing works",
                 f"HTTP {res.status_code}" + (f": {hint}" if hint else ""))
             if res.status_code != 200:
                 print("        full error from Google:\n" + _error_body(res, s.gemini_api_key))
