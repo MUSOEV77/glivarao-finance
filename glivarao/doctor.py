@@ -146,6 +146,11 @@ def check_settings(s, store) -> Report:
         saved = store.kv_get("voice_lock")
         if saved and json.loads(saved) != voice_lock.fingerprint(s):
             r.row("INVALID", "voice lock", "settings changed since the lock -> voice-lock --reset if intended")
+        elif saved:
+            src = json.loads(store.kv_get("voice_locked_from", "{}")).get("job")
+            r.row("ok", "voice lock", "LOCKED for every long video and Short" + (f" (copied from {src})" if src else ""))
+        else:
+            r.row("warn", "voice lock", "not recorded yet (recorded on the first narration)")
     except voice_lock.VoiceUnavailable as exc:
         r.row("INVALID", "voice settings", str(exc), critical=True)
 

@@ -347,6 +347,8 @@ def render_and_review(job, script, brief, claims, ctx: dict, settings: Settings,
         if script.format == "short":  # 1. cap the words before voicing
             script = trim_to_words(script, settings.short_max_words)
         res = _render_with_retry(render_animated, script, out, settings, workers)
+        if script.format == "short":  # measure the FINISHED file, not just the narration
+            res.duration = max(res.duration, _video_seconds(res.video))
         tries = 0
         while script.format == "short" and res.duration > settings.short_redo_seconds and tries < 2:
             tries += 1  # 2. measured too long: trim in proportion and voice again (max 2 times)
@@ -354,6 +356,7 @@ def render_and_review(job, script, brief, claims, ctx: dict, settings: Settings,
                         settings.short_redo_seconds, tries)
             script = trim_to_words(script, words_for(res.duration, script.word_count, settings.short_target_seconds))
             res = _render_with_retry(render_animated, script, out, settings, workers)
+            res.duration = max(res.duration, _video_seconds(res.video))
         if script.format == "short" and res.duration > settings.short_max_seconds:  # 3. never send it
             raise ShortTooLong(f"Short is {res.duration:.0f} s after {tries} shortening tries (limit "
                                f"{settings.short_max_seconds:.0f} s); not sent")
@@ -401,7 +404,7 @@ def render_and_review(job, script, brief, claims, ctx: dict, settings: Settings,
              "originality": {"phrase_overlap": round(sim.phrase_overlap, 3),
                              "structure_similarity": round(sim.structure_ratio, 3)},
              "pronunciation_misses": res.unknown_words,
-             "thumbnail_options": thumb_how, "scene_art": art_stats}, indent=2))
+             "thumbnail_options": thumb_how, "scene_art": art_stats, "tts": _tts_record(settings)}, indent=2))
         job.video_path, job.subtitles_path = str(res.video), str(res.srt)
         job.thumbnail_path, job.duration_sec = str(thumb), round(res.duration, 2)
         store.transition(job, JobStatus.RENDERED, f"{res.duration:.1f}s in {res.render_seconds:.0f}s")
@@ -595,6 +598,29 @@ def _hold_for_writer(settings: Settings, store: JobStore, today: date, topic: st
                           f"(\"{topic}\"); no other writer is used. I retry every hour and tell you when it works. "
                           "Check: python -m glivarao doctor --live")
     return DailyResult(topic, "claude (held)", note=f"held: waiting for Claude ({why[:120]})")
+
+
+def _tts_record(settings: Settings) -> dict:
+    """The exact voice settings used for this video (so it can be found and locked again later)."""
+    if settings.tts_provider != "gemini_tts":
+        return {"provider": settings.tts_provider}
+    from .tts.voice_lock import style_prompt
+
+    return {"provider": "gemini_tts", "model": settings.gemini_tts_model, "voice": settings.gemini_tts_voice,
+            "pace": settings.gemini_tts_pace, "style": settings.gemini_tts_style, "style_sent": style_prompt(settings),
+            "speed": settings.gemini_tts_speed}
+
+
+def _video_seconds(path) -> float:
+    """Real length of the finished file (ffprobe); 0 if it can't be read."""
+    import subprocess
+
+    try:
+        r = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(path)],
+                           capture_output=True, text=True, timeout=60)
+        return float(r.stdout.strip() or 0)
+    except Exception:  # noqa: BLE001
+        return 0.0
 
 
 def _release_writer_hold(settings: Settings, store: JobStore, send: bool) -> None:

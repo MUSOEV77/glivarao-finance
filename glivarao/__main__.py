@@ -287,6 +287,43 @@ def cmd_retry_held(args, s):
             print(f"production retry failed ({type(exc).__name__}); trying again next hour")
 
 
+def cmd_voice_of(args, s):
+    """Print the exact voice, style prompt and speed a video was made with."""
+    from datetime import date as _d
+
+    from .tts.voice_of import find_jobs, identify
+
+    store = _store(s)
+    if args.job_id:
+        jobs = [store.get(args.job_id)]
+    else:
+        jobs = find_jobs(store, args.find or "", "short" if args.short else ("long" if args.long else None),
+                         _d.fromisoformat(args.date) if args.date else _d.today())
+    if not jobs:
+        print("no matching job (try --date YYYY-MM-DD, or give the job id)")
+        return
+    for job in jobs:
+        info = identify(s, job)
+        dur = f"{int(job.duration_sec or 0) // 60}:{int(job.duration_sec or 0) % 60:02d}"
+        print(f"\n{job.id}  [{job.format}, {dur}, {job.status.value}]  {job.topic}")
+        for k in ("voice", "model", "pace", "speed", "style", "how", "scenes_matched", "voice_label"):
+            if k in info:
+                v = info[k]
+                if k == "speed" and not info.get("speed_measured", True):
+                    v = f"{v} (from .env; not measured)"
+                print(f"  {k:15s} {v}")
+    print(f"\nTo lock one: python -m glivarao voice-lock-from {jobs[0].id}")
+
+
+def cmd_voice_lock_from(args, s):
+    """Lock exactly the voice (model, voice, style, pace, speed) used by a job, for every video."""
+    from .tts.voice_of import lock_from
+
+    for k, v in lock_from(s, _store(s), args.job_id).items():
+        print(f"{k}={v}")
+    print("locked. Held videos are re-voiced by the hourly retry (or now: python -m glivarao retry-held)")
+
+
 def cmd_claude_quota(args, s):
     """Is Claude on Vertex usable yet? One tiny real call + quota limits and your increase requests."""
     from .daily_v2 import writer_held
@@ -601,6 +638,16 @@ def main(argv=None):
     al.set_defaults(fn=cmd_alert)
     sub.add_parser("verify-facts", help="re-check the launch list's facts on official pages").set_defaults(
         fn=cmd_verify_facts)
+    vo = sub.add_parser("voice-of", help="print the exact voice, style and speed a video was made with")
+    vo.add_argument("job_id", nargs="?")
+    vo.add_argument("--find", help="text in the topic/title, e.g. 'credit report'")
+    vo.add_argument("--short", action="store_true")
+    vo.add_argument("--long", action="store_true")
+    vo.add_argument("--date", help="YYYY-MM-DD (default: today)")
+    vo.set_defaults(fn=cmd_voice_of)
+    vf = sub.add_parser("voice-lock-from", help="lock exactly the voice a video was made with")
+    vf.add_argument("job_id")
+    vf.set_defaults(fn=cmd_voice_lock_from)
     sub.add_parser("claude-quota", help="is Claude on Vertex usable yet? (tiny real call + quota status)").set_defaults(
         fn=cmd_claude_quota)
     rm = sub.add_parser("remake", help="make a video again with the current voice and length rules")
