@@ -33,7 +33,8 @@ DEFAULT_STYLE = ("Narrate as a warm, deep, confident American male documentary n
                  "finance. Clear numbers and money amounts; subtle emphasis on key figures; trustworthy, never "
                  "theatrical.")
 RETRYABLE = {408, 429, 500, 502, 503, 504}
-PERMANENT = {400: "the request was refused", 401: "the API key was rejected", 403: "the API key has no access "
+PERMANENT = {402: "Gemini prepay balance is empty (buy credits on the AI Studio Billing page)",
+             400: "the request was refused", 401: "the API key was rejected", 403: "the API key has no access "
              "(check billing / API enabled)", 404: "the pinned model was not found (retired?)"}
 BRAND_RESPELL = {"GLIVARAO": "Gli-VAR-oh"}     # prompt-based models take respellings, not IPA
 

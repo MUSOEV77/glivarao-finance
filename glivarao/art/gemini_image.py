@@ -111,7 +111,9 @@ class GeminiImage:
                 last = f"HTTP {r.status_code}"
                 continue
             if r.status_code != 200:
-                raise ImageUnavailable(f"image API HTTP {r.status_code}")
+                raise ImageUnavailable(f"image API HTTP {r.status_code}" + (
+                    " (Gemini prepay balance empty: buy credits on the AI Studio Billing page)"
+                    if r.status_code == 402 else ""))
             img = _first_image(r.json())
             if img is None:  # e.g. blocked by a safety filter: no charge for an empty answer is assumed
                 last = "no image in the response"

@@ -85,6 +85,35 @@ cd /opt/glivarao/app && sudo -u glivarao .venv/bin/python -m glivarao doctor --l
 
 `Claude (Vertex AI) … answered 'OK'` means it works (the test costs a fraction of a cent).
 
+## Quota (HTTP 429 "Quota exceeded … global_online_predict")
+
+New projects often start with **0 quota** for Claude, even with the model enabled.
+- Sonnet 5.5 uses one shared bucket, `base_model=anthropic-claude-sonnet`, with three limits: requests per minute,
+  input tokens per minute and output tokens per minute.
+- It runs only on the **global**, **us** and **eu** endpoints; each has its own quota. There's no single-region
+  endpoint such as us-east5 for Sonnet 5.5.
+
+**In Google Cloud Shell** (console.cloud.google.com → the `>_` icon at the top), with your project ID:
+
+```
+curl -fsSL https://raw.githubusercontent.com/MUSOEV77/glivarao-finance/claude/glivarao-finance-mvp-n153rg/deploy/vertex-quota.sh -o vq.sh && bash vq.sh request project-ca5f1248-f0b8-49cb-8fa global
+```
+
+This asks for 10 requests/min, 100,000 input tokens/min and 20,000 output tokens/min. Check the status later
+(it also shows current limits for global, us and eu):
+
+```
+bash vq.sh status project-ca5f1248-f0b8-49cb-8fa
+```
+
+If `us` or `eu` already shows non-zero values, use that region right away on the VPS:
+
+```
+bash /opt/glivarao/app/deploy/set-key.sh VERTEX_REGION us
+```
+
+Until Claude has quota, the Gemini Pro fallback writes the scripts automatically.
+
 **Common errors:**
 - **403 / PermissionDenied:** the role hasn't spread yet (wait 2–5 minutes), or Claude Sonnet 5.5 isn't enabled in
   **Vertex AI → Model Garden** for this project.

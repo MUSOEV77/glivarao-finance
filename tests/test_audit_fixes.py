@@ -107,3 +107,32 @@ def test_scripts_are_valid_bash():
     assert ".deployed_commit" in Path("deploy/install.sh").read_text()
     poll = Path("deploy/systemd/glivarao-poll.service").read_text()
     assert "StartLimitIntervalSec=0" in poll and "Restart=" not in poll
+
+
+def test_aq_keys_valid_and_402_body_printed(settings, store, capsys):
+    from glivarao import doctor
+
+    class Pay402(FakeAPIs):
+        def post(self, url, **kw):
+            return Resp({"error": {"code": 402, "status": "RESOURCE_EXHAUSTED",
+                                   "message": "Your prepayment credits are depleted."}}, 402)
+
+    key = "AQ.Ab8RN6" + "k" * 44                                   # new AI Studio key format, 53 chars
+    s = replace(settings, allow_paid_apis=True, gemini_api_key=key, writer="free")
+    doctor.run(s, store, live=True, session=Pay402())
+    out = capsys.readouterr().out
+    assert "[  ok   ] GEMINI_API_KEY" in out and key not in out
+    assert "HTTP 402: prepay balance is empty" in out and "prepayment credits are depleted" in out
+
+
+def test_voice_402_is_not_retried(tmp_path):
+    from glivarao.tts.gemini_tts import GeminiTTSNarrator, SpendLedger
+    from glivarao.tts.voice_lock import VoiceUnavailable
+    from tests.test_gemini_voice import FakeGemini
+
+    g = FakeGemini(status=402)
+    n = GeminiTTSNarrator("K", cache_dir=tmp_path, ledger=SpendLedger(tmp_path / "s.json"), session=g,
+                          sleep=lambda s: None)
+    with pytest.raises(VoiceUnavailable, match="prepay balance is empty"):
+        n.narrate("Hello there.")
+    assert len(g.calls) == 1

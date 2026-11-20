@@ -50,7 +50,7 @@ chmod 600 "$DST"; chmod 700 "$APP/secrets"
 if [ -n "$SRC_FILE" ]; then shred -u "$SRC_FILE" 2>/dev/null || rm -f "$SRC_FILE"; echo "Uploaded copy deleted."; fi
 bash "$(dirname "$0")/set-key.sh" WRITER claude_vertex >/dev/null
 bash "$(dirname "$0")/set-key.sh" VERTEX_PROJECT_ID "$PROJECT" >/dev/null
-bash "$(dirname "$0")/set-key.sh" VERTEX_REGION global >/dev/null
+grep -q '^VERTEX_REGION=[a-z]' "$ENV_FILE" 2>/dev/null || bash "$(dirname "$0")/set-key.sh" VERTEX_REGION global >/dev/null
 bash "$(dirname "$0")/set-key.sh" VERTEX_MODEL claude-sonnet-5-5 >/dev/null
 echo "Saved: service account $EMAIL, project $PROJECT (file is owner-only)."
 echo "Test it:  cd $APP && sudo -u glivarao .venv/bin/python -m glivarao doctor --live"

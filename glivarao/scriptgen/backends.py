@@ -132,7 +132,9 @@ def gemini_write(settings, system: str, prompt: str, schema: dict, fmt: str, ses
             last = f"HTTP {r.status_code}"
             continue
         if r.status_code != 200:
-            raise WriterUnavailable(f"Gemini writer HTTP {r.status_code}")
+            raise WriterUnavailable(f"Gemini writer HTTP {r.status_code}" + (
+                " (Gemini prepay balance empty: buy credits on the AI Studio Billing page)"
+                if r.status_code == 402 else ""))
         data = r.json()
         u = data.get("usageMetadata", {})
         tin = int(u.get("promptTokenCount", 0))

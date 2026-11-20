@@ -18,7 +18,8 @@ from datetime import time
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-GOOGLE_KEY = re.compile(r"^AIza[0-9A-Za-z_\-]{35}$")
+# Google API keys: classic "AIza…" (39 chars) or the newer AI Studio auth keys "AQ.…" (both work in x-goog-api-key)
+GOOGLE_KEY = re.compile(r"^(AIza[0-9A-Za-z_\-]{35}|AQ\.[A-Za-z0-9_\-.]{20,})$")
 TG_TOKEN = re.compile(r"^\d{6,12}:[A-Za-z0-9_\-]{30,}$")
 GCP_PROJECT = re.compile(r"^[a-z][a-z0-9\-]{4,28}[a-z0-9]$")
 
@@ -105,7 +106,8 @@ def check_settings(s, store) -> Report:
             f"{s.writer!r} -> claude_vertex | claude_api | free")
     if s.writer == "claude_vertex":
         _key(r, "VERTEX_PROJECT_ID", s.vertex_project_id, GCP_PROJECT, "deploy/set-vertex-key.sh sets it")
-        r.row("ok" if s.vertex_region else "MISSING", "VERTEX_REGION", s.vertex_region or "-> global")
+        r.check(s.vertex_region in ("global", "us", "eu"), "VERTEX_REGION", s.vertex_region,
+                f"{s.vertex_region!r} -> global, us or eu (Claude Sonnet 5.5 endpoints)")
         r.row("ok" if s.vertex_model else "MISSING", "VERTEX_MODEL", s.vertex_model)
         kf = Path(s.vertex_credentials_file)
         if not kf.exists():
@@ -233,8 +235,13 @@ def live_checks(s, r: Report, session=None) -> None:
             res = http.post(base + s.gemini_writer_model + ":generateContent", headers=hdr, timeout=60, json={
                 "contents": [{"parts": [{"text": "Reply with the single word OK."}]}],
                 "generationConfig": {"maxOutputTokens": 64}})
-            say(res.status_code == 200, "Gemini test answer", "billing works", f"HTTP {res.status_code} (billing "
-                "enabled on the AI Studio project? Tier 1?)")
+            hint = {402: "prepay balance is empty: buy credits on the AI Studio Billing page (a Cloud Billing "
+                         "credit balance does not count)",
+                    403: "key not allowed for this API/project", 429: "rate limit or quota"}.get(res.status_code, "")
+            say(res.status_code == 200, "Gemini test answer", "billing works",
+                f"HTTP {res.status_code}" + (f": {hint}" if hint else ""))
+            if res.status_code != 200:
+                print("        full error from Google:\n" + _error_body(res, s.gemini_api_key))
         except Exception as exc:  # noqa: BLE001
             say(False, "Gemini test answer", "", f"network error {type(exc).__name__}")
     if s.writer in ("claude_vertex", "claude_api"):
@@ -253,11 +260,27 @@ def live_checks(s, r: Report, session=None) -> None:
         except Exception as exc:  # noqa: BLE001
             hint = ""
             name = type(exc).__name__
-            if "PermissionDenied" in name or "403" in str(exc):
+            if "RateLimit" in name or "429" in str(exc):
+                hint = (" (Vertex quota for anthropic-claude-sonnet is 0 or used up in region "
+                        f"{s.vertex_region}: run deploy/vertex-quota.sh in Cloud Shell; until then Gemini Pro writes)")
+            elif "PermissionDenied" in name or "403" in str(exc):
                 hint = " (grant the service account 'Vertex AI User'; enable Claude Sonnet 5.5 in Model Garden)"
             elif "NotFound" in name or "404" in str(exc):
                 hint = " (model not enabled for this project/region in Vertex AI Model Garden?)"
-            say(False, "Claude writer", "", f"{name}: {str(exc)[:120]}{hint}")
+            say(False, "Claude writer", "", f"{name}{hint}")
+            print("        full error:\n        " + str(exc)[:1500].replace("\n", "\n        "))
+
+
+def _error_body(res, *secrets: str) -> str:
+    """The API's own error text (pretty JSON when possible), with any key value masked, for the reader."""
+    try:
+        text = json.dumps(res.json(), indent=2, ensure_ascii=False)
+    except Exception:  # noqa: BLE001
+        text = getattr(res, "text", "") or ""
+    for sec in secrets:
+        if sec:
+            text = text.replace(sec, "***")
+    return "\n".join("        " + ln for ln in text[:3000].splitlines())
 
 
 def run(s, store, live: bool = False, strict: bool = False, session=None) -> Report:
