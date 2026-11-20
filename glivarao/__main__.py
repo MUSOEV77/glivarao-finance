@@ -305,7 +305,22 @@ def cmd_voice_of(args, s):
     for job in jobs:
         info = identify(s, job)
         dur = f"{int(job.duration_sec or 0) // 60}:{int(job.duration_sec or 0) % 60:02d}"
-        print(f"\n{job.id}  [{job.format}, {dur}, {job.status.value}]  {job.topic}")
+        when = ""
+        try:
+            from datetime import datetime as _dt
+            from zoneinfo import ZoneInfo
+
+            ev = [e for e in store.events(job.id) if e["to_status"] == "pending_approval"]
+            stamp = ev[-1]["at"] if ev else job.updated_at
+            when = _dt.fromisoformat(stamp.replace("Z", "+00:00")).astimezone(ZoneInfo(s.local_tz)).strftime(
+                "sent %H:%M Tashkent")
+        except Exception:  # noqa: BLE001
+            pass
+        title = ""
+        mp = Path(job.video_path).parent / "metadata.json" if job.video_path else None
+        if mp and mp.exists():
+            title = json.loads(mp.read_text()).get("title", "")
+        print(f"\n{job.id}  [{job.format}, {dur}, {job.status.value}, {when}]  {job.topic}\n  title           {title}")
         for k in ("voice", "model", "pace", "speed", "style", "how", "scenes_matched", "voice_label"):
             if k in info:
                 v = info[k]

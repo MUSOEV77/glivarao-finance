@@ -58,3 +58,27 @@ def test_voice_of_finds_exact_voice_style_speed_and_locks_it(settings, store, tm
                      gemini_tts_style=voice_lock.ENERGETIC_STYLE)
     assert voice_lock.verify(locked, store)["voice"] == "Puck"
     assert json.loads(store.kv_get("voice_locked_from"))["job"] == job.id
+
+
+def test_voice_of_cli_prints_time_title_and_settings(settings, store, monkeypatch, capsys, tmp_path):
+    from glivarao import __main__ as cli
+    from glivarao.models import JobStatus
+
+    s = replace(settings, tts_cache_dir=str(tmp_path / "c"))
+    monkeypatch.setattr(cli, "get_settings", lambda: s)
+    sh = write_shorts_format(build_brief(card("credit_report", "Credit reports and credit report errors"), DAY),
+                             "explainer", n=1)[0]
+    job = store.create("short", "Credit reports and credit report errors")
+    out = s.output_dir / job.id
+    out.mkdir(parents=True)
+    job.script_path, job.video_path, job.duration_sec = str(out / "script.json"), str(out / "video.mp4"), 66.0
+    (out / "script.json").write_text(sh.model_dump_json())
+    (out / "metadata.json").write_text(json.dumps({"title": "Blindly trusting your report", "tts": {
+        "voice": "Puck", "model": "gemini-3.8-flash-tts", "pace": "energetic", "style": "x", "speed": 1.15}}))
+    store.save(job)
+    for st in (JobStatus.SCRIPTED, JobStatus.RENDERED, JobStatus.PENDING_APPROVAL):
+        store.transition(store.get(job.id), st, "t")
+    cli.main(["voice-of", "--find", "credit report", "--short"])
+    o = capsys.readouterr().out
+    assert "1:06" in o and "sent" in o and "Tashkent" in o and "Blindly trusting your report" in o
+    assert "Puck" in o and "1.15" in o and "recorded in metadata.json" in o
