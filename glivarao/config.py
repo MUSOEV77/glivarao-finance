@@ -138,6 +138,10 @@ class Settings:
         "GEMINI_TTS_STYLE", "Narrate as a warm, deep, confident American male documentary narrator explaining "
         "personal finance. Clear numbers and money amounts; subtle emphasis on key figures; trustworthy, never "
         "theatrical."))
+    # Speaking speed: pitch-preserving tempo applied after synthesis (1.0 = as generated). Chosen in the voice
+    # audition so the narrator lands at TTS_TARGET_WPM; locked with the voice.
+    gemini_tts_speed: float = field(default_factory=lambda: float(_env("GEMINI_TTS_SPEED", "1.0")))
+    tts_target_wpm: int = field(default_factory=lambda: int(_env("TTS_TARGET_WPM", "170")))
     gemini_tts_retries: int = field(default_factory=lambda: int(_env("GEMINI_TTS_RETRIES", "5")))
     gemini_tts_backoff_sec: float = field(default_factory=lambda: float(_env("GEMINI_TTS_BACKOFF_SEC", "5")))
     tts_alert_ratio: float = field(default_factory=lambda: float(_env("TTS_ALERT_RATIO", "0.8")))

@@ -17,6 +17,9 @@ import re
 PINNED_MODEL = "gemini-3.8-flash-tts"   # Google's stable Gemini TTS model (Sept 2026); not an alias
 LOCKED_VOICE = "Charon"
 PACES = {
+    "energetic": ("Fast, upbeat, energetic delivery at about 170 words per minute, like a popular YouTube finance "
+                  "explainer: confident, lively, smiling voice, punchy emphasis on key numbers, short natural pauses, "
+                  "never rushed or shouty."),
     "measured": "Natural, measured pace with real pauses between sentences.",
     "slow": "Slow, deliberate pace with generous pauses between sentences.",
     "brisk": "Brisk but clear pace with short pauses between sentences.",
@@ -26,6 +29,10 @@ UNPINNED = re.compile(r"latest|preview|\bexp\b|-exp", re.I)
 
 class VoiceUnavailable(RuntimeError):
     """The locked voice can't be used right now. The video is held, never narrated by another voice."""
+
+
+ENERGETIC_STYLE = ("Narrate as a confident, upbeat American male YouTube finance host talking to a friend: warm, "
+                   "energetic and clear; numbers and money amounts spoken crisply; trustworthy, never theatrical.")
 
 
 def check_model(model: str) -> None:
@@ -42,8 +49,12 @@ def style_prompt(settings) -> str:
 
 def fingerprint(settings) -> dict:
     style = style_prompt(settings)
-    return {"provider": "gemini_tts", "model": settings.gemini_tts_model, "voice": settings.gemini_tts_voice,
-            "pace": settings.gemini_tts_pace, "style_sha": hashlib.sha256(style.encode()).hexdigest()[:16]}
+    fp = {"provider": "gemini_tts", "model": settings.gemini_tts_model, "voice": settings.gemini_tts_voice,
+          "pace": settings.gemini_tts_pace, "style_sha": hashlib.sha256(style.encode()).hexdigest()[:16]}
+    speed = round(float(getattr(settings, "gemini_tts_speed", 1.0)), 3)
+    if speed != 1.0:  # only part of the lock when used, so existing 1.0 locks stay valid
+        fp["speed"] = speed
+    return fp
 
 
 def verify(settings, store) -> dict:
@@ -72,5 +83,5 @@ def reset(settings, store) -> dict:
     return fp
 
 
-__all__ = ["VoiceUnavailable", "PINNED_MODEL", "LOCKED_VOICE", "PACES", "check_model", "style_prompt",
+__all__ = ["VoiceUnavailable", "PINNED_MODEL", "LOCKED_VOICE", "PACES", "ENERGETIC_STYLE", "check_model", "style_prompt",
            "fingerprint", "verify", "reset"]

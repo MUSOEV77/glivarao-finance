@@ -24,9 +24,9 @@ BANNED_PATTERNS = [
     r"\bdouble your money\b",
 ]
 
-LENGTH_RULES = {  # spoken words (≈150 wpm)
-    "long": (2200, 2800),   # ~15-18.5 minutes
-    "short": (90, 160),     # ~35-60 seconds
+LENGTH_RULES = {  # spoken words at ≈170 wpm (the energetic narrator pace)
+    "long": (2550, 3100),   # ~15-18 minutes
+    "short": (85, 170),     # ~30-60 seconds
 }
 
 

@@ -22,7 +22,7 @@ log = logging.getLogger(__name__)
 
 DEFAULT_MINUTES = {"long": 16.5, "short": 0.85}
 # spoken-word targets used for the revision step (kept in step with compliance.LENGTH_RULES)
-TARGET_WORDS = {"long": (2200, 2800), "short": (90, 160)}
+from ..compliance import LENGTH_RULES as TARGET_WORDS  # noqa: E402  same ranges as the compliance check
 # worst-case output tokens assumed by the pre-flight budget check (thinking + JSON)
 EST_OUTPUT_TOKENS = {"long": 24000, "short": 6000}
 MAX_TOKENS = 64000

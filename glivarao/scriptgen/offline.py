@@ -121,7 +121,9 @@ def _short_scenes(topic: str, angle: str) -> list[Scene]:
 def generate_offline(topic: str, fmt: str, minutes: float | None = None, angle: str = "") -> Script:
     if fmt == "long":
         minutes = minutes or 2.0
-        scenes = _long_scenes(topic, int(minutes * 150))
+        from .prompts import WORDS_PER_MINUTE
+
+        scenes = _long_scenes(topic, int(minutes * WORDS_PER_MINUTE))
         title = f"{topic}: A Plain-English Guide"
     else:
         scenes = _short_scenes(topic, angle)

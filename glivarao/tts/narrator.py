@@ -53,7 +53,8 @@ def gemini_narrator(settings: Settings, session=None, sleep=None) -> GeminiTTSNa
         style=style_prompt(settings), price_per_m_audio=settings.gemini_tts_price,
         tokens_per_sec=settings.gemini_tts_tokens_per_sec, monthly_budget_usd=settings.tts_monthly_budget_usd,
         cache_dir=Path(settings.tts_cache_dir), ledger=SpendLedger(Path(settings.tts_spend_ledger_path)),
-        session=session, retries=settings.gemini_tts_retries, backoff_sec=settings.gemini_tts_backoff_sec, **kw)
+        session=session, retries=settings.gemini_tts_retries, backoff_sec=settings.gemini_tts_backoff_sec,
+        speed=settings.gemini_tts_speed, **kw)
 
 
 def _gemini_choice(settings: Settings, script_text: str, session, store, sleep) -> NarratorChoice:

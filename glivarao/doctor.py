@@ -134,7 +134,8 @@ def check_settings(s, store) -> Report:
         voice_lock.check_model(s.gemini_tts_model)
         voice_lock.style_prompt(s)
         r.check(s.tts_provider == "gemini_tts", "TTS_PROVIDER", "gemini_tts", f"{s.tts_provider} -> gemini_tts")
-        r.row("ok", "voice", f"{s.gemini_tts_voice} on {s.gemini_tts_model}, pace {s.gemini_tts_pace}")
+        r.row("ok", "voice", f"{s.gemini_tts_voice} on {s.gemini_tts_model}, pace {s.gemini_tts_pace}, speed "
+              f"x{s.gemini_tts_speed} (target {s.tts_target_wpm} wpm)")
         saved = store.kv_get("voice_lock")
         if saved and json.loads(saved) != voice_lock.fingerprint(s):
             r.row("INVALID", "voice lock", "settings changed since the lock -> voice-lock --reset if intended")

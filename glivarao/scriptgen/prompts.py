@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from ..models import CHARACTERS, ILLUSTRATIONS
 
-WORDS_PER_MINUTE = 150
+WORDS_PER_MINUTE = 170  # energetic narrator pace (TTS_TARGET_WPM, 165-175 wpm)
 
 SYSTEM_PROMPT = f"""You are the head writer for GLIVARAO Finance, an original YouTube channel that explains
 everyday US personal finance in plain language to people aged 25-45 who struggle with money.

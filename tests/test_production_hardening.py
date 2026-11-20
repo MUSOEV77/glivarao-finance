@@ -71,9 +71,9 @@ def settings(tmp_path, **kw):
 
 def test_short_draft_is_revised_not_discarded_and_spend_recorded(tmp_path):
     s = settings(tmp_path)
-    fake = FakeClaude([script_json(20, 60), script_json(25, 100)])  # 1200 words -> 2500 words
+    fake = FakeClaude([script_json(20, 60), script_json(25, 112)])  # 1200 words -> 2800 words
     out = generate_with_claude("Credit card interest", "long", s, client=fake)
-    assert 2200 <= out.word_count <= 2800
+    assert 2550 <= out.word_count <= 3100
     assert len(fake.calls) == 2 and "Expand it" in fake.calls[1]["messages"][0]["content"]
     req = fake.calls[0]
     assert req["model"] == "claude-opus-5-5" and req["fallbacks"] == "default"
@@ -85,7 +85,7 @@ def test_short_draft_is_revised_not_discarded_and_spend_recorded(tmp_path):
 
 
 def test_in_range_draft_needs_one_request(tmp_path):
-    fake = FakeClaude([script_json(25, 100)])
+    fake = FakeClaude([script_json(25, 112)])
     generate_with_claude("t", "long", settings(tmp_path), client=fake)
     assert len(fake.calls) == 1
 
@@ -93,7 +93,7 @@ def test_in_range_draft_needs_one_request(tmp_path):
 def test_budget_blocks_request_before_any_call(tmp_path):
     s = settings(tmp_path, claude_monthly_budget_usd=1.0)
     ClaudeSpendLedger(tmp_path / "c.json").add(0.9, 0, 0)
-    fake = FakeClaude([script_json(25, 100)])
+    fake = FakeClaude([script_json(25, 112)])
     with pytest.raises(ScriptGenerationError, match="Claude monthly budget"):  # no Gemini key: nothing else to use
         generate_with_claude("t", "long", s, client=fake)
     assert fake.calls == []
@@ -101,9 +101,9 @@ def test_budget_blocks_request_before_any_call(tmp_path):
 
 def test_revision_skipped_when_budget_runs_out(tmp_path):
     s = settings(tmp_path, claude_monthly_budget_usd=0.8)  # first call fits, second does not
-    fake = FakeClaude([script_json(20, 60), script_json(25, 100)], out_tokens=30000)
+    fake = FakeClaude([script_json(20, 60), script_json(25, 112)], out_tokens=30000)
     out = generate_with_claude("t", "long", s, client=fake)
-    assert len(fake.calls) == 1 and out.word_count < 2200  # draft kept, compliance will flag length
+    assert len(fake.calls) == 1 and out.word_count < 2550  # draft kept, compliance will flag length
 
 
 def test_usage_cost_counts_cache_tokens():

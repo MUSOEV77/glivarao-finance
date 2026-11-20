@@ -196,6 +196,28 @@ def cmd_pack(args, s):
     print(send_pack(job, s, store))
 
 
+def cmd_voice_audition(args, s):
+    """Voice the same 30 s script with several voices and send them to Telegram with pick buttons."""
+    from .studio import voice_audition
+
+    store = _store(s)
+    cands = [(v, 1.15 if v == "Charon" else None) for v in args.voices] if args.voices else voice_audition.CANDIDATES
+    results = voice_audition.make_samples(s, store, Path(s.output_dir) / "voice_audition", candidates=cands)
+    for r in results:
+        print(f"{r['voice']:10s} " + (f"{r['wpm']} wpm (raw {r['wpm_raw']}, speed x{r['speed']}) {r['path']}"
+                                      if "path" in r else f"FAILED: {r['error']}"))
+    if not args.no_telegram:
+        print(f"sent {voice_audition.send_samples(s, results)} samples to Telegram")
+
+
+def cmd_voice_pick(args, s):
+    """Lock a voice from the last audition (same as tapping its button in Telegram)."""
+    from .studio import voice_audition
+
+    print(voice_audition.pick(s, _store(s), args.voice))
+    print("Held videos are re-voiced by the hourly retry, or now with: python -m glivarao retry-held")
+
+
 def cmd_voice_lock(args, s):
     """Show the locked channel voice, voice budget and held videos; --reset accepts changed voice settings."""
     from datetime import date as _d
@@ -210,7 +232,7 @@ def cmd_voice_lock(args, s):
         return
     saved = store.kv_get("voice_lock")
     print(f"provider: {s.tts_provider}   model: {s.gemini_tts_model}   voice: {s.gemini_tts_voice}   "
-          f"pace: {s.gemini_tts_pace}")
+          f"pace: {s.gemini_tts_pace}   speed: x{s.gemini_tts_speed} (target {s.tts_target_wpm} wpm)")
     print(f"style: {s.gemini_tts_style}")
     print("lock:", saved or "not recorded yet (recorded on the first narration)")
     try:
@@ -544,6 +566,13 @@ def main(argv=None):
     al.set_defaults(fn=cmd_alert)
     sub.add_parser("verify-facts", help="re-check the launch list's facts on official pages").set_defaults(
         fn=cmd_verify_facts)
+    va = sub.add_parser("voice-audition", help="send voice samples to Telegram with pick buttons")
+    va.add_argument("voices", nargs="*", help="default: Puck Sadachbia Fenrir Achird Charon")
+    va.add_argument("--no-telegram", action="store_true")
+    va.set_defaults(fn=cmd_voice_audition)
+    vp = sub.add_parser("voice-pick", help="lock a voice from the last audition")
+    vp.add_argument("voice")
+    vp.set_defaults(fn=cmd_voice_pick)
     vl = sub.add_parser("voice-lock", help="show the locked voice, budget and held videos")
     vl.add_argument("--reset", action="store_true", help="accept changed voice settings in .env as the new lock")
     vl.set_defaults(fn=cmd_voice_lock)

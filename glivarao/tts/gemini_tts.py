@@ -65,6 +65,30 @@ class SpendLedger:
         self.path.write_text(json.dumps(data, indent=2))
 
 
+def apply_tempo(audio: np.ndarray, factor: float, sr: int = KOKORO_SR) -> np.ndarray:
+    """Pitch-preserving speed change (ffmpeg atempo). factor 1.15 = 15% faster. 1.0 returns the input."""
+    import subprocess
+
+    if abs(factor - 1.0) < 0.005 or not len(audio):
+        return audio
+    factor = max(0.5, min(2.0, factor))
+    r = subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "f32le", "-ar", str(sr), "-ac", "1", "-i", "pipe:0",
+                        "-filter:a", f"atempo={factor:.4f}", "-f", "f32le", "-ar", str(sr), "-ac", "1", "pipe:1"],
+                       input=audio.astype(np.float32).tobytes(), capture_output=True, check=True)
+    return np.frombuffer(r.stdout, dtype=np.float32).copy()
+
+
+def speech_seconds(audio: np.ndarray, sr: int = KOKORO_SR) -> float:
+    """Duration between the first and last audible sample (leading/trailing silence excluded)."""
+    idx = np.where(np.abs(audio) > 0.004)[0]
+    return (idx[-1] - idx[0]) / sr if len(idx) else 0.0
+
+
+def words_per_minute(text: str, audio: np.ndarray, sr: int = KOKORO_SR) -> float:
+    sec = speech_seconds(audio, sr)
+    return len(text.split()) / sec * 60 if sec else 0.0
+
+
 def estimate_usd(text: str, price_per_m_audio: float, tokens_per_sec: float, chars_per_sec: float = 14.7) -> float:
     """Conservative pre-flight estimate (speech seconds from measured GLIVARAO narration rate)."""
     return len(text) / chars_per_sec * tokens_per_sec * price_per_m_audio / 1e6
@@ -108,12 +132,13 @@ class GeminiTTSNarrator:
     def __init__(self, api_key: str, model: str = DEFAULT_MODEL, voice: str = DEFAULT_VOICE, style: str = DEFAULT_STYLE,
                  price_per_m_audio: float = 18.0, tokens_per_sec: float = 32.0, monthly_budget_usd: float = 20.0,
                  cache_dir: Path = Path("data/tts_cache"), ledger: SpendLedger | None = None, session=None,
-                 retries: int = 5, backoff_sec: float = 5.0, sleep=time.sleep):
+                 retries: int = 5, backoff_sec: float = 5.0, sleep=time.sleep, speed: float = 1.0):
         if not api_key:
             raise VoiceUnavailable("GEMINI_API_KEY is not set")
         check_model(model)
         self._key, self.model, self.voice, self.style = api_key, model, voice, style
         self.retries, self.backoff, self._sleep = retries, backoff_sec, sleep
+        self.speed = speed
         self.price, self.tps, self.budget = price_per_m_audio, tokens_per_sec, monthly_budget_usd
         self.cache = Path(cache_dir)
         self.ledger = ledger or SpendLedger(Path("data/tts_spend.json"))
@@ -204,7 +229,7 @@ class GeminiTTSNarrator:
 
     def narrate(self, text: str, lead_in: float = 0.15, tail: float = 0.45) -> Narration:
         display = [s.replace("*", "") for s in split_sentences(" ".join(text.split()))]
-        audio = self._scene_audio(self._prep(text))
+        audio = apply_tempo(self._scene_audio(self._prep(text)), self.speed)  # raw audio cached; tempo after
         idx = np.where(np.abs(audio) > 0.004)[0]  # trim leading/trailing silence, keep GLIVARAO lead-in/tail
         if len(idx):
             audio = audio[max(0, idx[0] - 480): idx[-1] + 720]

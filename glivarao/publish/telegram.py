@@ -204,6 +204,23 @@ def poll_decisions(store: JobStore, settings: Settings, client: TelegramClient |
             client.call("answerCallbackQuery", callback_query_id=cq["id"], text="Not authorized")
             continue
         action, _, job_id = cq.get("data", "").partition(":")
+        if action == "voicepick":  # voice audition: lock the chosen narrator
+            from ..studio import voice_audition
+
+            try:
+                locked = voice_audition.pick(settings, store, job_id)
+                held = len(json.loads(store.kv_get("voice_held", "{}")))
+                client.call("answerCallbackQuery", callback_query_id=cq["id"], text=f"{job_id} locked")
+                client.call("sendMessage", chat_id=chat_id, text=(
+                    f"🔒 Voice locked: {locked['GEMINI_TTS_VOICE']}, energetic style, speed ×"
+                    f"{locked['GEMINI_TTS_SPEED']} (~{locked['wpm']} words/min). Every new video uses it."
+                    + (f" {held} video(s) on hold will be re-voiced with it within the hour." if held else "")))
+                decisions.append((job_id, "voice_locked"))
+            except Exception as exc:  # noqa: BLE001
+                log.warning("voice pick failed: %s", exc)
+                client.call("answerCallbackQuery", callback_query_id=cq["id"], text="Could not lock that voice")
+                client.call("sendMessage", chat_id=chat_id, text=f"⚠️ Voice not changed: {str(exc)[:200]}")
+            continue
         if action == "thumb":  # thumbnail choice (long videos)
             jid, _, n = job_id.rpartition(":")
             try:

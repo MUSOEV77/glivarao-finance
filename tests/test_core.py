@@ -56,7 +56,9 @@ def test_offline_scripts_pass_compliance():
 
 def test_offline_long_hits_production_length():
     script = generate_offline("Index funds explained", "long", minutes=16.5)
-    assert 2200 <= script.word_count <= 2800
+    from glivarao.compliance import LENGTH_RULES
+
+    assert LENGTH_RULES["long"][0] <= script.word_count <= LENGTH_RULES["long"][1]
     report = check_script(script, enforce_length=True)
     assert not any("Word count" in e for e in report.errors)  # length OK; repetition is flagged separately
 

@@ -21,6 +21,33 @@ change the voice settings, confirm on the server:
 cd /opt/glivarao/app && sudo -u glivarao .venv/bin/python -m glivarao voice-lock --reset
 ```
 
+## Choosing (or changing) the voice: the audition
+
+```
+cd /opt/glivarao/app && sudo -u glivarao .venv/bin/python -m glivarao voice-audition
+```
+
+**How it works:**
+- The same 30-second script is voiced by **Puck, Sadachbia, Fenrir, Achird and Charon (+15%)**, all with an
+  energetic YouTube-explainer style prompt.
+- Gemini has no numeric speed setting, so each sample is measured, then sped up or slowed down without changing
+  pitch so it lands at about **170 words per minute** (`TTS_TARGET_WPM`).
+- Each sample arrives in Telegram as audio, labelled with its words per minute, with a **✅ Use …** button.
+
+**Tapping a button:**
+- locks that voice in `.env`: `GEMINI_TTS_VOICE`, `GEMINI_TTS_PACE=energetic`, `GEMINI_TTS_STYLE` and
+  `GEMINI_TTS_SPEED` (the speed factor measured for that voice);
+- resets the voice lock on purpose;
+- lets the hourly retry re-voice every video on hold with the new voice.
+
+You can also do it from the server: `python -m glivarao voice-pick Puck`.
+
+**Scripts are sized for 170 words per minute:** long videos are 2,550–3,100 words (15–18 minutes) and Shorts
+85–170 words.
+
+**Cost:** about 2–3 cents for all five samples, counted in the $20 voice budget. Re-voicing the held videos with a
+new voice costs that voice's normal audio price once.
+
 ## If Gemini fails
 
 1. **Temporary errors** (network, rate limit, Google server errors) are retried with backoff: 5, 10, 20, 40 and
