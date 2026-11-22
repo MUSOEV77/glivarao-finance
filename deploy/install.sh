@@ -68,9 +68,17 @@ if [ "$SKIP_SYSTEMD" != "1" ]; then
   cp deploy/logrotate-glivarao /etc/logrotate.d/glivarao
   systemctl daemon-reload
   systemctl disable --now glivarao-propose.timer 2>/dev/null || true   # weekly ideas are only for TOPIC_MODE=queue
-  systemctl enable --now glivarao-daily.timer glivarao-poll.timer glivarao-backup.timer glivarao-plan.timer \
-    glivarao-health.timer glivarao-competitors.timer \
-    glivarao-voice-retry.timer
+  # always on: Telegram polling, health report, backups
+  systemctl enable --now glivarao-poll.timer glivarao-backup.timer glivarao-health.timer
+  if [ -f "$APP_DIR/data/PAUSED" ]; then
+    # production is paused by the owner: keep production timers OFF until `python -m glivarao resume`
+    systemctl disable --now glivarao-daily.timer glivarao-plan.timer glivarao-voice-retry.timer \
+      glivarao-competitors.timer 2>/dev/null || true
+    echo "   production is PAUSED (data/PAUSED): production timers left off"
+  else
+    systemctl enable --now glivarao-daily.timer glivarao-plan.timer glivarao-competitors.timer \
+      glivarao-voice-retry.timer
+  fi
   systemctl list-timers 'glivarao-*' --no-pager
 fi
 echo "Done. Installed $(cat "$APP_DIR/.deployed_commit" 2>/dev/null | cut -c1-8). Nothing is ever uploaded automatically."

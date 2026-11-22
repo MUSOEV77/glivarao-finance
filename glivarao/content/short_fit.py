@@ -1,10 +1,12 @@
-"""Keep Shorts short: 40-55 seconds, never over 60.
+"""Keep Shorts at 30-55 seconds, never over 59 (see daily_v2.fit_short_voice).
 
-1. Before voicing, the script is trimmed to SHORT_MAX_WORDS (110) words: whole sentences are removed from the
+1. Before voicing, the script is trimmed to SHORT_MAX_WORDS (120) words: whole sentences are removed from the
    middle scenes (the hook in the first scene and the closing scene are kept), longest scenes first.
-2. After voicing, the real audio length is measured; if it is over SHORT_REDO_SECONDS (58 s) the script is
-   trimmed in proportion to the overshoot and voiced again (at most 2 times).
-3. A Short still over SHORT_MAX_SECONDS (60 s) is never sent: the job fails and you get an alert.
+2. It is voiced BEFORE rendering and the real audio length is measured with ffprobe; over SHORT_REDO_SECONDS (55 s)
+   the script is trimmed in proportion and voiced again (at most 2 times).
+3. Still over SHORT_TEMPO_SECONDS (58 s): sped up with ffmpeg atempo, at most SHORT_MAX_TEMPO (1.15x).
+4. Still over SHORT_MAX_SECONDS (59 s): not rendered, held, and you get an alert. The finished file is measured
+   again after rendering and a Short over 59 s is never sent to Telegram.
 """
 from __future__ import annotations
 
@@ -48,7 +50,9 @@ def words_for(seconds_now: float, words_now: int, target_seconds: float) -> int:
 
 
 class ShortTooLong(RuntimeError):
-    pass
+    def __init__(self, msg: str, seconds: float = 0.0, rendered: bool = False):
+        super().__init__(msg)
+        self.seconds, self.rendered = seconds, rendered
 
 
 __all__ = ["trim_to_words", "words_for", "ShortTooLong"]

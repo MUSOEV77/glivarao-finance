@@ -257,6 +257,11 @@ def cmd_retry_held(args, s):
 
     from .daily_v2 import AlreadyRunning, held_videos, retry_held_videos, supervised_daily, writer_held
 
+    from .studio.pause import status as pause_status
+
+    if pause_status(s):
+        print("production is PAUSED: nothing retried (resume with: python -m glivarao resume)")
+        return
     store = _store(s)
     send = not args.no_telegram
     if not held_videos(store) and not writer_held(store):
@@ -339,13 +344,37 @@ def cmd_voice_lock_from(args, s):
     print("locked. Held videos are re-voiced by the hourly retry (or now: python -m glivarao retry-held)")
 
 
+def cmd_pause(args, s):
+    """Pause all production (survives updates and reboots), show the pause, or resume (explicit only)."""
+    from .studio import pause
+
+    if args.status:
+        st = pause.status(s)
+        print(f"PAUSED since {st['since']} ({st['reason']})" if st else "running (not paused)")
+        return
+    info = pause.pause(s, args.reason)
+    print(f"PAUSED since {info['since']}: no production, no retries, no remakes, no paid calls. "
+          "Telegram, health report and backups stay on. Resume only with: python -m glivarao resume")
+
+
+def cmd_resume(args, s):
+    from .studio import pause
+
+    print("resumed: production runs at the next scheduled time" if pause.resume(s) else "was not paused")
+
+
 def cmd_claude_quota(args, s):
     """Is Claude on Vertex usable yet? One tiny real call + quota limits and your increase requests."""
     from .daily_v2 import writer_held
     from .scriptgen.vertex_quota import live_test, quota_status
 
-    ok, msg = live_test(s)
-    print(("OK   " if ok else "WAIT ") + msg)
+    from .studio.pause import status as pause_status
+
+    if pause_status(s):
+        print("PAUSED: no test call made (it would cost a fraction of a cent). Quota status only:")
+    else:
+        ok, msg = live_test(s)
+        print(("OK   " if ok else "WAIT ") + msg)
     for line in quota_status(s):
         print(line)
     held = writer_held(_store(s))
@@ -359,6 +388,39 @@ def cmd_remake(args, s):
 
     r = remake_video(s, _store(s), args.job_id, send=not args.no_telegram)
     print(r[0], r[2], r[4] or "")
+
+
+def cmd_shorts_check(args, s):
+    """List Shorts waiting for review (or held) that are over the limit, measured on the real file (ffprobe).
+    --remake makes each one again with the current length rules and rejects the old one (never approved ones)."""
+    import json as _json
+
+    from .daily_v2 import _video_seconds, remake_video
+    from .models import JobStatus
+
+    store = _store(s)
+    held = _json.loads(store.kv_get("length_held", "{}"))
+    bad = []
+    for job in store.list(limit=500):
+        if job.format != "short" or job.status not in (JobStatus.RENDERED, JobStatus.PENDING_APPROVAL,
+                                                        JobStatus.SCRIPTED):
+            continue
+        secs = _video_seconds(job.video_path) if job.video_path else 0.0
+        if secs > s.short_max_seconds or job.id in held:
+            bad.append((job, secs or held.get(job.id, {}).get("seconds", 0.0)))
+    if not bad:
+        print(f"OK: no Short in the queue is over {s.short_max_seconds:.0f} s")
+        return
+    for job, secs in bad:
+        m, sec = divmod(int(round(secs)), 60)
+        print(f"TOO LONG  {job.id}  {m}:{sec:02d}  {job.status.value}  {job.topic}")
+    if not args.remake:
+        print(f"{len(bad)} Short(s) over the limit. Remake them (old ones rejected): python -m glivarao shorts-check "
+              "--remake")
+        return
+    for job, _ in bad:
+        r = remake_video(s, store, job.id, send=not args.no_telegram)
+        print(f"remade {job.id} -> {r[0]}: {r[2]} {r[4] or ''}")
 
 
 def cmd_competitors(args, s):
@@ -663,12 +725,21 @@ def main(argv=None):
     vf = sub.add_parser("voice-lock-from", help="lock exactly the voice a video was made with")
     vf.add_argument("job_id")
     vf.set_defaults(fn=cmd_voice_lock_from)
+    pz = sub.add_parser("pause", help="pause ALL production (survives updates); --status to check")
+    pz.add_argument("--reason", default="")
+    pz.add_argument("--status", action="store_true")
+    pz.set_defaults(fn=cmd_pause)
+    sub.add_parser("resume", help="resume production (explicit approval only)").set_defaults(fn=cmd_resume)
     sub.add_parser("claude-quota", help="is Claude on Vertex usable yet? (tiny real call + quota status)").set_defaults(
         fn=cmd_claude_quota)
     rm = sub.add_parser("remake", help="make a video again with the current voice and length rules")
     rm.add_argument("job_id")
     rm.add_argument("--no-telegram", action="store_true")
     rm.set_defaults(fn=cmd_remake)
+    sc = sub.add_parser("shorts-check", help="list Shorts in the queue over 59 s; --remake to make them again")
+    sc.add_argument("--remake", action="store_true")
+    sc.add_argument("--no-telegram", action="store_true")
+    sc.set_defaults(fn=cmd_shorts_check)
     va = sub.add_parser("voice-audition", help="send voice samples to Telegram with pick buttons")
     va.add_argument("voices", nargs="*", help="default: Puck Sadachbia Fenrir Achird Charon")
     va.add_argument("--no-telegram", action="store_true")
@@ -723,8 +794,13 @@ def main(argv=None):
     args = p.parse_args(argv)
     logging.basicConfig(level=logging.INFO if args.verbose else logging.WARNING, format="%(asctime)s %(levelname)s %(name)s: %(message)s",
                         force=True)
+    from .studio.pause import Paused
+
     try:
         args.fn(args, get_settings())
+    except Paused as exc:  # a pause is not an error: timers exit cleanly and never crash-loop
+        print(exc)
+        return
     except Exception as exc:  # concise operator-facing errors
         if args.verbose:
             raise

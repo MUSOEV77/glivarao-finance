@@ -89,7 +89,14 @@ def report(settings, store) -> str:
     from .planner import active_item
 
     b = buffer.status(store, settings)
-    lines = [f"🩺 GLIVARAO health — {date.today():%a %d %b %Y}", "", "BUFFER", buffer.text(b, settings), ""]
+    from . import pause
+
+    ps = pause.status(settings)
+    lines = [f"🩺 GLIVARAO health — {date.today():%a %d %b %Y}", ""]
+    if ps:
+        lines += [f"⏸ PRODUCTION PAUSED since {ps.get('since')} ({ps.get('reason')}). Nothing is produced or spent "
+                  "until you send: python -m glivarao resume", ""]
+    lines += ["BUFFER", buffer.text(b, settings), ""]
     made, due = buffer.long_due(store, date.today(), settings)
     shorts = sum(n for d, n in json.loads(store.kv_get("short_counts", "{}")).items()
                  if d[:7] == date.today().isoformat()[:7])

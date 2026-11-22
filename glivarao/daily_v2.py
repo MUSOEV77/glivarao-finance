@@ -139,6 +139,9 @@ def run_daily_v2(settings: Settings, store: JobStore, today: date | None = None,
     from .studio.formats import FORMATS, choose_format
     from .studio.queue import TopicQueue
 
+    from .studio.pause import guard
+
+    guard(settings, "daily production")
     today = today or date.today()
     if held_videos(store):  # videos held for the voice go first (they are already scripted and approved by checks)
         retry_held_videos(settings, store, send=send, workers=workers)
@@ -342,24 +345,18 @@ def render_and_review(job, script, brief, claims, ctx: dict, settings: Settings,
             from .art.ai_visuals import illustrate_scenes
 
             script, art_stats = illustrate_scenes(script, out, settings, store)
-        from .content.short_fit import ShortTooLong, trim_to_words, words_for
+        from .content.short_fit import ShortTooLong
 
-        if script.format == "short":  # 1. cap the words before voicing
-            script = trim_to_words(script, settings.short_max_words)
-        res = _render_with_retry(render_animated, script, out, settings, workers)
-        if script.format == "short":  # measure the FINISHED file, not just the narration
+        tempo = 1.0
+        if script.format == "short":  # voice + measure BEFORE rendering; held (not rendered) if it can't fit
+            script, tempo, voiced = fit_short_voice(script, settings, out, job.id)
+        res = _render_with_retry(render_animated, script, out, settings, workers, tempo)
+        if script.format == "short":  # the FINISHED file is measured too; never sent over the limit
             res.duration = max(res.duration, _video_seconds(res.video))
-        tries = 0
-        while script.format == "short" and res.duration > settings.short_redo_seconds and tries < 2:
-            tries += 1  # 2. measured too long: trim in proportion and voice again (max 2 times)
-            log.warning("Short %s is %.1f s (> %.0f s); trimming and re-voicing (try %d)", job.id, res.duration,
-                        settings.short_redo_seconds, tries)
-            script = trim_to_words(script, words_for(res.duration, script.word_count, settings.short_target_seconds))
-            res = _render_with_retry(render_animated, script, out, settings, workers)
-            res.duration = max(res.duration, _video_seconds(res.video))
-        if script.format == "short" and res.duration > settings.short_max_seconds:  # 3. never send it
-            raise ShortTooLong(f"Short is {res.duration:.0f} s after {tries} shortening tries (limit "
-                               f"{settings.short_max_seconds:.0f} s); not sent")
+            if res.duration > settings.short_max_seconds:
+                raise ShortTooLong(f"the finished Short is {_mss(res.duration)} (limit {_mss(settings.short_max_seconds)}"
+                                   f", voice measured {_mss(voiced)}, tempo x{tempo:.2f}); rendered but NOT sent",
+                                   seconds=res.duration, rendered=True)
         if script.format == "short":
             claims = factcheck.check_claims(script, brief, creator)  # the fact check matches the final words
         disc = disclosure.disclosure_for(res.voice)
@@ -419,15 +416,17 @@ def render_and_review(job, script, brief, claims, ctx: dict, settings: Settings,
                               f"{exc}\nNo other voice is used. I'll retry every hour and send the review as soon "
                               "as the Charon voice works again. Your buffer of approved videos covers the schedule.")
         return (job.id, script.format, "held", None, str(exc)[:200])
-    except ShortTooLong as exc:
+    except ShortTooLong as exc:  # HELD: stays scripted, never sent; you get one alert
         log.warning("%s: %s", job.id, exc)
-        job = store.get(job.id)
-        if JobStatus.FAILED in ALLOWED[job.status]:
-            store.transition(job, JobStatus.FAILED, str(exc)[:500])
+        held = json.loads(store.kv_get("length_held", "{}"))
+        held[job.id] = {"since": date.today().isoformat(), "seconds": round(exc.seconds, 1),
+                        "rendered": exc.rendered, "reason": str(exc)[:300]}
+        store.kv_set("length_held", json.dumps(held))
         if send:
-            _notify(settings, f"✂️ GLIVARAO: Short {job.id} (\"{brief.topic}\") was still too long and was NOT sent: "
-                              f"{exc}. Remake it with: python -m glivarao remake {job.id}")
-        return (job.id, script.format, "failed", None, str(exc)[:200])
+            _notify(settings, f"✂️ GLIVARAO: Short {job.id} (\"{brief.topic}\") is ON HOLD, NOT sent: {exc}. "
+                              f"Limit {_mss(settings.short_max_seconds)}. Nothing else was done. To make it again "
+                              f"(shorter script, re-voiced): python -m glivarao remake {job.id}")
+        return (job.id, script.format, "held", None, str(exc)[:200])
     except Exception as exc:  # one failed render must not stop the other videos
         log.exception("render failed for %s", job.id)
         job = store.get(job.id)
@@ -505,6 +504,9 @@ def remake_video(settings: Settings, store: JobStore, job_id: str, send: bool = 
     (e.g. a Short that came out too long). The old job is retired (rejected/failed) so it can't be uploaded."""
     import shutil
 
+    from .studio.pause import guard
+
+    guard(settings, f"remake of {job_id}")
     from .content.brief import load_brief
     from .models import Script
     from .studio import factcheck
@@ -525,6 +527,14 @@ def remake_video(settings: Settings, store: JobStore, job_id: str, send: bool = 
         "sim": {"summary": f"Originality: same script as {old.id} (already checked).",
                 "phrase_overlap": 0.0, "structure_ratio": 0.0}}
     ctx["date"] = date.today().isoformat()
+    lh = json.loads(store.kv_get("length_held", "{}"))
+    if script.format == "short" and old.id in lh:  # held for length: start from a proportionally shorter script
+        from .content.short_fit import trim_to_words, words_for
+
+        script = trim_to_words(script, words_for(lh[old.id]["seconds"], script.word_count,
+                                                 settings.short_target_seconds))
+        lh.pop(old.id)
+        store.kv_set("length_held", json.dumps(lh))
     new = store.create(script.format, old.topic)
     out = settings.output_dir / new.id
     out.mkdir(parents=True, exist_ok=True)
@@ -543,6 +553,9 @@ def remake_video(settings: Settings, store: JobStore, job_id: str, send: bool = 
 
 def retry_held_videos(settings: Settings, store: JobStore, send: bool = True, workers: int | None = None) -> list:
     """Re-render videos held because the voice was unavailable (systemd: hourly, and before every daily run)."""
+    from .studio.pause import guard
+
+    guard(settings, "retry of held videos")
     from .content.brief import build_brief
     from .models import Script
     from .studio import factcheck
@@ -611,6 +624,58 @@ def _tts_record(settings: Settings) -> dict:
             "speed": settings.gemini_tts_speed}
 
 
+def _mss(seconds: float) -> str:
+    m, s = divmod(int(round(seconds)), 60)
+    return f"{m}:{s:02d}"
+
+
+def _voice_seconds(script, settings: Settings, out: Path, tempo: float = 1.0) -> float:
+    """Voice the Short with the locked voice (clips are cached, so the render reuses them at no extra cost),
+    write the narration exactly as the render will build it, and measure the REAL length with ffprobe."""
+    import numpy as np
+    import soundfile as sf
+
+    from .tts.kokoro import KOKORO_SR
+    from .tts.narrator import get_narrator, narrate_all
+
+    texts = [s.narration for s in script.scenes]
+    choice = get_narrator(settings, "\n\n".join(texts))
+    if tempo != 1.0 and hasattr(choice.narrator, "speed"):
+        choice.narrator.speed = choice.narrator.speed * tempo
+    narrations, _ = narrate_all(choice, texts, settings)
+    audio = np.concatenate([n.audio for n in narrations])
+    out.mkdir(parents=True, exist_ok=True)
+    wav = out / "short_voice_check.wav"
+    sf.write(wav, audio, KOKORO_SR, subtype="PCM_16")
+    return _video_seconds(wav) or len(audio) / KOKORO_SR
+
+
+def fit_short_voice(script, settings: Settings, out: Path, job_id: str = "") -> tuple:
+    """Shorts rule (before any rendering): <=SHORT_MAX_WORDS words; voiced length over SHORT_REDO_SECONDS (55 s)
+    -> trim and re-voice (max 2 tries); over SHORT_TEMPO_SECONDS (58 s) -> atempo up to SHORT_MAX_TEMPO (1.15x);
+    over SHORT_MAX_SECONDS (59 s) -> ShortTooLong (held, not rendered). Returns (script, tempo, seconds)."""
+    from .content.short_fit import ShortTooLong, trim_to_words, words_for
+
+    script = trim_to_words(script, settings.short_max_words)
+    secs = _voice_seconds(script, settings, out)
+    tries = 0
+    while secs > settings.short_redo_seconds and tries < 2:
+        tries += 1
+        log.warning("Short %s voiced at %.1f s (> %.0f s); trimming and re-voicing (try %d)", job_id, secs,
+                    settings.short_redo_seconds, tries)
+        script = trim_to_words(script, words_for(secs, script.word_count, settings.short_target_seconds))
+        secs = _voice_seconds(script, settings, out)
+    tempo = 1.0
+    if secs > settings.short_tempo_seconds:
+        tempo = min(settings.short_max_tempo, secs / settings.short_redo_seconds)
+        log.warning("Short %s still %.1f s; speeding up x%.2f", job_id, secs, tempo)
+        secs = _voice_seconds(script, settings, out, tempo)
+    if secs > settings.short_max_seconds:
+        raise ShortTooLong(f"the voiced Short is {_mss(secs)} after {tries} shortening tries and tempo x{tempo:.2f} "
+                           f"(limit {_mss(settings.short_max_seconds)}); not rendered", seconds=secs)
+    return script, tempo, secs
+
+
 def _video_seconds(path) -> float:
     """Real length of the finished file (ffprobe); 0 if it can't be read."""
     import subprocess
@@ -636,18 +701,19 @@ def writer_held(store: JobStore) -> dict:
     return json.loads(store.kv_get("writer_held", "{}"))
 
 
-def _render_with_retry(render_animated, script, out, settings, workers):
+def _render_with_retry(render_animated, script, out, settings, workers, tempo: float = 1.0):
     """One retry with a single worker: the usual cause of a failed render is memory pressure or a crashed worker.
     A voice outage is not retried here (the voice client already retried with backoff); the video is held."""
     from .tts.voice_lock import VoiceUnavailable
 
+    kw = {"tempo_boost": tempo} if tempo != 1.0 else {}
     try:
-        return render_animated(script, out, settings, workers=workers)
+        return render_animated(script, out, settings, workers=workers, **kw)
     except VoiceUnavailable:
         raise
     except Exception as exc:
         log.warning("render failed (%s: %s); retrying once with 1 worker", type(exc).__name__, exc)
-        return render_animated(script, out, settings, workers=1)
+        return render_animated(script, out, settings, workers=1, **kw)
 
 
 class AlreadyRunning(RuntimeError):
@@ -665,6 +731,10 @@ def supervised_daily(settings: Settings, store: JobStore, today: date | None = N
     - also alerts when the day finished but any video failed or was rejected by compliance.
     Never uploads, publishes or schedules anything on YouTube."""
     import fcntl
+
+    from .studio.pause import guard
+
+    guard(settings, "daily production")
     import time
 
     from .sysres import check_disk
@@ -750,7 +820,7 @@ def _topic_block(brief, item, script, store=None, today: date | None = None, wri
         m, sec = divmod(int(round(duration)), 60)
         lines.append(f"LENGTH: {m}:{sec:02d} ({script.word_count} words, "
                      f"{script.word_count / max(duration, 1) * 60:.0f} words/min)"
-                     + (" — Short, limit 0:60" if script.format == "short" else ""))
+                     + (" — Short, limit 0:59" if script.format == "short" else ""))
     if writer:
         lines.append(f"WRITER: {writer}")
     lines.append("Don't like the topic? Tap ❌ Reject: the whole video is discarded and nothing is uploaded.")

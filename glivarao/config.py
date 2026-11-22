@@ -147,10 +147,14 @@ class Settings:
     gemini_tts_speed: float = field(default_factory=lambda: float(_env("GEMINI_TTS_SPEED", "1.0")))
     tts_target_wpm: int = field(default_factory=lambda: int(_env("TTS_TARGET_WPM", "170")))
     # Shorts length: script capped before voicing; real audio measured after; never sent over SHORT_MAX_SECONDS
-    short_max_words: int = field(default_factory=lambda: int(_env("SHORT_MAX_WORDS", "110")))
-    short_redo_seconds: float = field(default_factory=lambda: float(_env("SHORT_REDO_SECONDS", "58")))
-    short_target_seconds: float = field(default_factory=lambda: float(_env("SHORT_TARGET_SECONDS", "50")))
-    short_max_seconds: float = field(default_factory=lambda: float(_env("SHORT_MAX_SECONDS", "60")))
+    # Shorts must be 30-55 s: <=120 words; voiced and measured BEFORE rendering; over 55 s -> trim + re-voice (2x);
+    # over 58 s -> atempo up to 1.15x; over 59 s -> held (never rendered or sent). The final file is checked again.
+    short_max_words: int = field(default_factory=lambda: int(_env("SHORT_MAX_WORDS", "120")))
+    short_redo_seconds: float = field(default_factory=lambda: float(_env("SHORT_REDO_SECONDS", "55")))
+    short_target_seconds: float = field(default_factory=lambda: float(_env("SHORT_TARGET_SECONDS", "48")))
+    short_tempo_seconds: float = field(default_factory=lambda: float(_env("SHORT_TEMPO_SECONDS", "58")))
+    short_max_tempo: float = field(default_factory=lambda: float(_env("SHORT_MAX_TEMPO", "1.15")))
+    short_max_seconds: float = field(default_factory=lambda: float(_env("SHORT_MAX_SECONDS", "59")))
     gemini_tts_retries: int = field(default_factory=lambda: int(_env("GEMINI_TTS_RETRIES", "5")))
     gemini_tts_backoff_sec: float = field(default_factory=lambda: float(_env("GEMINI_TTS_BACKOFF_SEC", "5")))
     tts_alert_ratio: float = field(default_factory=lambda: float(_env("TTS_ALERT_RATIO", "0.8")))

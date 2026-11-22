@@ -138,6 +138,12 @@ def request_approval(job: Job, store: JobStore, settings: Settings, script: Scri
                      attachments: list[tuple[Path, str]] | None = None) -> Job:
     if job.status != JobStatus.RENDERED:
         raise TelegramError(f"Job {job.id} is {job.status.value}; only rendered jobs can be sent for approval")
+    if job.format == "short":  # last line of defence: a Short over the limit never reaches Telegram
+        from ..daily_v2 import _video_seconds
+
+        secs = max(job.duration_sec or 0.0, _video_seconds(job.video_path) if job.video_path else 0.0)
+        if secs > settings.short_max_seconds:
+            raise TelegramError(f"Short {job.id} is {secs:.1f} s (limit {settings.short_max_seconds:.0f} s); not sent")
     client = _client(settings, client)
     chat = settings.telegram_approver_chat_id
 

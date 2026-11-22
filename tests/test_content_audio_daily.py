@@ -119,7 +119,7 @@ def test_daily_v2_orchestration_with_stubbed_render(settings, store, tmp_path, m
         out.mkdir(parents=True, exist_ok=True)
         (out / "video.mp4").write_bytes(b"0" * 100)
         (out / "captions.srt").write_text("1\n00:00:00,000 --> 00:00:01,000\nx\n")
-        return SimpleNamespace(video=out / "video.mp4", srt=out / "captions.srt", duration=60.0, render_seconds=1.0,
+        return SimpleNamespace(video=out / "video.mp4", srt=out / "captions.srt", duration=48.0 if script.format == "short" else 60.0, render_seconds=1.0,
                                unknown_words=[], voice=f"Kokoro {voice or 'am_michael'}",
                                scene_starts=[i * 15.0 for i in range(len(script.scenes))])
 

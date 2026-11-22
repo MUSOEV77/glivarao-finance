@@ -303,6 +303,14 @@ def _error_body(res, *secrets: str) -> str:
 def run(s, store, live: bool = False, strict: bool = False, session=None) -> Report:
     print("GLIVARAO doctor (key values are never shown)\n")
     r = check_settings(s, store)
+    from .studio.pause import status as pause_status
+
+    st = pause_status(s)
+    if st:
+        r.row("warn", "PRODUCTION", f"PAUSED since {st.get('since')} ({st.get('reason')}); resume: python -m glivarao resume")
+    if live and st:
+        print("\nLIVE TESTS skipped: production is paused (no paid calls while paused)")
+        live = False
     if live:
         live_checks(s, r, session)
     print()

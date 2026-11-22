@@ -282,7 +282,8 @@ def _render_segment(i: int) -> str:
 
 
 def render_animated(script: Script, workdir: Path, settings: Settings, voice: str | None = None,
-                    workers: int | None = None, with_audio_mix: bool = True) -> AnimatedResult:
+                    workers: int | None = None, with_audio_mix: bool = True,
+                    tempo_boost: float = 1.0) -> AnimatedResult:
     t0 = time.time()
     portrait = script.format == "short"
     fw, fh = (PW, PH) if portrait else (W, H)
@@ -292,6 +293,8 @@ def render_animated(script: Script, workdir: Path, settings: Settings, voice: st
     # one narrator for the whole video: approved paid voice if allowed and within budget, else Kokoro backup
     texts = [s.narration for s in script.scenes]
     choice = get_narrator(settings, "\n\n".join(texts), kokoro_voice=voice)
+    if tempo_boost != 1.0 and hasattr(choice.narrator, "speed"):  # Shorts only: atempo on top of the locked speed
+        choice.narrator.speed = choice.narrator.speed * tempo_boost
     narrations, choice = narrate_all(choice, texts, settings, kokoro_voice=voice)
     log.info("narrator: %s", choice.label)
     unknown = sorted({w for n in narrations for w in n.unknown_words})

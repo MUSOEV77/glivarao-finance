@@ -65,6 +65,9 @@ def announce(item, settings, client=None) -> None:
 def plan_next(settings, store, today: date | None = None, research_dir: Path | None = None, send: bool = True,
               client=None):
     """Returns the planned queue item (or the one already waiting), or None if no eligible topic exists."""
+    from .pause import guard
+
+    guard(settings, "planning the next topic")
     from ..daily_v2 import _mark_used, _notify
     from ..research.run import run_research
 

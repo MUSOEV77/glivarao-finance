@@ -15,6 +15,15 @@ def settings(tmp_path):
                     writer="claude_api")
 
 
+@pytest.fixture(autouse=True)
+def _short_voice_estimate(monkeypatch):
+    """No real voicing in tests: a Short's voiced length is estimated at 150 words/min (120 words = 48 s).
+    Tests about the length rules replace this with their own measurements."""
+    from glivarao import daily_v2
+
+    monkeypatch.setattr(daily_v2, "_voice_seconds", lambda script, s, out, tempo=1.0: script.word_count / 150 * 60 / tempo)
+
+
 @pytest.fixture
 def store(settings):
     import json

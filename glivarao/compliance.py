@@ -26,7 +26,7 @@ BANNED_PATTERNS = [
 
 LENGTH_RULES = {  # spoken words at ≈170 wpm (the energetic narrator pace)
     "long": (2550, 3100),   # ~15-18 minutes
-    "short": (75, 110),     # ~40-55 seconds after voicing (SHORT_MAX_WORDS=110; real length checked after voicing)
+    "short": (75, 120),     # 30-55 seconds after voicing (SHORT_MAX_WORDS=120; real length measured before rendering)
 }
 
 

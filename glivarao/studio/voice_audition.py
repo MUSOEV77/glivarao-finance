@@ -67,6 +67,9 @@ def _mp3(audio: np.ndarray, sr: int, dst: Path) -> Path:
 
 def make_samples(settings, store, out_dir: Path, session=None, candidates=CANDIDATES) -> list[dict]:
     """Synthesize every candidate; returns [{voice, speed, wpm_raw, wpm, path, seconds}] (failed voices skipped)."""
+    from .pause import guard
+
+    guard(settings, "voice audition")
     from ..tts.gemini_tts import KOKORO_SR, GeminiTTSNarrator, SpendLedger, apply_tempo, words_per_minute
     from ..tts.voice_lock import ENERGETIC_STYLE, PACES, VoiceUnavailable
 

@@ -1,4 +1,5 @@
-"""Shorts never over 60 s (word cap, measured length, re-voice up to 2x, never sent if still long), Claude-only
+"""Shorts 30-55 s, never over 59 s (120-word cap, voiced length measured BEFORE rendering, re-voice up to 2x, atempo
+up to 1.15x, held if still long, final file checked again, never sent over 59 s), Claude-only
 writer that holds production and retries hourly, remake, and the slow-audio guard. All external calls simulated."""
 import json
 from dataclasses import replace
@@ -29,8 +30,8 @@ def a_short(words=300):
 def test_trim_keeps_hook_and_close():
     _, sh = a_short(300)
     assert sh.word_count > 250
-    t = trim_to_words(sh, 110)
-    assert t.word_count <= 110 and t.scenes[0].narration == sh.scenes[0].narration
+    t = trim_to_words(sh, 120)
+    assert t.word_count <= 120 and t.scenes[0].narration == sh.scenes[0].narration
     assert t.scenes[-1].narration == sh.scenes[-1].narration
     assert words_for(144, 110, 50) == 38 or words_for(144, 110, 50) >= 40
 
@@ -41,8 +42,8 @@ def _render_stub(monkeypatch, durations):
 
     calls = []
 
-    def fake_render(script, out, s, voice=None, workers=None):
-        calls.append(script.word_count)
+    def fake_render(script, out, s, voice=None, workers=None, tempo_boost=1.0):
+        calls.append((script.word_count, tempo_boost))
         out.mkdir(parents=True, exist_ok=True)
         (out / "video.mp4").write_bytes(b"0")
         (out / "captions.srt").write_text("1\n00:00:00,000 --> 00:00:01,000\nx\n")
@@ -70,30 +71,116 @@ CTX = {"writer": "claude", "creator": "", "item_id": None, "date": DAY.isoformat
        "sim": {"summary": "ok", "phrase_overlap": 0.0, "structure_ratio": 0.0}}
 
 
-def test_long_short_is_capped_then_reshortened_and_shows_length(settings, store, monkeypatch):
-    b, sh = a_short(300)
-    calls = _render_stub(monkeypatch, [64.0, 49.0])
+def _voice_stub(monkeypatch, seconds):
+    """Measured voice lengths, one per voicing (a tempo call divides the last raw length by the tempo)."""
+    calls = []
+
+    def voice(script, s, out, tempo=1.0):
+        calls.append((script.word_count, tempo))
+        raw = [c for c in calls if c[1] == 1.0]
+        return seconds[min(len(raw), len(seconds)) - 1] / tempo
+
+    monkeypatch.setattr(daily_v2, "_voice_seconds", voice)
+    return calls
+
+
+def _review_spy(monkeypatch):
     sent = {}
     monkeypatch.setattr("glivarao.publish.telegram.request_approval",
-                        lambda job, st, s, script, checks, **kw: (sent.update(checks=checks),
+                        lambda job, st, s, script, checks, **kw: (sent.update(checks=checks, job=job),
                                                                  st.transition(job, JobStatus.PENDING_APPROVAL, "t")))
-    s = replace(settings, telegram_bot_token="T", telegram_approver_chat_id="42")
-    r = render_and_review(_job(store, s, sh, b), sh, b, [], dict(CTX), s, store, True, 1)
-    assert calls[0] <= 110 and len(calls) == 2 and calls[1] < calls[0]     # capped, then trimmed + re-voiced
-    assert r[2] == "pending_approval" and "LENGTH: 0:49" in sent["checks"] and "limit 0:60" in sent["checks"]
+    return sent
 
 
-def test_short_still_over_60s_is_never_sent(settings, store, monkeypatch):
+def _tg(settings):
+    return replace(settings, telegram_bot_token="T", telegram_approver_chat_id="42")
+
+
+def test_short_script_capped_at_120_words_and_revoiced_before_rendering(settings, store, monkeypatch):
     b, sh = a_short(300)
-    calls = _render_stub(monkeypatch, [144.0, 120.0, 95.0])
+    voiced = _voice_stub(monkeypatch, [64.0, 49.0])
+    renders = _render_stub(monkeypatch, [49.0])
+    sent = _review_spy(monkeypatch)
+    s = _tg(settings)
+    r = render_and_review(_job(store, s, sh, b), sh, b, [], dict(CTX), s, store, True, 1)
+    assert voiced[0][0] <= 120 and len(voiced) == 2 and voiced[1][0] < voiced[0][0]   # capped, trimmed, re-voiced
+    assert renders == [(voiced[1][0], 1.0)]                                       # rendered ONCE, after fitting
+    assert r[2] == "pending_approval" and "LENGTH: 0:49" in sent["checks"] and "limit 0:59" in sent["checks"]
+
+
+def test_short_over_58s_after_two_tries_is_sped_up_at_most_115(settings, store, monkeypatch):
+    b, sh = a_short(300)
+    voiced = _voice_stub(monkeypatch, [70.0, 62.0, 60.0])
+    renders = _render_stub(monkeypatch, [55.0])
+    _review_spy(monkeypatch)
+    s = _tg(settings)
+    r = render_and_review(_job(store, s, sh, b), sh, b, [], dict(CTX), s, store, True, 1)
+    tempo = renders[0][1]
+    assert len([v for v in voiced if v[1] == 1.0]) == 3 and 1.0 < tempo <= 1.15      # 2 re-voices, then atempo
+    assert r[2] == "pending_approval"
+
+
+def test_short_still_over_59s_is_held_not_rendered_and_alerted(settings, store, monkeypatch):
+    b, sh = a_short(300)
+    _voice_stub(monkeypatch, [144.0, 120.0, 95.0])
+    renders = _render_stub(monkeypatch, [45.0])
     alerts = []
     monkeypatch.setattr(daily_v2, "_notify", lambda s, t: alerts.append(t))
     monkeypatch.setattr("glivarao.publish.telegram.request_approval", lambda *a, **k: pytest.fail("sent!"))
-    s = replace(settings, telegram_bot_token="T", telegram_approver_chat_id="42")
+    s = _tg(settings)
     job = _job(store, s, sh, b)
     r = render_and_review(job, sh, b, [], dict(CTX), s, store, True, 1)
-    assert len(calls) == 3 and r[2] == "failed" and store.get(job.id).status == JobStatus.FAILED
-    assert "NOT sent" in alerts[0] and "remake" in alerts[0]
+    assert renders == [] and r[2] == "held" and store.get(job.id).status == JobStatus.SCRIPTED
+    assert job.id in json.loads(store.kv_get("length_held", "{}"))
+    assert "ON HOLD, NOT sent" in alerts[0] and "not rendered" in alerts[0]
+
+
+@pytest.mark.parametrize("final", [30.0, 48.0, 55.0, 59.0, 59.4, 59.6, 61.0, 75.0, 120.0, 144.0])
+def test_no_short_over_59s_is_ever_sent_to_telegram(settings, store, monkeypatch, final):
+    """FAILS if any Short over 59 s reaches Telegram, whatever the voice measurement said."""
+    b, sh = a_short(100)
+    _voice_stub(monkeypatch, [48.0])
+    _render_stub(monkeypatch, [final])
+    monkeypatch.setattr(daily_v2, "_notify", lambda s, t: None)
+    sent = _review_spy(monkeypatch)
+    s = _tg(settings)
+    r = render_and_review(_job(store, s, sh, b), sh, b, [], dict(CTX), s, store, True, 1)
+    if "job" in sent:
+        assert sent["job"].duration_sec <= 59.0, f"a {final} s Short was sent"
+    assert ("job" in sent) == (final <= 59.0) and r[2] == ("pending_approval" if final <= 59.0 else "held")
+
+
+def test_telegram_refuses_a_short_over_59s(settings, store):
+    from glivarao.publish.telegram import TelegramError, request_approval
+
+    job = store.create("short", "x")
+    for st in (JobStatus.SCRIPTED, JobStatus.RENDERED):
+        store.transition(job, st, "t")
+    job.duration_sec = 64.0
+    with pytest.raises(TelegramError, match="limit 59"):
+        request_approval(job, store, _tg(settings), None, "")
+
+
+def test_shorts_check_lists_and_remakes_too_long_shorts(settings, store, monkeypatch, capsys):
+    from glivarao import __main__ as cli
+
+    b, sh = a_short(100)
+    _render_stub(monkeypatch, [45.0])
+    long_one = _job(store, settings, sh, b)
+    for st in (JobStatus.RENDERED, JobStatus.PENDING_APPROVAL):
+        store.transition(long_one, st, "t")
+    long_one = store.get(long_one.id)
+    long_one.video_path = str(settings.output_dir / long_one.id / "video.mp4")
+    store.save(long_one)
+    monkeypatch.setattr(daily_v2, "_video_seconds", lambda p: 128.0 if long_one.id in str(p) else 45.0)
+    monkeypatch.setattr(cli, "_store", lambda s: store)
+    args = SimpleNamespace(remake=False, no_telegram=True)
+    store.kv_set("length_held", json.dumps({long_one.id: {"seconds": 128.0}}))
+    cli.cmd_shorts_check(args, settings)
+    assert "TOO LONG" in capsys.readouterr().out
+    cli.cmd_shorts_check(SimpleNamespace(remake=True, no_telegram=True), settings)
+    out = capsys.readouterr().out
+    assert "remade" in out and store.get(long_one.id).status == JobStatus.REJECTED
 
 
 def test_claude_only_holds_production_and_resumes_hourly(settings, store, monkeypatch, tmp_path):
