@@ -36,7 +36,22 @@ def cmd_doctor(args, s):
         print(json.dumps(s.redacted(), indent=2))
 
 
+LEGACY_MSG = ("this is the old v1 command (no voice lock, no Shorts length rules, no Claude-only rule, no pause "
+              "check). Production uses daily-v2 (timer), remake and shorts-check. For a local dry-run test only: "
+              "GLIVARAO_MODE=dry-run python -m glivarao {cmd} --legacy")
+
+
+def _legacy_allowed(args, s) -> None:
+    """Item 6 of the audit: the v1 pipeline is locked. It runs only in dry-run mode with --legacy, never paid."""
+    from .studio.pause import guard
+
+    guard(s, f"legacy {args.cmd}")
+    if not getattr(args, "legacy", False) or s.mode == "production" or s.allow_paid_apis:
+        raise SystemExit(LEGACY_MSG.format(cmd=args.cmd))
+
+
 def cmd_produce(args, s):
+    _legacy_allowed(args, s)
     from .pipeline import produce
 
     res = produce(s, _store(s), args.format, topic=args.topic, minutes=args.minutes, angle=args.angle or "",
@@ -45,6 +60,7 @@ def cmd_produce(args, s):
 
 
 def cmd_daily(args, s):
+    _legacy_allowed(args, s)
     from .pipeline import daily
 
     for res in daily(s, _store(s), long_minutes=args.long_minutes, tts_provider=args.tts):
@@ -364,7 +380,7 @@ def cmd_resume(args, s):
 
 
 def cmd_claude_quota(args, s):
-    """Is Claude on Vertex usable yet? One tiny real call + quota limits and your increase requests."""
+    """Is the Claude writer usable? One tiny real call (+ Vertex quota limits when WRITER=claude_vertex)."""
     from .daily_v2 import writer_held
     from .scriptgen.vertex_quota import live_test, quota_status
 
@@ -375,7 +391,7 @@ def cmd_claude_quota(args, s):
     else:
         ok, msg = live_test(s)
         print(("OK   " if ok else "WAIT ") + msg)
-    for line in quota_status(s):
+    for line in (quota_status(s) if s.writer == "claude_vertex" else []):
         print(line)
     held = writer_held(_store(s))
     if held:
@@ -661,7 +677,9 @@ def main(argv=None):
     dr.add_argument("--live", action="store_true", help="test Telegram, YouTube, Gemini and Claude with tiny calls")
     dr.add_argument("--config", dest="verbose_config", action="store_true", help="also print the redacted config")
     dr.set_defaults(fn=cmd_doctor)
-    pr = sub.add_parser("produce")
+    pr = sub.add_parser("produce", help="LOCKED old v1 command (dry-run tests only, with --legacy)")
+    pr.add_argument("--legacy", action="store_true")
+    pr.set_defaults(cmd="produce")
     pr.add_argument("--format", choices=["long", "short"], default="short")
     pr.add_argument("--topic")
     pr.add_argument("--minutes", type=float, help="override target length (dry runs default to 2 min)")
@@ -669,7 +687,9 @@ def main(argv=None):
     pr.add_argument("--tts", choices=["elevenlabs", "google", "espeak", "silent"])
     pr.add_argument("--no-approval", action="store_true", help="do not send to Telegram")
     pr.set_defaults(fn=cmd_produce)
-    d = sub.add_parser("daily")
+    d = sub.add_parser("daily", help="LOCKED old v1 command (use daily-v2)")
+    d.add_argument("--legacy", action="store_true")
+    d.set_defaults(cmd="daily")
     d.add_argument("--long-minutes", type=float)
     d.add_argument("--tts", choices=["elevenlabs", "google", "espeak", "silent"])
     d.set_defaults(fn=cmd_daily)
@@ -730,7 +750,7 @@ def main(argv=None):
     pz.add_argument("--status", action="store_true")
     pz.set_defaults(fn=cmd_pause)
     sub.add_parser("resume", help="resume production (explicit approval only)").set_defaults(fn=cmd_resume)
-    sub.add_parser("claude-quota", help="is Claude on Vertex usable yet? (tiny real call + quota status)").set_defaults(
+    sub.add_parser("claude-quota", help="is the Claude writer usable? (tiny real call; Vertex quota status)").set_defaults(
         fn=cmd_claude_quota)
     rm = sub.add_parser("remake", help="make a video again with the current voice and length rules")
     rm.add_argument("job_id")

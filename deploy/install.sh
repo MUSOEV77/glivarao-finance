@@ -24,7 +24,7 @@ if [ "$SRC_DIR" != "$APP_DIR" ]; then
       --exclude=__pycache__ -cf - . | tar -C "$APP_DIR" -xf -
 fi
 cd "$APP_DIR"
-mkdir -p secrets data output logs reports models/kokoro
+mkdir -p secrets data output logs reports
 chown -R glivarao:glivarao /opt/glivarao
 chmod 700 secrets
 find secrets -type f -exec chmod 600 {} + 2>/dev/null || true   # keys: owner-only
@@ -46,10 +46,12 @@ echo "==> voice-note transcription (optional, local and free; model downloads on
 sudo -u glivarao .venv/bin/pip install -q faster-whisper || echo "   faster-whisper not installed: send your input as text"
 sudo -u glivarao .venv/bin/pip install -q pytesseract || true
 
-echo "==> voice model (Kokoro-82M, Apache-2.0, ~350 MB)"
-B=https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0
-[ -f models/kokoro/kokoro-v1.0.onnx ] || sudo -u glivarao curl -fsSL -o models/kokoro/kokoro-v1.0.onnx "$B/kokoro-v1.0.onnx"
-[ -f models/kokoro/voices-v1.0.bin ] || sudo -u glivarao curl -fsSL -o models/kokoro/voices-v1.0.bin "$B/voices-v1.0.bin"
+# The local Kokoro voice model (~350 MB) is no longer downloaded: every video uses the locked Gemini voice and
+# never falls back to another voice. Files from older installs are left in place (nothing is deleted); to free the
+# space yourself: sudo rm -r /opt/glivarao/app/models/kokoro
+if [ -d models/kokoro ] && [ -n "$(ls -A models/kokoro 2>/dev/null)" ]; then
+  echo "   note: models/kokoro ($(du -sh models/kokoro | cut -f1)) is unused; you may delete it to free space"
+fi
 
 echo "==> configuration"
 if [ ! -f .env ]; then

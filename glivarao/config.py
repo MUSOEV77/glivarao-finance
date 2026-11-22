@@ -40,7 +40,9 @@ class Settings:
     mode: str = field(default_factory=lambda: _env("GLIVARAO_MODE", "dry-run"))
     output_dir: Path = field(default_factory=lambda: Path(_env("GLIVARAO_OUTPUT_DIR", "output")))
     db_path: Path = field(default_factory=lambda: Path(_env("GLIVARAO_DB_PATH", "data/glivarao.sqlite3")))
-    fps: int = field(default_factory=lambda: int(_env("GLIVARAO_FPS", "12")))
+    # Output frame rate. The production renderer (render/animated.py) always encodes 24 fps; this setting is
+    # kept equal to it so doctor and reports show the real value (GLIVARAO_FPS in an old .env is ignored).
+    fps: int = 24
 
     # Owner approval switch for anything that costs money (Claude API). Default: off.
     allow_paid_apis: bool = field(default_factory=lambda: _bool("ALLOW_PAID_APIS", False))
@@ -53,14 +55,18 @@ class Settings:
     claude_price_out: float = field(default_factory=lambda: float(_env("CLAUDE_PRICE_OUT_PER_M", "20")))
     claude_spend_ledger_path: str = field(default_factory=lambda: _env("CLAUDE_SPEND_LEDGER_PATH",
                                                                        "data/claude_spend.json"))
-    # Long-script writer: claude_vertex (Claude on Google Vertex AI, service-account JSON) | claude_api
-    # (Anthropic Console key) | free (offline templates). Gemini Pro (same GEMINI_API_KEY) takes over automatically
-    # if the Claude writer fails. One shared Claude cap (CLAUDE_MONTHLY_BUDGET_USD) covers both Claude backends.
-    writer: str = field(default_factory=lambda: _env("WRITER", "claude_vertex"))
-    # none (default): Claude only; if Claude can't write, production is held, you get an alert, it retries hourly.
-    # gemini: Gemini Pro writes instead when Claude fails.
-    writer_fallback: str = field(default_factory=lambda: {"off": "none", "none": "none", "gemini": "gemini"}.get(
-        _env("FALLBACK_WRITER", _env("WRITER_FALLBACK", "off")).lower(), "none"))   # FALLBACK_WRITER=off|gemini
+    # Script writer, Claude ONLY (no other writer, no fallback): claude_openrouter (default; OPENROUTER_API_KEY)
+    # | claude_vertex (Claude on Google Vertex AI; optional switch) | claude_api (Anthropic Console key)
+    # | free (offline templates, development only). One shared Claude cap (CLAUDE_MONTHLY_BUDGET_USD) covers all.
+    # If Claude can't write, production is held, you get one alert a day, and it retries hourly.
+    writer: str = field(default_factory=lambda: _env("WRITER", "claude_openrouter"))
+    openrouter_api_key: str = field(default_factory=lambda: _env("OPENROUTER_API_KEY"))
+    openrouter_model: str = field(default_factory=lambda: _env("OPENROUTER_MODEL", "anthropic/claude-sonnet-5.5"))
+    # OpenRouter list price for Claude Sonnet 5.5: $2 in / $10 out per 1M tokens (checked 2026-11-22). The real
+    # cost reported by OpenRouter is recorded when present; these prices are for the pre-flight cap check.
+    openrouter_price_in: float = field(default_factory=lambda: float(_env("OPENROUTER_PRICE_IN_PER_M", "2")))
+    openrouter_price_out: float = field(default_factory=lambda: float(_env("OPENROUTER_PRICE_OUT_PER_M", "10")))
+    openrouter_effort: str = field(default_factory=lambda: _env("OPENROUTER_EFFORT", "high"))
     vertex_project_id: str = field(default_factory=lambda: _env("VERTEX_PROJECT_ID"))
     vertex_region: str = field(default_factory=lambda: _env("VERTEX_REGION", "global"))
     vertex_model: str = field(default_factory=lambda: _env("VERTEX_MODEL", "claude-sonnet-5-5"))
@@ -68,14 +74,7 @@ class Settings:
                                                                       "secrets/vertex-sa.json"))
     vertex_price_in: float = field(default_factory=lambda: float(_env("VERTEX_PRICE_IN_PER_M", "2")))
     vertex_price_out: float = field(default_factory=lambda: float(_env("VERTEX_PRICE_OUT_PER_M", "10")))
-    gemini_writer_model: str = field(default_factory=lambda: _env("GEMINI_WRITER_MODEL", "gemini-3.1-pro-preview"))
-    gemini_writer_price_in: float = field(default_factory=lambda: float(_env("GEMINI_WRITER_PRICE_IN_PER_M", "2")))
-    gemini_writer_price_out: float = field(default_factory=lambda: float(_env("GEMINI_WRITER_PRICE_OUT_PER_M", "12")))
-    gemini_writer_monthly_budget_usd: float = field(default_factory=lambda: float(_env(
-        "GEMINI_WRITER_MONTHLY_BUDGET_USD", "5")))
     ai_studio_limit_usd: float = field(default_factory=lambda: float(_env("AI_STUDIO_LIMIT_USD", "35")))
-    gemini_writer_ledger_path: str = field(default_factory=lambda: _env("GEMINI_WRITER_LEDGER_PATH",
-                                                                        "data/gemini_writer_spend.json"))
 
     tts_provider: str = field(default_factory=lambda: _env("TTS_PROVIDER", "gemini_tts"))
     kokoro_voice: str = field(default_factory=lambda: _env("KOKORO_VOICE", "am_michael"))

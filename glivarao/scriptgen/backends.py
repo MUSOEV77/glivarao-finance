@@ -1,37 +1,37 @@
-"""Script-writer backends and automatic fallback.
+"""Script-writer backends. Scripts are written ONLY by Claude; there is no other writer and no fallback.
 
-WRITER=claude_vertex (default): Claude Sonnet 5.5 on Google Vertex AI (region global), authenticated with the
-    service-account JSON in VERTEX_CREDENTIALS_FILE (owner-only file, never in Git or logs).
+WRITER=claude_openrouter (default): Claude Sonnet 5.5 through OpenRouter (OPENROUTER_API_KEY), model
+    OPENROUTER_MODEL=anthropic/claude-sonnet-5.5. Structured output (JSON schema), routed only to providers that
+    support it, never to another model. The answer's model is checked to be an anthropic/ model.
+WRITER=claude_vertex: Claude Sonnet 5.5 on Google Vertex AI (optional switch; service-account JSON in
+    VERTEX_CREDENTIALS_FILE, owner-only, never in Git or logs).
 WRITER=claude_api: Claude through an Anthropic Console key (ANTHROPIC_API_KEY).
-WRITER=free: offline template writer only (no paid calls).
+WRITER=free: offline template writer (development only; production never uses it).
 
-If the Claude writer fails for any reason (credentials, quota, outage after the SDK's retries, budget cap,
-refusal, invalid JSON) the same request goes to Gemini Pro (GEMINI_API_KEY) automatically. Both have their own
-monthly caps; the Claude cap is shared by both Claude backends.
-Vertex does not support Anthropic's server-side `fallbacks`, so a refusal there is handled by this Gemini
-fallback instead.
+All Claude backends share one monthly cap (CLAUDE_MONTHLY_BUDGET_USD, $30) and one spend ledger. If Claude can't
+write (key, credits, quota, outage, refusal, bad JSON), production is held, you get one alert a day, and it
+retries hourly.
 """
 from __future__ import annotations
 
-import json
 import logging
 import random
 import time
-from datetime import date
 from pathlib import Path
 
 import requests
 
 log = logging.getLogger(__name__)
-GEMINI_API = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 SCOPES = ["https://www.googleapis.com/auth/cloud-platform"]
+OPENROUTER_API = "https://openrouter.ai/api/v1/chat/completions"
+CLAUDE_BACKENDS = ("claude_openrouter", "claude_vertex", "claude_api")
 
 
 class WriterUnavailable(RuntimeError):
     pass
 
 
-# ------------------------------------------------------------------------------------------- Claude clients
+# ------------------------------------------------------------------------------------------- Anthropic SDK clients
 def vertex_credentials(settings):
     """Service-account credentials from the owner-only JSON file. Errors never include the file contents."""
     from google.oauth2 import service_account
@@ -46,7 +46,7 @@ def vertex_credentials(settings):
 
 
 def claude_client(settings):
-    """(client, platform, model, price_in, price_out) for the configured Claude backend."""
+    """(client, platform, model, price_in, price_out) for the Anthropic-SDK Claude backends (Vertex, API)."""
     import anthropic
 
     if settings.writer == "claude_vertex":
@@ -60,10 +60,12 @@ def claude_client(settings):
             raise WriterUnavailable("ANTHROPIC_API_KEY is not set")
         client = anthropic.Anthropic(api_key=settings.anthropic_api_key, max_retries=3, timeout=600)
         return client, "api", settings.script_model, settings.claude_price_in, settings.claude_price_out
-    raise WriterUnavailable(f"WRITER={settings.writer} has no Claude backend")
+    raise WriterUnavailable(f"WRITER={settings.writer} has no Anthropic-SDK backend")
 
 
 def claude_configured(settings) -> bool:
+    if settings.writer == "claude_openrouter":
+        return bool(settings.openrouter_api_key)
     if settings.writer == "claude_vertex":
         return bool(settings.vertex_project_id and Path(settings.vertex_credentials_file).exists())
     if settings.writer == "claude_api":
@@ -71,87 +73,85 @@ def claude_configured(settings) -> bool:
     return False
 
 
-# ------------------------------------------------------------------------------------------- Gemini writer
-class GeminiWriterLedger:
-    def __init__(self, path: Path):
-        self.path = Path(path)
-
-    def _load(self) -> dict:
-        return json.loads(self.path.read_text()) if self.path.exists() else {}
-
-    def spent(self, month: str | None = None) -> float:
-        return float(self._load().get(month or date.today().strftime("%Y-%m"), {}).get("usd", 0.0))
-
-    def add(self, usd: float, tin: int, tout: int) -> None:
-        data = self._load()
-        row = data.setdefault(date.today().strftime("%Y-%m"), {"usd": 0.0, "input_tokens": 0, "output_tokens": 0,
-                                                              "requests": 0})
-        row["usd"] = round(row["usd"] + usd, 6)
-        row["input_tokens"] += tin
-        row["output_tokens"] += tout
-        row["requests"] += 1
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(data, indent=2))
+# ------------------------------------------------------------------------------------------- OpenRouter
+HINTS = {401: "OPENROUTER_API_KEY is invalid or revoked (set it again: deploy/set-key.sh OPENROUTER_API_KEY)",
+         402: "OpenRouter credits are used up (add credits at openrouter.ai/settings/credits)",
+         403: "the request was blocked by OpenRouter moderation or the key's limits",
+         404: "model not found on OpenRouter (check OPENROUTER_MODEL)"}
 
 
-def gemini_write(settings, system: str, prompt: str, schema: dict, fmt: str, session=None,
-                 sleep=time.sleep) -> dict:
-    """One JSON script from Gemini Pro (structured output), with retries and its own monthly cap."""
-    if not (settings.allow_paid_apis and settings.gemini_api_key):
-        raise WriterUnavailable("Gemini fallback needs ALLOW_PAID_APIS=true and GEMINI_API_KEY")
-    ledger = GeminiWriterLedger(Path(settings.gemini_writer_ledger_path))
-    est_out = 24000 if fmt == "long" else 6000
-    est = (len(prompt) + len(system)) / 3.5 * settings.gemini_writer_price_in / 1e6 + \
-        est_out * settings.gemini_writer_price_out / 1e6
-    if ledger.spent() + est > settings.gemini_writer_monthly_budget_usd:
-        raise WriterUnavailable(f"Gemini writer monthly budget: ${ledger.spent():.2f} spent + ~${est:.2f} > "
-                                f"${settings.gemini_writer_monthly_budget_usd:.2f}")
+def openrouter_chat(settings, system: str, prompt: str, max_tokens: int, schema: dict | None = None,
+                    effort: str | None = None, session=None, sleep=time.sleep, attempts: int = 4) -> tuple[str, dict]:
+    """One Claude answer through OpenRouter: (text, usage). usage has prompt/completion tokens and OpenRouter's
+    own cost in USD when it reports it. Retries 408/429/5xx with backoff; anything else raises WriterUnavailable.
+    The key goes only in the Authorization header and never appears in errors or logs."""
+    if not settings.openrouter_api_key:
+        raise WriterUnavailable("OPENROUTER_API_KEY is not set (deploy/set-key.sh OPENROUTER_API_KEY)")
+    model = settings.openrouter_model
+    if not model.startswith("anthropic/"):
+        raise WriterUnavailable(f"OPENROUTER_MODEL={model!r} is not a Claude model (Claude only)")
+    body: dict = {"model": model, "max_tokens": max_tokens,
+                  "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}],
+                  "usage": {"include": True},
+                  # never silently route to a provider that would ignore the JSON schema
+                  "provider": {"require_parameters": True, "allow_fallbacks": True}}
+    if schema is not None:
+        body["response_format"] = {"type": "json_schema",
+                                   "json_schema": {"name": "script", "strict": True, "schema": schema}}
+    if effort:
+        body["reasoning"] = {"effort": effort}
     http = session or requests.Session()
-    body = {"systemInstruction": {"parts": [{"text": system}]},
-            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-            "generationConfig": {"responseMimeType": "application/json", "responseJsonSchema": schema,
-                                 "maxOutputTokens": 32768}}
     last = ""
-    for attempt in range(4):
+    for attempt in range(attempts):
         if attempt:
             sleep(min(60.0, 5.0 * 2 ** (attempt - 1)) + random.uniform(0, 1))
         try:
-            r = http.post(GEMINI_API.format(model=settings.gemini_writer_model),
-                          headers={"x-goog-api-key": settings.gemini_api_key}, json=body, timeout=600)
+            r = http.post(OPENROUTER_API, headers={"Authorization": f"Bearer {settings.openrouter_api_key}",
+                                                   "Content-Type": "application/json"},
+                          json=body, timeout=(30, 900))
         except requests.RequestException as exc:
             last = f"network error: {type(exc).__name__}"
-            continue
-        if r.status_code == 400 and "responseJsonSchema" in body["generationConfig"]:
-            # older Pro models: plain JSON mode, schema described in the prompt instead
-            body["generationConfig"].pop("responseJsonSchema")
-            body["contents"][0]["parts"][0]["text"] = (prompt + "\n\nReturn ONLY JSON that matches this JSON "
-                                                       "schema:\n" + json.dumps(schema))
-            last = "HTTP 400 (retrying without the schema field)"
             continue
         if r.status_code in (408, 429, 500, 502, 503, 504):
             last = f"HTTP {r.status_code}"
             continue
         if r.status_code != 200:
-            raise WriterUnavailable(f"Gemini writer HTTP {r.status_code}" + (
-                " (Gemini prepay balance empty: buy credits on the AI Studio Billing page)"
-                if r.status_code == 402 else ""))
-        data = r.json()
-        u = data.get("usageMetadata", {})
-        tin = int(u.get("promptTokenCount", 0))
-        tout = int(u.get("candidatesTokenCount", 0)) + int(u.get("thoughtsTokenCount", 0))
-        ledger.add(tin * settings.gemini_writer_price_in / 1e6 + tout * settings.gemini_writer_price_out / 1e6,
-                   tin, tout)
+            msg = ""
+            try:
+                msg = str(r.json().get("error", {}).get("message", ""))[:200]
+            except Exception:  # noqa: BLE001
+                pass
+            msg = msg.replace(settings.openrouter_api_key, "***")
+            raise WriterUnavailable(f"OpenRouter HTTP {r.status_code}"
+                                    + (f": {HINTS[r.status_code]}" if r.status_code in HINTS else "")
+                                    + (f" ({msg})" if msg else ""))
         try:
-            cand = data["candidates"][0]
-            if cand.get("finishReason") not in (None, "STOP"):
-                raise WriterUnavailable(f"Gemini writer stopped early ({cand.get('finishReason')})")
-            text = "".join(p.get("text", "") for p in cand["content"]["parts"] if not p.get("thought"))
-            return json.loads(text)
-        except (KeyError, IndexError, json.JSONDecodeError) as exc:
-            last = f"unusable answer ({type(exc).__name__})"
+            data = r.json()
+        except ValueError:
+            last = "unreadable answer"
             continue
-    raise WriterUnavailable(f"Gemini writer unavailable after 4 attempts ({last})")
+        if "error" in data and not data.get("choices"):  # some upstream errors arrive with HTTP 200
+            last = f"upstream error {str(data['error'].get('code', ''))}".strip()
+            continue
+        served = str(data.get("model", model))
+        if not served.startswith("anthropic/"):
+            raise WriterUnavailable(f"OpenRouter answered with {served!r}, not Claude; answer discarded")
+        u = data.get("usage") or {}
+        usage = {"prompt_tokens": int(u.get("prompt_tokens") or 0),
+                 "completion_tokens": int(u.get("completion_tokens") or 0),
+                 "cost": u.get("cost"), "model": served}
+        try:
+            choice = data["choices"][0]
+        except (KeyError, IndexError):
+            last = "answer without choices"
+            continue
+        usage["finish_reason"] = choice.get("finish_reason") or choice.get("native_finish_reason") or ""
+        msg = choice.get("message") or {}
+        if msg.get("refusal"):
+            usage["finish_reason"] = "refusal"
+        return str(msg.get("content") or ""), usage
+    raise WriterUnavailable(f"OpenRouter unavailable after {attempts} attempts ({last})")
 
 
-__all__ = ["claude_client", "claude_configured", "gemini_write", "vertex_credentials", "WriterUnavailable",
-           "GeminiWriterLedger"]
+__all__ = ["claude_client", "claude_configured", "openrouter_chat", "vertex_credentials", "WriterUnavailable",
+           "CLAUDE_BACKENDS", "OPENROUTER_API"]

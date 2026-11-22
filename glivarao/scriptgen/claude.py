@@ -92,7 +92,7 @@ def _request(client, settings: Settings, ledger: ClaudeSpendLedger, prompt: str,
                   output_config={"effort": "high", "format": {"type": "json_schema", "schema": SCRIPT_SCHEMA}},
                   system=SYSTEM_PROMPT, messages=[{"role": "user", "content": prompt}])
     # Streaming avoids HTTP timeouts on long outputs. On the Claude API, server-side fallback re-runs a declined
-    # request on another model; Vertex has no server-side fallbacks, so there a refusal goes to the Gemini writer.
+    # request on another Claude model; Vertex has no server-side fallbacks, so there a refusal holds production.
     if platform == "api":
         stream = client.beta.messages.stream(betas=["server-side-fallback-2026-07-01"], fallbacks="default", **kwargs)
     else:
@@ -118,15 +118,50 @@ def _request(client, settings: Settings, ledger: ClaudeSpendLedger, prompt: str,
 LAST_WRITER: dict = {"name": "", "note": ""}   # which backend wrote the most recent script (shown in the review)
 
 
+def _parse_json(text: str) -> dict:
+    t = text.strip()
+    if t.startswith("```"):  # tolerate a fenced answer
+        t = t.split("\n", 1)[1] if "\n" in t else t
+        t = t.rsplit("```", 1)[0]
+    try:
+        return json.loads(t)
+    except json.JSONDecodeError as exc:
+        raise ScriptGenerationError(f"Invalid JSON from model: {exc}") from exc
+
+
+def _request_openrouter(settings: Settings, ledger: ClaudeSpendLedger, prompt: str, fmt: str, session=None) -> dict:
+    """Same prompts, schema and rules as the other Claude backends, through OpenRouter."""
+    from .backends import openrouter_chat
+
+    p_in, p_out = settings.openrouter_price_in, settings.openrouter_price_out
+    _check_budget(settings, ledger, len(prompt), fmt, p_in, p_out)
+    text, u = openrouter_chat(settings, SYSTEM_PROMPT, prompt, MAX_TOKENS, schema=SCRIPT_SCHEMA,
+                              effort=settings.openrouter_effort or None, session=session)
+    tin, tout = u["prompt_tokens"], u["completion_tokens"]
+    usd = float(u["cost"]) if u.get("cost") is not None else tin * p_in / 1e6 + tout * p_out / 1e6
+    ledger.add(usd, tin, tout)  # billed even when the output is unusable
+    log.info("Claude (OpenRouter %s) usage: in=%s out=%s cost=$%.3f (month: $%.2f of $%.2f)", u.get("model"), tin,
+             tout, usd, ledger.spent(), settings.claude_monthly_budget_usd)
+    if u.get("finish_reason") in ("refusal", "content_filter"):
+        raise ScriptGenerationError("Model declined the request")
+    if u.get("finish_reason") in ("length", "max_tokens"):
+        raise ScriptGenerationError("Script truncated at max_tokens")
+    return _parse_json(text)
+
+
 def _ask(settings: Settings, prompt: str, fmt: str, client=None, ledger: ClaudeSpendLedger | None = None) -> dict:
-    """Claude first (Vertex or Anthropic API, per WRITER); Gemini Pro automatically if Claude fails."""
+    """Claude only (OpenRouter, Vertex or Anthropic API, per WRITER). Any failure raises ClaudeUnavailable:
+    production is held and retried hourly; no other writer is ever used."""
     import anthropic
 
-    from .backends import WriterUnavailable, claude_client, gemini_write
+    from .backends import WriterUnavailable, claude_client
 
     ledger = ledger or ClaudeSpendLedger(Path(settings.claude_spend_ledger_path))
-    why = ""
     try:
+        if settings.writer == "claude_openrouter":  # `client` (tests) is the HTTP session
+            data = _request_openrouter(settings, ledger, prompt, fmt, session=client)
+            LAST_WRITER.update(name=f"Claude {settings.openrouter_model} (OpenRouter)", note="")
+            return data
         if client is not None:  # injected (tests): treat as the configured platform
             platform = "vertex" if settings.writer == "claude_vertex" else "api"
             model = settings.vertex_model if platform == "vertex" else settings.script_model
@@ -139,42 +174,14 @@ def _ask(settings: Settings, prompt: str, fmt: str, client=None, ledger: ClaudeS
         LAST_WRITER.update(name=f"Claude {model} ({'Vertex AI' if platform == 'vertex' else 'Anthropic API'})",
                            note="")
         return data
-    except ClaudeBudgetExceeded as exc:
-        why = str(exc)
-    except (ScriptGenerationError, WriterUnavailable) as exc:
+    except (ScriptGenerationError, WriterUnavailable) as exc:  # includes the monthly cap
         why = str(exc)
     except anthropic.APIError as exc:  # auth, quota, outage after the SDK's own retries
         why = f"{type(exc).__name__}: {getattr(exc, 'status_code', '')}".strip()
     except Exception as exc:  # noqa: BLE001  e.g. google-auth token refresh failures
         why = f"{type(exc).__name__}"
-    if getattr(settings, "writer_fallback", "none") != "gemini":
-        log.warning("Claude writer failed (%s); no fallback writer (Claude only): holding production", why)
-        raise ClaudeUnavailable(why)
-    log.warning("Claude writer failed (%s); using the Gemini Pro fallback", why)
-    try:
-        data = gemini_write(settings, SYSTEM_PROMPT, prompt, SCRIPT_SCHEMA, fmt)
-    except WriterUnavailable as exc:
-        raise ScriptGenerationError(f"Claude failed ({why}) and the Gemini fallback failed ({exc})") from None
-    LAST_WRITER.update(name=f"Gemini {settings.gemini_writer_model} (fallback)", note=why)
-    _fallback_alert(settings, why)
-    return data
-
-
-def _fallback_alert(settings: Settings, why: str) -> None:
-    """One Telegram alert per day when the fallback writer had to step in."""
-    try:
-        from ..publish.telegram import notify
-        from ..storage import JobStore
-
-        store = JobStore(settings.db_path)
-        key = f"writer_fallback_alert:{date.today().isoformat()}"
-        if store.kv_get(key):
-            return
-        store.kv_set(key, "1")
-        notify(settings, f"✍️ GLIVARAO: the Claude writer failed ({why[:200]}); Gemini Pro wrote today's script "
-                         "instead. Check: python -m glivarao doctor --live")
-    except Exception:  # noqa: BLE001  an alert must never break production
-        log.exception("could not send the writer fallback alert")
+    log.warning("Claude writer failed (%s); Claude only: holding production", why)
+    raise ClaudeUnavailable(why)
 
 
 def _to_script(data: dict, fmt: str, topic: str) -> Script:

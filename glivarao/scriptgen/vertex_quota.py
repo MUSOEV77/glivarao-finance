@@ -19,9 +19,20 @@ API = "https://cloudquotas.googleapis.com/v1"
 
 
 def live_test(settings) -> tuple[bool, str]:
-    from .backends import WriterUnavailable, claude_client
+    from .backends import WriterUnavailable, claude_client, openrouter_chat
     from .claude import ClaudeSpendLedger, usage_cost
 
+    if settings.writer == "claude_openrouter":
+        try:
+            text, u = openrouter_chat(settings, "You are a test.", "Reply with the single word OK.", max_tokens=16,
+                                      attempts=2)
+            tin, tout = u["prompt_tokens"], u["completion_tokens"]
+            usd = float(u["cost"]) if u.get("cost") is not None else (
+                tin * settings.openrouter_price_in + tout * settings.openrouter_price_out) / 1e6
+            ClaudeSpendLedger(Path(settings.claude_spend_ledger_path)).add(usd, tin, tout)
+            return True, f"Claude {u.get('model')} via OpenRouter answered '{text.strip()[:20]}' (${usd:.5f})"
+        except WriterUnavailable as exc:
+            return False, str(exc)
     try:
         client, platform, model, p_in, p_out = claude_client(settings)
         msg = client.messages.create(model=model, max_tokens=256, output_config={"effort": "low"},

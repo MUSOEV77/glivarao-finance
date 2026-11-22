@@ -199,7 +199,7 @@ def test_claude_only_holds_production_and_resumes_hourly(settings, store, monkey
         return json.loads(script_json(25, 112) if fmt == "long" else script_json(4, 25))
 
     monkeypatch.setattr(C, "_ask", ask)
-    s = replace(settings, allow_paid_apis=True, writer="claude_vertex", writer_fallback="none",
+    s = replace(settings, allow_paid_apis=True, writer="claude_vertex",
                 creator_input_wait_hours=0)
     rdir = tmp_path / "r"
     rdir.mkdir()
@@ -260,13 +260,8 @@ def test_abnormally_slow_tts_is_requested_again(tmp_path):
 def test_fallback_writer_setting_and_production_never_uses_templates(settings, store, monkeypatch):
     from glivarao.config import Settings
 
-    monkeypatch.setenv("FALLBACK_WRITER", "off")
-    assert Settings().writer_fallback == "none"
-    monkeypatch.setenv("FALLBACK_WRITER", "gemini")
-    assert Settings().writer_fallback == "gemini"
-    monkeypatch.delenv("FALLBACK_WRITER")
-    monkeypatch.delenv("WRITER_FALLBACK", raising=False)
-    assert Settings().writer_fallback == "none"                      # default: off
+    monkeypatch.setenv("FALLBACK_WRITER", "gemini")                  # an old .env setting is simply ignored
+    assert not hasattr(Settings(), "writer_fallback")
     alerts = []
     monkeypatch.setattr(daily_v2, "_notify", lambda s, t: alerts.append(t))
     prod = replace(settings, mode="production", allow_paid_apis=False, writer="claude_vertex")

@@ -97,14 +97,23 @@ def check_settings(s, store) -> Report:
     print("\nPAID SERVICES (all capped in code)")
     r.check(s.allow_paid_apis, "ALLOW_PAID_APIS", "true", "false -> deploy/set-key.sh ALLOW_PAID_APIS true",
             bad="MISSING")
-    _key(r, "GEMINI_API_KEY (voice, images, fallback writer)", s.gemini_api_key, GOOGLE_KEY,
+    _key(r, "GEMINI_API_KEY (voice, images)", s.gemini_api_key, GOOGLE_KEY,
          "deploy/set-key.sh GEMINI_API_KEY")
     _key(r, "YOUTUBE_API_KEY (competitor research)", s.youtube_api_key, GOOGLE_KEY, "deploy/set-key.sh YOUTUBE_API_KEY")
 
     print("\nSCRIPT WRITER")
-    r.check(s.writer in ("claude_vertex", "claude_api", "free"), "WRITER", s.writer,
-            f"{s.writer!r} -> claude_vertex | claude_api | free")
-    if s.writer == "claude_vertex":
+    r.check(s.writer in ("claude_openrouter", "claude_vertex", "claude_api", "free"), "WRITER", s.writer,
+            f"{s.writer!r} -> claude_openrouter | claude_vertex | claude_api | free")
+    if s.writer == "free":
+        r.row("warn", "WRITER", "free = offline templates (development only); production holds instead of using them")
+    if s.writer == "claude_openrouter":
+        _key(r, "OPENROUTER_API_KEY", s.openrouter_api_key, re.compile(r"^sk-or-[A-Za-z0-9_-]{20,}$"),
+             "deploy/set-key.sh OPENROUTER_API_KEY")
+        r.check(s.openrouter_model.startswith("anthropic/claude-"), "OPENROUTER_MODEL", s.openrouter_model,
+                f"{s.openrouter_model!r} is not a Claude model (Claude only) -> anthropic/claude-sonnet-5.5")
+        r.row("info", "OpenRouter price / effort", f"${s.openrouter_price_in:g} in / ${s.openrouter_price_out:g} out "
+              f"per 1M tokens (pre-flight cap check; real cost recorded), effort {s.openrouter_effort or 'default'}")
+    elif s.writer == "claude_vertex":
         _key(r, "VERTEX_PROJECT_ID", s.vertex_project_id, GCP_PROJECT, "deploy/set-vertex-key.sh sets it")
         r.check(s.vertex_region in ("global", "us", "eu"), "VERTEX_REGION", s.vertex_region,
                 f"{s.vertex_region!r} -> global, us or eu (Claude Sonnet 5.5 endpoints)")
@@ -127,14 +136,17 @@ def check_settings(s, store) -> Report:
             r.check(perm in ("600", "400"), "key file permissions", "600 (owner only)", f"{perm} -> chmod 600 {kf}")
     elif s.writer == "claude_api":
         _key(r, "ANTHROPIC_API_KEY", s.anthropic_api_key, re.compile(r"^sk-ant-"), "deploy/set-key.sh ANTHROPIC_API_KEY")
-    r.row("ok", "FALLBACK_WRITER",
-          "off: Claude only (held + hourly retry + one alert a day if Claude can't write)" if s.writer_fallback == "none"
-          else f"gemini: Gemini {s.gemini_writer_model} writes if Claude fails")
+    r.row("ok", "writer rule", "Claude only: no fallback writer (held + hourly retry + one alert a day if Claude "
+          "can't write)")
+    if os.environ.get("FALLBACK_WRITER", os.environ.get("WRITER_FALLBACK", "off")).lower() not in ("", "off", "none"):
+        r.row("warn", "FALLBACK_WRITER", "set in .env but ignored: the Gemini writer was removed (Claude only)")
     held = json.loads(store.kv_get("writer_held", "{}"))
     if held:
         r.row("warn", "production", f"on hold since {held.get('since')}: Claude unavailable ({held.get('reason', '')[:80]})")
-    r.row("info", "Shorts length", f"max {s.short_max_words} words; re-voiced if over {s.short_redo_seconds:g} s; "
-          f"never sent over {s.short_max_seconds:g} s")
+    r.row("info", "Shorts length", f"max {s.short_max_words} words; voiced and measured before rendering; over "
+          f"{s.short_redo_seconds:g} s re-voiced (2x); over {s.short_tempo_seconds:g} s sped up (max "
+          f"x{s.short_max_tempo:g}); held over {s.short_max_seconds:g} s; never sent over {s.short_max_seconds:g} s")
+    r.row("info", "frame rate", f"{s.fps} fps (long 1920x1080, Shorts 1080x1920)")
 
     print("\nVOICE (locked)")
     try:
@@ -164,10 +176,9 @@ def check_settings(s, store) -> Report:
           "scenes per long video")
 
     print("\nMONTHLY CAPS (alert at {:.0%})".format(s.spend_alert_ratio))
-    gemini_total = s.tts_monthly_budget_usd + s.image_monthly_budget_usd + s.gemini_writer_monthly_budget_usd
+    gemini_total = s.tts_monthly_budget_usd + s.image_monthly_budget_usd
     for name, cap in (("Claude (writer)", s.claude_monthly_budget_usd), ("Gemini voice", s.tts_monthly_budget_usd),
-                      ("Gemini images", s.image_monthly_budget_usd),
-                      ("Gemini fallback writer", s.gemini_writer_monthly_budget_usd)):
+                      ("Gemini images", s.image_monthly_budget_usd)):
         r.check(cap > 0, name, f"${cap:g}", f"${cap:g} -> must be above 0")
     r.check(gemini_total <= s.ai_studio_limit_usd, "AI Studio spend limit",
             f"${s.ai_studio_limit_usd:g} covers the Gemini caps (${gemini_total:g})",
@@ -233,8 +244,6 @@ def live_checks(s, r: Report, session=None) -> None:
         base = "https://generativelanguage.googleapis.com/v1beta/models/"
         hdr = {"x-goog-api-key": s.gemini_api_key}
         models = [("Gemini voice model", s.gemini_tts_model), ("Gemini image model", s.image_model)]
-        if s.writer_fallback == "gemini":
-            models.append(("Gemini fallback writer", s.gemini_writer_model))
         for label, model in models:
             try:
                 res = http.get(base + model, headers=hdr, timeout=30)
@@ -242,11 +251,6 @@ def live_checks(s, r: Report, session=None) -> None:
             except Exception as exc:  # noqa: BLE001
                 say(False, label, "", f"network error {type(exc).__name__}")
         try:
-            res = http.get(base.rstrip("/"), params={"pageSize": 200}, headers=hdr, timeout=30)
-            if res.status_code == 200 and s.writer_fallback == "gemini":
-                pros = sorted(m["name"].split("/")[-1] for m in res.json().get("models", [])
-                              if "pro" in m["name"] and "generateContent" in m.get("supportedGenerationMethods", []))
-                r.row("info", "Pro models for your key", ", ".join(pros[:8]) or "none")
             # billing check on the VOICE model (Gemini is used only for voice and images): a one-word clip
             res = http.post(base + s.gemini_tts_model + ":generateContent", headers=hdr, timeout=60, json={
                 "contents": [{"parts": [{"text": "OK."}]}],
@@ -261,6 +265,8 @@ def live_checks(s, r: Report, session=None) -> None:
                 print("        full error from Google:\n" + _error_body(res, s.gemini_api_key))
         except Exception as exc:  # noqa: BLE001
             say(False, "Gemini test answer", "", f"network error {type(exc).__name__}")
+    if s.writer == "claude_openrouter":
+        openrouter_live(s, r, http)
     if s.writer in ("claude_vertex", "claude_api"):
         try:
             from .scriptgen.backends import claude_client
@@ -279,13 +285,42 @@ def live_checks(s, r: Report, session=None) -> None:
             name = type(exc).__name__
             if "RateLimit" in name or "429" in str(exc):
                 hint = (" (Vertex quota for anthropic-claude-sonnet is 0 or used up in region "
-                        f"{s.vertex_region}: run deploy/vertex-quota.sh in Cloud Shell; until then Gemini Pro writes)")
+                        f"{s.vertex_region}: run deploy/vertex-quota.sh in Cloud Shell, or switch: WRITER=claude_openrouter)")
             elif "PermissionDenied" in name or "403" in str(exc):
                 hint = " (grant the service account 'Vertex AI User'; enable Claude Sonnet 5.5 in Model Garden)"
             elif "NotFound" in name or "404" in str(exc):
                 hint = " (model not enabled for this project/region in Vertex AI Model Garden?)"
             say(False, "Claude writer", "", f"{name}{hint}")
             print("        full error:\n        " + str(exc)[:1500].replace("\n", "\n        "))
+
+
+def openrouter_live(s, r: Report, http=None) -> None:
+    """Tiny real OpenRouter call (a few tokens, well under a cent, counted in the Claude cap) + the key's credit."""
+    from .scriptgen.backends import WriterUnavailable, openrouter_chat
+    from .scriptgen.claude import ClaudeSpendLedger
+
+    try:
+        text, u = openrouter_chat(s, "You are a test.", "Reply with the single word OK.", max_tokens=16,
+                                  session=http, attempts=2)
+        tin, tout = u["prompt_tokens"], u["completion_tokens"]
+        usd = float(u["cost"]) if u.get("cost") is not None else (tin * s.openrouter_price_in
+                                                                    + tout * s.openrouter_price_out) / 1e6
+        ClaudeSpendLedger(Path(s.claude_spend_ledger_path)).add(usd, tin, tout)
+        r.check(bool(text.strip()), "Claude (OpenRouter)", f"{u.get('model')} answered '{text.strip()[:20]}' "
+                f"(${usd:.5f})", f"{u.get('model')} gave an empty answer ({u.get('finish_reason')})")
+    except WriterUnavailable as exc:
+        r.check(False, "Claude (OpenRouter)", "", str(exc)[:300])
+    try:
+        res = (http or __import__("requests")).get("https://openrouter.ai/api/v1/key", timeout=30,
+                                                    headers={"Authorization": f"Bearer {s.openrouter_api_key}"})
+        if res.status_code == 200:
+            d = res.json().get("data", {})
+            lim = d.get("limit_remaining")
+            r.row("info", "OpenRouter key", f"used ${float(d.get('usage') or 0):.2f}"
+                  + (f", ${float(lim):.2f} left on the key's limit" if lim is not None else ", no key limit set")
+                  + " (credit balance: openrouter.ai/settings/credits)")
+    except Exception:  # noqa: BLE001  informational only
+        pass
 
 
 def _error_body(res, *secrets: str) -> str:

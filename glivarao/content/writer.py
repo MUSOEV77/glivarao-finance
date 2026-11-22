@@ -283,14 +283,9 @@ def with_house_description(b: Brief, script: Script) -> Script:
 
 
 def paid_writer_allowed(settings: Settings) -> bool:
-    """A paid writer can run: Claude (Vertex or API, per WRITER) or, failing that, the Gemini Pro fallback."""
-    if not settings.allow_paid_apis or settings.writer == "free":
-        return False
-    if getattr(settings, "writer_fallback", "none") != "gemini":
-        return True  # Claude only: if it isn't usable, production is held (never the free template writer)
-    from ..scriptgen.backends import claude_configured
-
-    return claude_configured(settings) or bool(settings.gemini_api_key)
+    """Claude may run (paid use approved and a Claude WRITER). Whether Claude then works is decided by the call
+    itself: if it can't write, production is held (never the free template writer)."""
+    return bool(settings.allow_paid_apis) and settings.writer != "free"
 
 
 __all__ = ["write_long_free", "write_shorts_free", "write_with_claude", "paid_writer_allowed"]

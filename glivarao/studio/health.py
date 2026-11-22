@@ -14,19 +14,17 @@ from pathlib import Path
 
 def _spend(settings) -> list[tuple[str, float, float]]:
     from ..art.gemini_image import ImageLedger
-    from ..scriptgen.backends import GeminiWriterLedger
     from ..scriptgen.claude import ClaudeSpendLedger
     from ..tts.gemini_tts import SpendLedger
 
     m = date.today().strftime("%Y-%m")
-    return [("Voice (Gemini Charon)", SpendLedger(Path(settings.tts_spend_ledger_path)).spent(m),
+    via = {"claude_openrouter": " via OpenRouter", "claude_vertex": " on Vertex"}.get(settings.writer, "")
+    return [(f"Voice (Gemini {settings.gemini_tts_voice})", SpendLedger(Path(settings.tts_spend_ledger_path)).spent(m),
              settings.tts_monthly_budget_usd),
-            (f"Scripts (Claude{' on Vertex' if settings.writer == 'claude_vertex' else ''})", ClaudeSpendLedger(Path(settings.claude_spend_ledger_path)).spent(m),
+            (f"Scripts (Claude{via})", ClaudeSpendLedger(Path(settings.claude_spend_ledger_path)).spent(m),
              settings.claude_monthly_budget_usd),
             ("Images (Nano Banana)", ImageLedger(Path(settings.image_spend_ledger_path)).spent(m),
-             settings.image_monthly_budget_usd),
-            ("Fallback writer (Gemini Pro)", GeminiWriterLedger(Path(settings.gemini_writer_ledger_path)).spent(m),
-             settings.gemini_writer_monthly_budget_usd)]
+             settings.image_monthly_budget_usd)]
 
 
 def spend_alerts(settings, store) -> list[str]:

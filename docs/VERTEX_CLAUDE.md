@@ -1,3 +1,6 @@
+> **Optional since 2026-11-22.** The default writer is Claude through OpenRouter (`docs/OPENROUTER_CLAUDE.md`).
+> Vertex gave this project 0 Claude quota. Use this page only if you switch back with `WRITER=claude_vertex`.
+
 # Claude on Vertex AI (the script writer)
 
 The long-script writer is **Claude Sonnet 5.5 on Google Vertex AI** (`WRITER=claude_vertex`, region `global`). It
