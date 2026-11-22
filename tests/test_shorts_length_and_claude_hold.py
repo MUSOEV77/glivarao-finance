@@ -106,6 +106,10 @@ def test_short_script_capped_at_120_words_and_revoiced_before_rendering(settings
     assert voiced[0][0] <= 120 and len(voiced) == 2 and voiced[1][0] < voiced[0][0]   # capped, trimmed, re-voiced
     assert renders == [(voiced[1][0], 1.0)]                                       # rendered ONCE, after fitting
     assert r[2] == "pending_approval" and "LENGTH: 0:49" in sent["checks"] and "limit 0:59" in sent["checks"]
+    from glivarao.models import Script
+
+    final = Script.model_validate_json(open(sent["job"].script_path).read())
+    assert "[AFFILIATE: " in final.description and "http" not in final.description.split("[AFFILIATE")[1][:60]
 
 
 def test_short_over_58s_after_two_tries_is_sped_up_at_most_115(settings, store, monkeypatch):

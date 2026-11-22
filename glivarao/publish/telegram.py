@@ -227,6 +227,26 @@ def poll_decisions(store: JobStore, settings: Settings, client: TelegramClient |
                 client.call("answerCallbackQuery", callback_query_id=cq["id"], text="Could not lock that voice")
                 client.call("sendMessage", chat_id=chat_id, text=f"⚠️ Voice not changed: {str(exc)[:200]}")
             continue
+        if action in ("launch", "launchedit"):  # the US-only launch list
+            from ..studio import launch_plan
+
+            if action == "launch" and job_id == launch_plan.VERSION:
+                launch_plan.approve(store)
+                client.call("answerCallbackQuery", callback_query_id=cq["id"], text="Launch list approved")
+                client.call("sendMessage", chat_id=chat_id, text=(
+                    f"✅ Launch list approved ({len(launch_plan.LAUNCH)} US-only videos, starting with "
+                    f"\"{launch_plan.LAUNCH[0].topic}\"). Production is still PAUSED: nothing is made until you "
+                    "send resume."))
+                decisions.append((job_id, "launch_approved"))
+            elif action == "launch":
+                client.call("answerCallbackQuery", callback_query_id=cq["id"], text="That list is out of date")
+            else:
+                client.call("answerCallbackQuery", callback_query_id=cq["id"], text="OK")
+                client.call("sendMessage", chat_id=chat_id, text=(
+                    "✏️ Tell Claude (in your Claude Code session) which videos to change, drop or reorder; a new list "
+                    "will be sent here for approval. Nothing is planned until you approve a list."))
+                decisions.append(("launch", "changes_requested"))
+            continue
         if action == "thumb":  # thumbnail choice (long videos)
             jid, _, n = job_id.rpartition(":")
             try:

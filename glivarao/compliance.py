@@ -24,6 +24,40 @@ BANNED_PATTERNS = [
     r"\bdouble your money\b",
 ]
 
+# Sponsor-friendly rules (advertisers avoid profanity, panic clickbait and political sides).
+PROFANITY = r"\b(?:damn(?:ed|n)?|hell|crap(?:py)?|sucks?|shit\w*|f+u+c+k\w*|ass(?:hole)?|bitch\w*|bastard|wtf|pissed)\b"
+PANIC_PATTERNS = [
+    r"\b(?:market|stock|housing|economic|bank) (?:crash|collapse) (?:is )?coming\b",
+    r"\b(?:collapse|crash) is (?:coming|here|imminent)\b",
+    r"\byou(?:'re| are) doomed\b",
+    r"\bwipe out your (?:savings|money|retirement)\b",
+    r"\bbefore it'?s too late\b",
+    r"\bthey don'?t want you to know\b",
+    r"\bthe end of (?:america|the dollar|the economy|money)\b",
+    r"\b(?:total|financial) (?:apocalypse|armageddon|meltdown)\b",
+]
+POLITICAL_SIDES = (r"\b(?:democrats?|republicans?|gop|maga|liberals?|conservatives?|left-wing|right-wing|"
+                   r"(?:biden|trump|obama|harris|vance)(?:'s)?|the (?:democratic|republican) party)\b")
+WHAT_TO_DO = re.compile(r"^what to do", re.I)
+
+
+def sponsor_issues(script: Script) -> list[str]:
+    """Profanity, panic clickbait and political-side language in the narration, title, description or thumbnail."""
+    text = " ".join([script.title, script.description, script.thumbnail_text or "", script.full_narration])
+    out = [f"profanity: '{m.group(0)}'" for m in re.finditer(PROFANITY, text, flags=re.I)]
+    for pat in PANIC_PATTERNS:
+        out += [f"panic clickbait: '{m.group(0)}'" for m in re.finditer(pat, text, flags=re.I)]
+    out += [f"political side: '{m.group(0)}'" for m in re.finditer(POLITICAL_SIDES, text, flags=re.I)]
+    return list(dict.fromkeys(out))
+
+
+def has_what_to_do(script: Script) -> bool:
+    """Long videos end with a practical "What to do" section (Shorts: a one-line takeaway is enough)."""
+    if script.format != "long":
+        return True
+    return any(WHAT_TO_DO.match(s.heading.strip()) for s in script.scenes[-4:])
+
+
 LENGTH_RULES = {  # spoken words at ≈170 wpm (the energetic narrator pace)
     "long": (2550, 3100),   # ~15-18 minutes
     "short": (75, 120),     # 30-55 seconds after voicing (SHORT_MAX_WORDS=120; real length measured before rendering)
@@ -66,6 +100,12 @@ def check_script(script: Script, enforce_length: bool = True,
     for pat in BANNED_PATTERNS:
         for m in re.finditer(pat, text, flags=re.I):
             r.errors.append(f"Prohibited claim language: '{m.group(0)}'")
+
+    for issue in sponsor_issues(script):
+        r.errors.append(f"Not sponsor-friendly: {issue}")
+    if not has_what_to_do(script):
+        (r.errors if enforce_length else r.warnings).append(
+            "Missing the closing \"What to do\" section (practical steps for a US household)")
 
     if DISCLAIMER not in script.scenes[-1].narration.replace("’", "'"):
         r.errors.append("Final scene is missing the education-only disclaimer")

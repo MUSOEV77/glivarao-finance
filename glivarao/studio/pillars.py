@@ -1,7 +1,9 @@
 """Channel focus: everyday US personal finance for people 25-45 who struggle with money.
 
-Exactly 5 content pillars. Every topic must fit one of them; anything else (crypto, single stocks, options, gold,
-general news, Canada-only accounts, ...) is rejected before it can become a video.
+US-ONLY: the audience is ordinary Americans; every video is about a US problem and its effect on a US household's
+money. 6 content pillars (the 5 personal-finance pillars plus "The US economy and your money" for the Fed, housing,
+the stock market, the national debt, banks and recession signals). Anything else (crypto, single stocks, options,
+gold, Canada or other countries, general news) is rejected before it can become a video.
 
 Also defines:
 * rotation rules (never the same pillar twice in a row; at most 2 of the last 5 videos per pillar, so a week of
@@ -29,11 +31,11 @@ class Pillar:
 PILLARS: dict[str, Pillar] = {p.key: p for p in [
     Pillar("debt", "Debt and credit", "credit cards, loans, credit score", frozenset({
         "credit_card", "credit_report", "credit_score", "debt_collection", "student_loan", "mortgage", "auto_loan",
-        "personal_loan", "bnpl", "debt_payoff", "bankruptcy"}),
+        "personal_loan", "bnpl", "debt_payoff", "bankruptcy", "household_debt", "medical_debt"}),
         ("Rocket Money", "Monarch Money"),
         avoid="No payday lenders, debt-settlement companies or high-APR cards: this audience is already struggling."),
     Pillar("budget", "Budgeting and saving", "budgets, subscriptions, saving money", frozenset({
-        "aca_marketplace", "budgeting", "cost_of_living", "spending_psych", "money_relationships", "paycheck", "inflation_personal",
+        "aca_marketplace", "budgeting", "cost_of_living", "spending_psych", "money_relationships", "paycheck",
         "bank_account", "bank_fees", "debit_prepaid", "emergency_fund", "hysa", "cd_gic"}),
         ("Rocket Money", "Monarch Money", "YNAB (later)"),
         avoid="Only FDIC-insured savings products; never \"get rich\" apps."),
@@ -47,15 +49,22 @@ PILLARS: dict[str, Pillar] = {p.key: p for p in [
         ("Rocket Dollar",),
         avoid="No single-stock picks, trading apps, options or crypto."),
     Pillar("scams", "Scams and consumer protection", "scams, identity theft, your rights", frozenset({
-        "scams", "identity_theft", "money_transfer", "deposit_insurance", "money_mistakes"}),
+        "scams", "identity_theft", "money_transfer", "money_mistakes"}),
         ("Wise (only for money-transfer topics)",),
         avoid="Always give the free steps first (credit freeze, IdentityTheft.gov, ReportFraud.ftc.gov)."),
+    Pillar("economy", "The US economy and your money", "the Fed, housing, stock market, national debt, banks, "
+           "recession signals", frozenset({"fed_rates", "us_housing", "us_stock_market", "national_debt",
+                                            "treasury_market", "us_banks", "recession", "deposit_insurance",
+                                            "rent_vs_buy", "inflation_personal"}),
+           ("high-yield savings", "budgeting app"),
+           avoid="No predictions, no panic, no political sides: explain the official number, then what a US "
+                 "household can do."),
 ]}
 ORDER = list(PILLARS)
 OUT_OF_FOCUS = {"crypto": "crypto", "stocks": "single stocks", "options": "options trading", "gold": "gold/metals",
                 "real_estate_inv": "real estate investing", "rrsp": "Canada-only", "tfsa": "Canada-only",
                 "fhsa": "Canada-only", "insurance": "insurance", "estate": "estates/wills",
-                "rent_vs_buy": "housing market", "currency_exchange": "travel money", "check_cashing": "check cashing"}
+                "currency_exchange": "travel money", "check_cashing": "check cashing"}
 
 TAX_SEASON_MONTHS = {12, 1, 2, 3, 4}
 RECENT_WINDOW = 5         # at most MAX_IN_WINDOW videos per pillar in the last RECENT_WINDOW
@@ -78,8 +87,8 @@ def rejection(card: dict) -> str | None:
     key = card.get("key", "")
     if key in OUT_OF_FOCUS:
         return f"outside the 5 pillars ({OUT_OF_FOCUS[key]})"
-    if card.get("market") == "CA":
-        return "outside the 5 pillars (Canada-only)"
+    if card.get("market") in ("CA", "other"):
+        return "not a US household topic (US-only channel)"
     if pillar_of(key) is None:
         return "outside the 5 pillars (no clear pillar)"
     return None

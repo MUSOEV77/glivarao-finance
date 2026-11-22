@@ -95,24 +95,54 @@ def test_news_videos_at_most_one_in_four(store):
     assert any("evergreen" in w for w in why)
 
 
-def test_launch_list_comes_first_with_checked_facts(settings, store, monkeypatch, tmp_path):
+def test_launch_list_waits_for_approval_then_comes_first_with_checked_facts(settings, store, monkeypatch, tmp_path):
     from glivarao.studio import launch_plan
     from glivarao.studio.planner import plan_next
 
-    store.kv_set("launch_done", "[]")
+    store.kv_set("launch_done", "[1, 2]")                       # progress on the OLD list
     monkeypatch.setattr(launch_plan, "verify_facts", lambda v, session=None: (
-        v.facts[1:], [(v.facts[0], "DROPPED: '15,960' is no longer on the page")]))
+        v.facts[1:], [(v.facts[0], "DROPPED: '3-3/4 to 4 percent' is no longer on the page")]))
+    assert launch_plan.awaiting_approval(store)
+    assert plan_next(settings, store, NOV, tmp_path, send=False) is None   # nothing planned before your ✅
+    launch_plan.approve(store)                                  # the new list starts from video 1
     item = plan_next(settings, store, NOV, tmp_path, send=False)
-    assert item.topic == "ACA 2027: the subsidy cliff is back" and item.card["launch"] == 1
+    assert item.topic == launch_plan.LAUNCH[0].topic and item.card["launch"] == 1
+    assert item.card["affiliate_category"] == "high-yield savings" and item.card["market"] == "US"
     assert any("DROPPED" in w for w in item.why)
     first = launch_plan.LAUNCH[0].facts[0].text
     assert first not in [f["text"] for f in item.card["launch_facts"]]     # a dropped fact never reaches the script
     assert launch_plan.done(store) == [1] and launch_plan.remaining(store) == 15
     assert len(launch_plan.LAUNCH) == 16 and len({v.slug for v in launch_plan.LAUNCH}) == 16
-    for v in launch_plan.LAUNCH:                              # every number in the list has an official URL
+    from glivarao.studio.affiliates import CATEGORIES
+
+    for v in launch_plan.LAUNCH:                              # every number in the list has an official US URL
+        assert v.affiliate in CATEGORIES and P.pillar_of(v.key) is not None, v.slug
         for f in v.facts:
             assert f.url.startswith("https://") and any(d in f.url for d in (
-                ".gov", "annualcreditreport.com")), (v.slug, f.url)
+                ".gov", "annualcreditreport.com", "newyorkfed.org", "federalreserve.gov", "freddiemac.com")), f.url
+
+
+def test_launch_list_approval_button_in_telegram(settings, store):
+    from dataclasses import replace
+
+    from glivarao.publish.telegram import poll_decisions
+    from glivarao.studio import launch_plan
+    from tests.conftest import FakeTelegramSession
+
+    s = replace(settings, telegram_bot_token="T", telegram_approver_chat_id="42")
+    tg = FakeTelegramSession()
+    from glivarao.publish.telegram import TelegramClient
+
+    client = TelegramClient("T", session=tg)
+    launch_plan.send_for_approval(s, store, client)
+    sent = tg.calls[-1][1]
+    assert "US-only" in sent["text"] and sent["reply_markup"]["inline_keyboard"][0][0]["callback_data"] == \
+        f"launch:{launch_plan.VERSION}"
+    tg.updates = [{"update_id": 1, "callback_query": {"id": "c1", "from": {"id": 42}, "data": f"launch:{launch_plan.VERSION}",
+                                                      "message": {"chat": {"id": 42}}}}]
+    poll_decisions(store, s, client)
+    assert launch_plan.approved(store) and launch_plan.done(store) == []
+    assert any("still PAUSED" in str(c[1]) for c in tg.calls)
 
 
 def test_taxes_favoured_in_tax_season_and_series_name():

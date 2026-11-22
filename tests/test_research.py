@@ -21,7 +21,7 @@ def ts(days_ago: int) -> int:
     ("Is a dealer offering a rebate for financing a car a red flag?", True),
     ("What happens to a mortgage when the owner died?", True),
     ("Senate passes new bill on election funding", False),
-    ("Federal Reserve signals rate cut as recession fears grow", False),
+    ("Federal Reserve signals rate cut as recession fears grow", True),   # US macro: allowed (US-only rule)
     ("Tariffs push up prices worldwide", False),
     ("Taylor Swift album breaks records", False),
     ("Best hiking trails in Colorado", False),
@@ -36,7 +36,9 @@ def test_off_topic_markers_apply_even_to_finance_sources():
 
 
 def test_market_comes_from_the_subject():
-    assert market_of("question tagged united-states", match_concepts("credit card interest")) == "both"
+    assert market_of("question tagged united-states", match_concepts("credit card interest")) == "US"
+    assert market_of("credit card interest", []) == "US"                 # US-only channel: no "both"
+    assert market_of("my RRSP in canada", []) == "CA"
     assert market_of("", match_concepts("Roth IRA contribution")) == "US"
     assert market_of("", match_concepts("TFSA room")) == "CA"
     assert market_of("my pension in the united-kingdom", []) == "other"
@@ -70,7 +72,8 @@ CFPB = [{"issue": "Problem with a purchase shown on your statement", "product": 
 def test_candidates_scoring_and_rejections():
     cands, rejected = build_candidates(SE, CFPB, [{"article": "How_to_Rob_a_Bank_(2026_film)", "views_7d": 1}])
     reasons = {r.text: r.reason for r in rejected}
-    assert "not US/Canada" in reasons["Can I deduct mortgage interest in the UK?"]
+    assert "not a US topic" in reasons["Can I deduct mortgage interest in the UK?"]
+    assert "not a US topic" in reasons["What is a good credit card APR?"]          # Canada-tagged: rejected
     assert "politics" in reasons["Who will win the election and what about my stocks?"]
     assert "entertainment" in reasons["How to Rob a Bank (2026 film)"]
     assert "bankruptcy" not in cands  # sub-issue text no longer creates false matches
@@ -79,8 +82,8 @@ def test_candidates_scoring_and_rejections():
         compute_metrics(c, TODAY)
     score_all(list(cands.values()))
     cc = cands["credit_card"]
-    assert cc.metrics["se_questions_365d"] == 4 and cc.metrics["cfpb_yoy_change"] == pytest.approx(0.6)
-    assert cc.market == "both" and cc.scores["demand"][1] == "MEASURED"
+    assert cc.metrics["se_questions_365d"] == 3 and cc.metrics["cfpb_yoy_change"] == pytest.approx(0.6)
+    assert cc.market == "US" and cc.scores["demand"][1] == "MEASURED"
     assert cc.scores["potential_views"][:2] == (None, "UNAVAILABLE") and "competitors" in cc.scores["potential_views"][2]
     assert cc.confidence != "high"  # can't be high without YouTube data
     assert cands["ira_roth"].market == "US" and eligible(cc)[0]

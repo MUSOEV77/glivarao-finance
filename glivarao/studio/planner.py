@@ -80,6 +80,13 @@ def plan_next(settings, store, today: date | None = None, research_dir: Path | N
     from . import launch_plan
     from .pillars import is_news
 
+    if launch_plan.awaiting_approval(store):  # the US-only launch list waits for your ✅ in Telegram
+        key = f"launch_wait_alert:{today.isoformat()}"
+        if send and not store.kv_get(key):
+            store.kv_set(key, "1")
+            _notify(settings, "🇺🇸 GLIVARAO: the launch list is waiting for your approval, so no topic is planned. "
+                              "Tap ✅ under the list (resend it: python -m glivarao launch-list --send).")
+        return None
     launch = launch_plan.next_video(store)
     if launch is not None:  # your launch list comes first (16 long videos), facts re-checked on official pages
         from dataclasses import replace as _replace

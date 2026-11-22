@@ -439,6 +439,23 @@ def cmd_shorts_check(args, s):
         print(f"remade {job.id} -> {r[0]}: {r[2]} {r[4] or ''}")
 
 
+def cmd_launch_list(args, s):
+    """Show the US-only launch list (and its approval state); --send puts it in Telegram with an approve button."""
+    from .studio import launch_plan
+
+    store = _store(s)
+    print(launch_plan.approval_text())
+    print(f"\nstatus: {'APPROVED' if launch_plan.approved(store) else 'waiting for your approval'} "
+          f"(version {launch_plan.VERSION}); {launch_plan.remaining(store)} of {len(launch_plan.LAUNCH)} still to make")
+    if args.verify:
+        for v in launch_plan.LAUNCH:
+            kept, notes = launch_plan.verify_facts(v)
+            print(f"{v.n:2d}. {len(kept)}/{len(v.facts)} facts confirmed" + "".join(f"\n    ⚠ {n}" for _, n in notes))
+    if args.send:
+        launch_plan.send_for_approval(s, store)
+        print("sent to Telegram (no production is started)")
+
+
 def cmd_competitors(args, s):
     """Competitor research: patterns from similar channels' last 90 days (YouTube Data API, read-only)."""
     from .research.competitors import YouTubeAPIError, render_markdown, run
@@ -756,6 +773,10 @@ def main(argv=None):
     rm.add_argument("job_id")
     rm.add_argument("--no-telegram", action="store_true")
     rm.set_defaults(fn=cmd_remake)
+    ll = sub.add_parser("launch-list", help="show the US-only launch list; --send for approval in Telegram")
+    ll.add_argument("--send", action="store_true")
+    ll.add_argument("--verify", action="store_true", help="re-check every fact on its official page")
+    ll.set_defaults(fn=cmd_launch_list)
     sc = sub.add_parser("shorts-check", help="list Shorts in the queue over 59 s; --remake to make them again")
     sc.add_argument("--remake", action="store_true")
     sc.add_argument("--no-telegram", action="store_true")

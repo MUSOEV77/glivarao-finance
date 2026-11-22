@@ -1,7 +1,7 @@
 """Fresh signals for automatic topic selection (each item keeps its source URL):
 
 * Official news: Federal Reserve press releases (RSS), CFPB newsroom + blog (RSS), IRS news releases (newsroom page).
-* Google Trends: daily trending searches for the US and Canada (public RSS), with their linked news articles.
+* Google Trends: daily trending searches for the US (public RSS), with their linked news articles.
 * Search questions: Google search suggestions for a topic ("how...", "should I...", "is...").
 
 BLS, FTC and some news sites refuse automated requests from servers (HTTP 403); BLS data series are available
@@ -123,7 +123,7 @@ def parse_trends(xml: str, geo: str) -> list[dict]:
 
 def google_trends(http) -> SourceResult:
     items, notes = [], []
-    for geo in ("US", "CA"):
+    for geo in ("US",):  # US-only channel
         try:
             items += parse_trends(_text(http, TRENDS_RSS.format(geo=geo), save_as=f"trends_{geo}.xml"), geo)
         except Exception as exc:  # noqa: BLE001

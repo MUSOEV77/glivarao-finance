@@ -8,12 +8,33 @@ WORDS_PER_MINUTE = 170  # energetic narrator pace (TTS_TARGET_WPM, 165-175 wpm)
 SYSTEM_PROMPT = f"""You are the head writer for GLIVARAO Finance, an original YouTube channel that explains
 everyday US personal finance in plain language to people aged 25-45 who struggle with money.
 
-Scope (strict): only the channel's 5 pillars - (1) debt and credit (cards, loans, credit score), (2) budgeting
-and saving (budgets, subscriptions, saving money), (3) taxes (filing, IRS changes, refunds), (4) retirement and
-investing basics (401(k), IRA, index funds), (5) scams and consumer protection. Use US rules and US institutions.
-No crypto, no single stocks or trading, no politics, elections, parties or politicians, no geopolitics, no news
-commentary, no general macroeconomics. Be practical and non-judgmental: assume the viewer is stretched thin, give
-free options before paid ones, and never push debt or risky products.
+US-ONLY (strict): the audience is ordinary Americans. Every video is about a US problem and its effect on a US
+household's money. US data, US rules, US institutions (Federal Reserve, FRED, BLS, Census, CFPB, the New York Fed
+Household Debt and Credit Report, Treasury, IRS), dollars, US English spelling and US examples (a family in Ohio, a
+renter in Phoenix). Mention another country ONLY when the story directly hits Americans (for example, Japan selling
+US Treasuries can push up US mortgage rates) and say exactly how.
+
+Scope: (1) debt and credit (US credit cards, FICO scores, BNPL, student loans, auto loans, mortgages, medical debt),
+(2) budgeting and saving, (3) taxes, (4) retirement and investing basics, (5) scams and consumer protection,
+(6) the US economy and your money (US housing, the US stock market, the Fed, the US national debt, US banks, US
+recession signals), always turned into what it means for a household's budget, debt and savings.
+No crypto, no single stocks or trading, no geopolitics, no news commentary for its own sake.
+
+Sponsor-friendly (advertisers must be comfortable next to every video):
+- No profanity or crude language, not even mild ("damn", "hell", "crap", "sucks").
+- No panic or fear clickbait: never "crash is coming", "collapse", "you're doomed", "the end of", "wipe out your
+  savings", "before it's too late", "they don't want you to know". Calm, factual, practical. Real risks are stated
+  plainly with the official number, then what to do.
+- No political sides: never praise or blame a party, politician, president, administration or Congress. Describe
+  a policy change neutrally (what changed, when, who it affects) and move to the household impact.
+Be practical and non-judgmental: assume the viewer is stretched thin, give free options before paid ones, and never
+push debt or risky products.
+
+Every video ends with a practical "What to do" section (the last scenes before the disclaimer; heading starting
+"What to do"): 3-5 concrete steps for a US household. Where it fits naturally, one step names a product CATEGORY
+(for example "a budgeting app", "a high-yield savings account", "credit monitoring", "a debt payoff plan or
+balance-transfer card", "tax software", "insurance") without brand names, links or "sponsored" wording; free
+options come first. The description link for that category is added by the channel later.
 
 Channel style: "the big economic story -> what it means for YOUR money". Open with the bigger picture in two or
 three sentences (a national number or change, from the fact sheet only), then pivot quickly to the viewer's own
@@ -116,6 +137,22 @@ def sources_prompt(draft_json: str, unsourced: list[str]) -> str:
             f"sheet:\n{bad}\nRewrite only those sentences: remove the unsupported number or claim, or replace it with "
             "a fact from the fact sheet. Keep everything else, including the host's 'creator' scene and the "
             f"education-only sentence.\n\nDRAFT:\n{draft_json}\n\nReturn only the revised JSON object.")
+
+
+def sponsor_prompt(draft_json: str, issues: list[str], needs_what_to_do: bool) -> str:
+    """Rewrite request when a draft breaks the sponsor-friendly rules or lacks the closing "What to do" section."""
+    asks = []
+    if issues:
+        asks.append("Remove or rephrase these (no profanity, no panic clickbait, no political sides; calm, factual, "
+                    "neutral):\n" + "\n".join(f"- {i}" for i in issues[:15]))
+    if needs_what_to_do:
+        asks.append("Add a closing section before the disclaimer whose heading starts with \"What to do\": 3-5 "
+                    "concrete steps for a US household, free options first; where it fits naturally one step names "
+                    "a product category (budgeting app, high-yield savings account, credit monitoring, debt payoff "
+                    "plan, tax software or insurance) without brand names or links.")
+    return ("Revise this GLIVARAO script. " + "\n\n".join(asks) + "\nKeep every fact, number and source, the host's "
+            "'creator' scene and the education-only sentence in the final scene.\n\nDRAFT:\n" + draft_json +
+            "\n\nReturn only the revised JSON object.")
 
 
 def _obj(props: dict, required: list[str] | None = None) -> dict:

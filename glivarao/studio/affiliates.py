@@ -41,6 +41,41 @@ PROGRAMS: dict[str, Program] = {p.key: p for p in [
 ]}
 MAX_PER_LONG = 2
 
+# Product CATEGORIES for the closing "What to do" section. Every video's description gets a placeholder line
+# "[AFFILIATE: <category>]" (no real links yet); you replace it with your link when uploading.
+CATEGORIES = ("budgeting app", "high-yield savings", "credit monitoring", "debt payoff", "tax software", "insurance")
+CATEGORY_FOR_TOPIC = {
+    **dict.fromkeys(("credit_card", "debt_payoff", "household_debt", "student_loan", "personal_loan",
+                     "debt_collection", "bankruptcy"), "debt payoff"),
+    **dict.fromkeys(("credit_score", "credit_report", "medical_debt", "identity_theft", "scams"), "credit monitoring"),
+    **dict.fromkeys(("budgeting", "cost_of_living", "spending_psych", "money_relationships", "paycheck", "bnpl",
+                     "auto_loan", "bank_fees", "money_mistakes"), "budgeting app"),
+    **dict.fromkeys(("hysa", "emergency_fund", "cd_gic", "fed_rates", "recession", "us_banks", "deposit_insurance",
+                     "national_debt", "treasury_market", "us_housing", "mortgage", "rent_vs_buy", "us_stock_market",
+                     "inflation_personal", "retirement_401k", "ira_roth", "bank_account"), "high-yield savings"),
+    **dict.fromkeys(("income_tax", "tax_filing", "tax_refund", "tax_credits", "tax_withholding", "side_income_tax"),
+                    "tax software"),
+    **dict.fromkeys(("aca_marketplace", "insurance"), "insurance"),
+}
+
+
+def category_for(topic_key: str, card: dict | None = None) -> str:
+    """The product category that fits this video's "What to do" section (launch list entries set their own)."""
+    cat = (card or {}).get("affiliate_category") or CATEGORY_FOR_TOPIC.get(topic_key, "budgeting app")
+    return cat if cat in CATEGORIES else "budgeting app"
+
+
+def placeholder(category: str) -> str:
+    return f"[AFFILIATE: {category}]"
+
+
+def add_placeholder(description: str, category: str) -> str:
+    """Put the category placeholder on its own line (once), ahead of the disclosure."""
+    tag = placeholder(category)
+    if tag in description:
+        return description
+    return description.rstrip() + f"\n\nRecommended for the \"What to do\" steps: {tag}\n"
+
 
 def links(store) -> dict[str, str]:
     return json.loads(store.kv_get("affiliate_programs", "{}"))

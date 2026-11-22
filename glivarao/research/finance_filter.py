@@ -108,8 +108,8 @@ CONCEPTS = [
     # Investing
     C("index_funds", "Index funds and ETFs", [r"index fund", r"\betfs?\b", r"\bvoo\b", r"\bvti\b", r"s&p 500",
       r"total market"], "Investing", num=True, wiki="Index_fund"),
-    C("stocks", "Investing in stocks", [r"\bstocks?\b", r"\bshares?\b", r"brokerage", r"\bipo\b", r"dividend",
-      r"stock market"], "Investing", num=True, wiki="Stock"),
+    C("stocks", "Investing in stocks", [r"\bstocks?\b", r"\bshares?\b", r"brokerage", r"\bipo\b", r"dividend"],
+      "Investing", num=True, wiki="Stock"),
     C("bonds", "Bonds, Treasuries and TIPS", [r"\bbonds?\b", r"treasury bill", r"t-bill", r"\btips\b", r"i bond"],
       "Investing", num=True, wiki="Bond_(finance)"),
     C("options", "Options trading", [r"\boptions? trad", r"call option", r"put option", r"covered call"], "Investing",
@@ -160,6 +160,29 @@ CONCEPTS = [
       r"subscription"], "Personal Finance", num=True, wiki="Cost_of_living"),
     C("inflation_personal", "Inflation and your money", [r"inflation"], "Personal Finance", num=True,
       wiki="Inflation"),
+    # The US economy and your household (macro topics, always told as "what it means for your money")
+    C("fed_rates", "The Federal Reserve and interest rates", [r"federal reserve", r"\bthe fed\b", r"\bfomc\b",
+      r"rate (?:cut|hike)", r"interest rate decision", r"federal funds"], "Banking and Money", "US", True,
+      "Federal_Reserve"),
+    C("us_housing", "The US housing market and mortgage rates", [r"housing market", r"home prices?",
+      r"mortgage rates?", r"housing affordab", r"home sales"], "Personal Finance", "US", True,
+      "United_States_housing_market"),
+    C("us_stock_market", "The US stock market and your 401(k)", [r"stock market", r"s&p 500", r"dow jones",
+      r"\bnasdaq\b", r"bear market", r"market (?:crash|correction|selloff)"], "Investing", "US", True,
+      "S%26P_500"),
+    C("national_debt", "The US national debt and your money", [r"national debt", r"debt ceiling", r"federal deficit",
+      r"treasury (?:yields?|auction)"], "Personal Finance", "US", True, "National_debt_of_the_United_States"),
+    C("treasury_market", "Who owns US Treasuries (and why it hits your rates)", [r"treasur(?:y|ies) (?:holdings|selling)",
+      r"foreign holders", r"selling (?:us )?treasuries", r"10-year yield", r"bond yields?"], "Investing", "US", True,
+      "United_States_Treasury_security"),
+    C("us_banks", "US banks and deposit safety", [r"bank (?:failure|run|collapse)", r"regional banks?",
+      r"is my money safe"], "Banking and Money", "US", False, "Bank_failure"),
+    C("recession", "US recession signals and your household", [r"recession", r"layoffs?", r"unemployment rate",
+      r"jobs report", r"yield curve"], "Personal Finance", "US", True, "Recession"),
+    C("household_debt", "US household debt and delinquencies", [r"household debt", r"delinquen", r"past due"],
+      "Credit and Debt", "US", True, "Household_debt"),
+    C("medical_debt", "Medical debt and medical bills", [r"medical debt", r"medical bills?", r"hospital bills?",
+      r"charity care", r"no surprises act"], "Credit and Debt", "US", True, "Medical_debt"),
     # Financial Psychology
     C("spending_psych", "Spending habits and money psychology", [r"impulse (?:buy|spend)", r"lifestyle creep",
       r"emotional spending", r"money anxiety", r"financial stress", r"\bfomo\b", r"frugal", r"spending habit",
@@ -188,8 +211,9 @@ OFF_TOPIC = [
     (r"\b(election|electoral|senate|congress|parliament|prime minister|president|presidential|democrat|republican|"
      r"liberal party|conservative party|campaign|politic|ballot|governor|mayor|white house|supreme court)", "politics"),
     (r"\b(war|military|invasion|sanction|nato|geopolit|terror|ceasefire|missile|army)\b", "geopolitics / conflict"),
-    (r"\b(gdp|recession|tariffs?|trade war|central bank|federal reserve|monetary policy|fiscal policy|"
-     r"national debt|sovereign debt|bond market selloff|unemployment rate|jobs report)\b", "general economics"),
+    # US macro topics (the Fed, recession, national debt, housing, the stock market) are ALLOWED: every video turns
+    # them into "what it means for a US household's money". Trade wars and tariffs stay out (political sides).
+    (r"\b(tariffs?|trade war)\b", "trade politics"),
     (r"\b(celebrity|actor|actress|singer|rapper|album|movie|film|tv series|season \d|episode|nfl|nba|mlb|nhl|"
      r"world cup|olympic|super bowl)\b", "entertainment / sports"),
     # ("died"/"death" are deliberately NOT here: inheritance and estate topics are finance)
@@ -226,22 +250,19 @@ def gate(text: str, finance_source: bool = False) -> tuple[bool, str]:
 
 
 def market_of(text: str, concepts: list[Concept]) -> str:
-    """A concept's market is a property of the subject (credit cards matter in both countries), so it wins
-    over incidental mentions. Text markers decide only for candidates without a concept."""
+    """US-only channel: "US" unless the subject is Canadian ("CA") or about another country with no US marker
+    ("other"); both are rejected. A concept's market wins over incidental mentions."""
     if concepts:
         markets = {c.market for c in concepts}
-        return markets.pop() if len(markets) == 1 else "both"
-    us, ca = bool(US_MARKERS.search(text)), bool(CA_MARKERS.search(text))
-    for c in concepts:
-        us |= c.market == "US"
-        ca |= c.market == "CA"
-    if us and not ca:
+        if markets == {"CA"}:
+            return "CA"
         return "US"
+    us, ca = bool(US_MARKERS.search(text)), bool(CA_MARKERS.search(text))
     if ca and not us:
         return "CA"
-    if OTHER_REGION.search(text) and not (us or ca):
+    if OTHER_REGION.search(text) and not us:
         return "other"
-    return "both"
+    return "US"
 
 
 def category_of(concepts: list[Concept], text: str = "") -> str:

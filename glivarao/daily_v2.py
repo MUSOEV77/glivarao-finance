@@ -279,6 +279,18 @@ def run_daily_v2(settings: Settings, store: JobStore, today: date | None = None,
                 missing = factcheck.needs_source(claims)
             except ClaudeUnavailable as exc:  # keep the draft; it is rejected below for the unsourced claims
                 log.warning("source rewrite skipped for %s: Claude unavailable (%s)", job.id, exc)
+        from .compliance import has_what_to_do, sponsor_issues
+
+        issues = sponsor_issues(script)
+        if (issues or not has_what_to_do(script)) and paid:  # sponsor-friendly + closing "What to do" section
+            from .scriptgen.claude import ClaudeUnavailable, rewrite_for_sponsor
+
+            try:
+                script = rewrite_for_sponsor(script, issues, not has_what_to_do(script), settings)
+                claims = factcheck.check_claims(script, brief, creator)
+                missing = factcheck.needs_source(claims)
+            except ClaudeUnavailable as exc:  # keep the draft; the compliance check below rejects it
+                log.warning("sponsor rewrite skipped for %s: Claude unavailable (%s)", job.id, exc)
         (out / "fact_check.md").write_text("# " + factcheck.report(claims, limit=500).replace("\n", "\n\n") + "\n")
         job.script_path = str(out / "script.json")
         Path(job.script_path).write_text(script.model_dump_json(indent=2))
@@ -365,6 +377,10 @@ def render_and_review(job, script, brief, claims, ctx: dict, settings: Settings,
         from .content.packaging import add_affiliate_disclosure, title_options
         from .studio.pillars import pillar_of, series_for
 
+        from .studio.affiliates import add_placeholder, category_for
+
+        aff_cat = category_for(brief.topic_key, ctx.get("card"))
+        desc = add_placeholder(desc, aff_cat)  # "[AFFILIATE: category]": no real links yet
         desc = add_affiliate_disclosure(desc, settings.affiliate_disclosure)
         script = script.model_copy(update={"description": finalize_description(
             desc, [s.heading for s in script.scenes], res.scene_starts or [], script.format == "long")})
@@ -392,7 +408,7 @@ def render_and_review(job, script, brief, claims, ctx: dict, settings: Settings,
              "topic_key": brief.topic_key, "category": brief.category, "market": brief.market,
              "pillar": getattr(pillar_of(brief.topic_key), "key", None),
              "series": series_for(brief.topic_key, today),
-             "format": script.style, "creator_input": creator, "picked_by_you": item is not None,
+             "format": script.style, "creator_input": creator, "affiliate_category": aff_cat, "picked_by_you": item is not None,
              "research_score": brief.score, "confidence": brief.confidence, "writer": writer,
              "voice": res.voice, "render_seconds": round(res.render_seconds, 1),
              "youtube_altered_content": disc.youtube_altered_content, "disclosure": disc.reasons,

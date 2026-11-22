@@ -1,3 +1,13 @@
+> **Final rule since 2026-11-22: US-only.** The audience is ordinary Americans; every video is about a US problem
+> and its effect on a US household's money. Macro topics (US housing, the US stock market, the Fed, the national
+> debt, US banks, recession signals) are allowed in a 6th pillar, "The US economy and your money"; other countries
+> only when the story directly hits Americans (e.g. Japan selling Treasuries). US data only (Fed, FRED, BLS, Census,
+> CFPB, NY Fed Household Debt and Credit Report, Treasury). Sponsor-friendly: no profanity, no panic clickbait, no
+> political sides (checked in code; one rewrite, else the script is rejected). Every long video ends with a
+> "What to do" section; each description gets an `[AFFILIATE: category]` placeholder (budgeting app, high-yield
+> savings, credit monitoring, debt payoff, tax software, insurance), no real links yet. Launch list:
+> `python -m glivarao launch-list [--verify] [--send]`; nothing from it is planned until you approve it in Telegram.
+
 # Channel focus: 5 pillars, series and affiliate links
 
 **One channel:** English, US finance. A Spanish channel is postponed.

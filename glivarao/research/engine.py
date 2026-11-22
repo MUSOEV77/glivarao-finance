@@ -132,8 +132,8 @@ def build_candidates(se_items, cfpb_items, wiki_items, news_items=None, trend_it
         if not ok:
             rejected.append(Rejection("Stack Exchange", q["title"], why))
             continue
-        if any(t in REGION_TAGS and t not in ("united-states", "canada") for t in q["tags"]):
-            rejected.append(Rejection("Stack Exchange", q["title"], "not US/Canada (region tag)"))
+        if any(t in REGION_TAGS and t != "united-states" for t in q["tags"]):
+            rejected.append(Rejection("Stack Exchange", q["title"], "not a US topic (region tag)"))
             continue
         concepts = match_concepts(text)
         if concepts:
@@ -285,8 +285,6 @@ def score_all(cands: list[Candidate]) -> None:
         c.category = category_of([c.concept] if c.concept else match_concepts(c.label), c.label)
         text = c.label + " " + " ".join(q["title"] + " " + " ".join(q["tags"]) for q in c.se[:30])
         c.market = market_of(text, [c.concept] if c.concept else [])
-        if c.concept is None and c.cfpb and c.market == "both" and not c.se:
-            c.market = "US"  # a CFPB-only problem without a concept: Canadian relevance not established
         sc: dict = {}
         dem = [r[c.key] for r in (r_se_vpd, r_se_n, r_cfpb, r_wiki, r_trends, r_search) if c.key in r]
         sc["demand"] = (round(statistics.mean(dem), 1), "MEASURED",
@@ -305,7 +303,7 @@ def score_all(cands: list[Candidate]) -> None:
             sc["curiosity"] = (round(cur, 1), "MEASURED", "questions people type into Google about it")
         else:
             sc["curiosity"] = (NO_EVIDENCE, "MEASURED", "no real viewer questions found for this topic")
-        rel = {"both": 10, "US": 7, "CA": 7, "other": 1}[c.market]
+        rel = {"US": 10, "both": 10, "CA": 0, "other": 0}[c.market]
         sc["relevance"] = (rel, "RULE", f"market: {c.market}")
         hook = bool(c.concept and c.concept.numeric_hook)
         stakes = c.category in ("Credit and Debt", "Financial Mistakes and Scams")
@@ -372,8 +370,8 @@ MIN_EVIDENCE = {"se": 4, "cfpb": 300, "wiki": 300}
 
 def eligible(c: Candidate) -> tuple[bool, str]:
     m = c.metrics
-    if c.market == "other":
-        return False, "not relevant to US/Canada viewers"
+    if c.market in ("other", "CA"):
+        return False, "not a US household topic (US-only channel)"
     strong = (m.get("se_questions_365d", 0) >= MIN_EVIDENCE["se"] or m.get("cfpb_complaints_90d", 0) >= MIN_EVIDENCE["cfpb"]
               or m.get("wiki_views_per_day_30d", 0) >= MIN_EVIDENCE["wiki"] or m.get("wiki_trending_views_7d", 0) > 0
               or m.get("official_news_14d", 0) > 0 or m.get("trends_searches", 0) > 0)
