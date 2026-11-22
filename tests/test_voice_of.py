@@ -47,15 +47,15 @@ def test_voice_of_finds_exact_voice_style_speed_and_locks_it(settings, store, tm
     now = replace(s, gemini_tts_voice="Charon", gemini_tts_pace="measured")
     assert [j.id for j in find_jobs(store, "credit report", "short")] == [job.id]      # today, by topic
     info = identify(now, store.get(job.id))
-    assert info["voice"] == "Puck" and info["pace"] == "energetic" and info["style"] == voice_lock.ENERGETIC_STYLE
+    # the clips were made with the short direction prompt: the exact voice, direction and speed are recovered
+    assert info["voice"] == "Puck" and info["direction"] == "Say in a warm, confident, upbeat voice"
     assert info["speed"] == 1.15 and info["how"].startswith("matched") and info["scenes_matched"].split("/")[0] == \
         info["scenes_matched"].split("/")[1]
     env = tmp_path / ".env"
     env.write_text("GEMINI_TTS_VOICE=Charon\n")
     vals = lock_from(now, store, job.id, env_path=env)
     assert vals["GEMINI_TTS_VOICE"] == "Puck" and "GEMINI_TTS_SPEED=1.15" in env.read_text()
-    locked = replace(now, gemini_tts_voice="Puck", gemini_tts_pace="energetic", gemini_tts_speed=1.15,
-                     gemini_tts_style=voice_lock.ENERGETIC_STYLE)
+    locked = replace(now, gemini_tts_voice="Puck", gemini_tts_speed=1.15)
     assert voice_lock.verify(locked, store)["voice"] == "Puck"
     assert json.loads(store.kv_get("voice_locked_from"))["job"] == job.id
 

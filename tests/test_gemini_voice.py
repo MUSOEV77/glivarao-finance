@@ -58,7 +58,8 @@ def test_request_format_voice_and_header(tmp_path):
     assert cfg["responseModalities"] == ["AUDIO"]
     assert cfg["speechConfig"]["voiceConfig"]["prebuiltVoiceConfig"]["voiceName"] == "Charon"
     prompt = c["json"]["contents"][0]["parts"][0]["text"]
-    assert "documentary narrator" in prompt and "Gli-VAR-oh" in prompt and "GLIVARAO" not in prompt
+    assert prompt.startswith("Say in a warm, confident, upbeat voice: ")          # short direction only
+    assert "documentary narrator" not in prompt and "Gli-VAR-oh" in prompt and "GLIVARAO" not in prompt
     assert len(n.sentences) == 3 and n.sentences[2].question
     assert all(a.end <= b.start for a, b in zip(n.sentences, n.sentences[1:]))  # boundaries found in the pauses
 
@@ -157,4 +158,4 @@ def test_voice_settings_are_locked_after_first_use(tmp_path):
     g = FakeGemini()
     n = get_narrator(replace(s, gemini_tts_pace="slow"), "Hi.", session=g, store=store)
     n.narrator.narrate("Hello there.")
-    assert "Slow, deliberate pace" in g.calls[0]["json"]["contents"][0]["parts"][0]["text"]
+    assert "Slow, deliberate pace" not in g.calls[0]["json"]["contents"][0]["parts"][0]["text"]   # never sent

@@ -64,7 +64,7 @@ def _style_candidates(settings) -> list[tuple[str, str, str]]:
 
 def identify(settings, job) -> dict:
     from ..models import Script
-    from .gemini_tts import GeminiTTSNarrator, speech_seconds
+    from .gemini_tts import GeminiTTSNarrator
 
     out_dir = Path(job.video_path).parent if job.video_path else settings.output_dir / job.id
     meta = json.loads((out_dir / "metadata.json").read_text()) if (out_dir / "metadata.json").exists() else {}
@@ -76,6 +76,26 @@ def identify(settings, job) -> dict:
     label = meta.get("voice", "")
     voices = list(dict.fromkeys([v for v in KNOWN_VOICES if v in label] + [settings.gemini_tts_voice] + KNOWN_VOICES))
     models = list(dict.fromkeys([settings.gemini_tts_model, "gemini-3.8-flash-tts", "gemini-3.8-flash-lite-tts"]))
+    res0 = {"job": job.id, "topic": job.topic, "format": job.format, "voice_label": label, "duration_s": job.duration_sec}
+    # clips made since the short-direction prompt: the key is model|voice|prompt version|direction|text (no style)
+    from .gemini_tts import DIRECTION, PROMPT_VERSION
+
+    newbest = None
+    for model, voice, d in product(models, voices, list(dict.fromkeys([settings.gemini_tts_direction, DIRECTION]))):
+        hits = [cache / f"gem_{hashlib.sha256(f'{model}|{voice}|{PROMPT_VERSION}|{d}|{t}'.encode()).hexdigest()[:24]}.npy"
+                for t in texts]
+        n = sum(p.exists() for p in hits)
+        if n and (newbest is None or n > newbest[0]):
+            newbest = (n, model, voice, d, [p for p in hits if p.exists()])
+        if n == len(texts):
+            break
+    if newbest is not None:
+        n, model, voice, d, files = newbest
+        speed = _measured_speed(out_dir, files, n, len(texts))
+        return {**res0, "model": model, "voice": voice, "pace": settings.gemini_tts_pace,
+                "style": settings.gemini_tts_style, "style_sent": f"(short direction only) {d}", "direction": d,
+                "speed": speed if speed is not None else settings.gemini_tts_speed, "speed_measured": speed is not None,
+                "scenes_matched": f"{n}/{len(texts)}", "how": "matched in the voice cache (exact voice + direction)"}
     best = None
     for model, voice, (style, base, pace) in product(models, voices, _style_candidates(settings)):
         hits = [_cache_key(cache, model, voice, style, t) for t in texts]
@@ -89,21 +109,29 @@ def identify(settings, job) -> dict:
     if best is None:
         return {**res, "how": "not found in the voice cache (cache cleared?)"}
     n, model, voice, style, base, pace, files = best
-    raw = sum(speech_seconds(np.load(p)) for p in files)
-    speed = None
-    wav = out_dir / "narration_kokoro.wav"
-    if wav.exists() and n == len(texts):
-        import soundfile as sf
-
-        audio, sr = sf.read(wav, dtype="float32")
-        final = len(audio) / sr - 0.6 * len(texts)   # minus the fixed 0.15 s lead-in + 0.45 s tail per scene
-        if final > 0:
-            measured = raw / final
-            speed = min(SPEEDS, key=lambda v: abs(v - measured)) if abs(
-                min(SPEEDS, key=lambda v: abs(v - measured)) - measured) < 0.03 else round(measured, 2)
+    speed = _measured_speed(out_dir, files, n, len(texts))
     return {**res, "model": model, "voice": voice, "pace": pace or "(none)", "style": base, "style_sent": style,
             "speed": speed if speed is not None else settings.gemini_tts_speed, "speed_measured": speed is not None,
             "scenes_matched": f"{n}/{len(texts)}", "how": "matched in the voice cache (exact)"}
+
+
+def _measured_speed(out_dir: Path, files: list, n: int, n_texts: int):
+    """Speed = raw clip speech time / speech time in the job's narration track (None if it can't be measured)."""
+    from .gemini_tts import speech_seconds
+
+    raw = sum(speech_seconds(np.load(p)) for p in files)
+    wav = out_dir / "narration_kokoro.wav"
+    if not (wav.exists() and n == n_texts):
+        return None
+    import soundfile as sf
+
+    audio, sr = sf.read(wav, dtype="float32")
+    final = len(audio) / sr - 0.6 * n_texts   # minus the fixed 0.15 s lead-in + 0.45 s tail per scene
+    if final <= 0:
+        return None
+    measured = raw / final
+    near = min(SPEEDS, key=lambda v: abs(v - measured))
+    return near if abs(near - measured) < 0.03 else round(measured, 2)
 
 
 def lock_from(settings, store, job_id: str, env_path: Path | None = None) -> dict:
