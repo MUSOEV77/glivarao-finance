@@ -25,6 +25,14 @@ log = logging.getLogger(__name__)
 CHARACTER = ("our channel's original mascot 'Max': a friendly man in his early thirties with round glasses, a brown "
              "hair tuft and a green sweater, drawn in simple ink lines. Keep him EXACTLY like the reference sheet "
              "(same face, glasses, hair, sweater, proportions).")
+DOODLE_CHARACTER = ("our channel's original doodle mascot 'Max': a simple stick-style character with a round white head, "
+                    "round glasses, a three-hair tuft, stick arms and legs, and a deep green (#1f8a4c) sweater with a "
+                    "small gold coin pin. Keep him EXACTLY like the reference sheet (same head, glasses, hair, "
+                    "sweater, proportions, line weight).")
+DOODLE_STYLE = ("Style: simple hand-drawn black marker doodle on plain off-white paper, thick confident lines, flat "
+                "fills only in deep green #1f8a4c and gold #e0a526 accents, lots of empty paper, like a whiteboard "
+                "explainer sketch. Not photorealistic, no shading, no gradients, no real people or faces, no brand "
+                "logos, no watermarks.")
 THUMB_SCENES = [("worried, hand on his head", "a bar chart whose bars rise sharply", "deep navy"),
                 ("pointing at the chart, confident", "a line chart that falls steeply", "crimson"),
                 ("surprised, both hands up", "a simple pie chart with one large slice", "forest green")]
@@ -33,8 +41,20 @@ STOP = set("the a an and or of to in on for is are your you what how why this th
 
 
 # ------------------------------------------------------------------------------------------- character
+def doodle_reference_sheet(settings) -> bytes:
+    """PNG bytes of the doodle Max style reference (art/doodle.py), created once and reused."""
+    path = Path(getattr(settings, "doodle_ref_path", "data/character/doodle_reference.png"))
+    if not path.exists():
+        from .doodle import reference_sheet as draw_sheet
+
+        draw_sheet(path)
+    return path.read_bytes()
+
+
 def reference_sheet(settings, store=None) -> bytes:
     """PNG bytes of the locked character reference (created once from the code-drawn original)."""
+    if getattr(settings, "theme", "") == "doodle":
+        return doodle_reference_sheet(settings)
     path = Path(settings.character_ref_path)
     if not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -148,13 +168,16 @@ def thumbnail_options(script, out: Path, settings, store=None, client: GeminiIma
 
 
 # ------------------------------------------------------------------------------------------- scenes
-def scene_prompt(scene, with_character: bool) -> str:
+def scene_prompt(scene, with_character: bool, theme: str = "editorial") -> str:
     gist = re.sub(r"\s+", " ", scene.narration.replace("*", ""))[:400]
-    who = (f"Include {CHARACTER} as the person in the scene." if with_character else
+    char, style = (DOODLE_CHARACTER, DOODLE_STYLE) if theme == "doodle" else (CHARACTER, STYLE)
+    who = (f"Include {char} as the person in the scene." if with_character else
            "No people; objects and symbols only.")
-    return (f"Square editorial illustration for a personal-finance documentary scene titled \"{scene.heading}\". "
+    kind = "doodle drawing for a personal-finance explainer" if theme == "doodle" else \
+        "editorial illustration for a personal-finance documentary"
+    return (f"Square {kind} scene titled \"{scene.heading}\". "
             f"What the narrator says: {gist} Show ONE clear visual idea (objects, documents, money, a simple "
-            f"situation). {who} No numbers, no words, no text, no charts with values. {STYLE}")
+            f"situation). {who} No numbers, no words, no text, no charts with values. {style}")
 
 
 def illustrate_scenes(script, out: Path, settings, store=None, client: GeminiImage | None = None):
@@ -176,7 +199,8 @@ def illustrate_scenes(script, out: Path, settings, store=None, client: GeminiIma
         sc = scenes[i]
         with_char = sc.beat in ("creator", "case", "question") or n % 3 == 0
         try:
-            img = gi.generate(scene_prompt(sc, with_char), settings.image_scene_size, "1:1",
+            img = gi.generate(scene_prompt(sc, with_char, getattr(settings, "theme", "editorial")),
+                              settings.image_scene_size, "1:1",
                               [ref] if with_char else [])
         except ImageUnavailable as exc:
             note = str(exc)

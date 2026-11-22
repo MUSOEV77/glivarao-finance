@@ -227,6 +227,25 @@ def poll_decisions(store: JobStore, settings: Settings, client: TelegramClient |
                 client.call("answerCallbackQuery", callback_query_id=cq["id"], text="Could not lock that voice")
                 client.call("sendMessage", chat_id=chat_id, text=f"⚠️ Voice not changed: {str(exc)[:200]}")
             continue
+        if action in ("style", "styleedit"):  # doodle style samples
+            from ..studio import style_samples
+
+            if action == "style" and job_id == style_samples.VERSION:
+                style_samples.approve(settings, store)
+                client.call("answerCallbackQuery", callback_query_id=cq["id"], text="Style approved")
+                client.call("sendMessage", chat_id=chat_id, text=(
+                    "✅ Doodle style approved: new videos use it (GLIVARAO_THEME=doodle). Production is still "
+                    "PAUSED: nothing is made until you send resume."))
+                decisions.append((job_id, "style_approved"))
+            elif action == "style":
+                client.call("answerCallbackQuery", callback_query_id=cq["id"], text="Those samples are out of date")
+            else:
+                client.call("answerCallbackQuery", callback_query_id=cq["id"], text="OK")
+                client.call("sendMessage", chat_id=chat_id, text=(
+                    "✏️ Tell Claude (in your Claude Code session) what to change: Max, colors, thumbnails or motion. "
+                    "New samples will be sent here. The current style stays until you approve."))
+                decisions.append(("style", "changes_requested"))
+            continue
         if action in ("launch", "launchedit"):  # the US-only launch list
             from ..studio import launch_plan
 

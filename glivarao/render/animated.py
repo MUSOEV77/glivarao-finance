@@ -241,6 +241,10 @@ def _init_worker(job: dict) -> None:
 def _frames(i: int):
     """Frame source for scene i in the configured theme (both expose frame(f, portrait))."""
     script, plans, envs = _JOB["script"], _JOB["plans"], _JOB["envs"]
+    if _JOB.get("theme") == "doodle":
+        from .doodle import DoodleFrames
+
+        return DoodleFrames(script, i, _JOB["sentences"][i], _JOB["starts"][i + 1] - _JOB["starts"][i])
     if _JOB.get("theme") == "editorial":
         from .editorial import EditorialFrames
 
@@ -250,6 +254,8 @@ def _frames(i: int):
 
 
 def _transition_kind(kind: str) -> str:
+    if _JOB.get("theme") == "doodle":  # hard cuts, like the cuts between shots
+        return "cut"
     if _JOB.get("theme") == "editorial":  # documentary grammar: dissolves and clean slides only
         return {"iris": "fade", "wipe": "fade", "push": "slide"}.get(kind, kind)
     return kind
@@ -344,6 +350,12 @@ def render_animated(script: Script, workdir: Path, settings: Settings, voice: st
         burn = [c for c in cues if not any(a <= (c.start + c.end) / 2 <= b for a, b in muted)]
         ass = write_ass(burn, workdir / "captions.ass", fw, fh, portrait=portrait,
                         margin_v=PORTRAIT_CAPTION_MARGIN_V if portrait else 46, theme="editorial")
+    elif theme == "doodle":  # hand-drawn explainer: 6-10 s shots with camera moves (render/doodle.py)
+        from .editorial import PORTRAIT_CAPTION_MARGIN_V, sentence_tuples
+
+        sentences = [sentence_tuples(n) for n in narrations]
+        ass = write_ass(cues, workdir / "captions.ass", fw, fh, portrait=portrait,
+                        margin_v=PORTRAIT_CAPTION_MARGIN_V if portrait else 46, theme="editorial")
     else:
         ass = write_ass(cues, workdir / "captions.ass", fw, fh, portrait=portrait,
                         margin_v=(PH - 1010) if portrait else None)
@@ -354,6 +366,8 @@ def render_animated(script: Script, workdir: Path, settings: Settings, voice: st
             from .editorial import editorial_cues
 
             sfx_cues = editorial_cues(beats, plans, starts_sec[:-1])
+        elif theme == "doodle":
+            sfx_cues = []  # music bed only: calm explainer, no cartoon sound effects
         else:
             sfx_cues = cue_list(plans, starts_sec[:-1])
         mixed = mix(audio, sfx_cues, seed=zlib.crc32(script.title.encode()) % 1000,

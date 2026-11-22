@@ -79,7 +79,8 @@ class Settings:
     tts_provider: str = field(default_factory=lambda: _env("TTS_PROVIDER", "gemini_tts"))
     kokoro_voice: str = field(default_factory=lambda: _env("KOKORO_VOICE", "am_michael"))
     renderer: str = field(default_factory=lambda: _env("GLIVARAO_RENDERER", "v1"))
-    # Visual theme of the animated (v2) renderer: "editorial" (premium documentary, default) or "cartoon".
+    # Visual theme of the animated (v2) renderer: "editorial" (premium documentary, default), "cartoon", or
+    # "doodle" (GLIVARAO hand-drawn explainer; switched on only when you approve the style samples in Telegram).
     theme: str = field(default_factory=lambda: _env("GLIVARAO_THEME", "editorial"))
     # Human-in-the-loop production (YouTube "inauthentic content" safety). See docs/AUTHENTICITY.md.
     # auto = research picks topics (default); queue = only topics you pick from weekly ideas
@@ -172,6 +173,8 @@ class Settings:
     image_spend_ledger_path: str = field(default_factory=lambda: _env("IMAGE_SPEND_LEDGER_PATH", "data/image_spend.json"))
     image_cache_dir: str = field(default_factory=lambda: _env("IMAGE_CACHE_DIR", "data/image_cache"))
     character_ref_path: str = field(default_factory=lambda: _env("CHARACTER_REF_PATH", "data/character/reference.png"))
+    doodle_ref_path: str = field(default_factory=lambda: _env("DOODLE_REF_PATH",
+                                                              "data/character/doodle_reference.png"))
     gemini_tts_tokens_per_sec: float = field(default_factory=lambda: float(_env("GEMINI_TTS_TOKENS_PER_SEC", "32")))
     tts_spend_ledger_path: str = field(default_factory=lambda: _env("TTS_SPEND_LEDGER_PATH", "data/tts_spend.json"))
     tts_cache_dir: str = field(default_factory=lambda: _env("TTS_CACHE_DIR", "data/tts_cache"))

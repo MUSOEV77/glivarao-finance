@@ -456,6 +456,23 @@ def cmd_launch_list(args, s):
         print("sent to Telegram (no production is started)")
 
 
+def cmd_style_samples(args, s):
+    """Doodle style samples (Max reference sheet, 3 frames, 3 thumbnails, a motion clip); --send to Telegram."""
+    from pathlib import Path
+
+    from .studio import style_samples
+
+    out = Path(args.out) if args.out else s.output_dir / "style_samples" / style_samples.VERSION
+    res = style_samples.make(out)
+    print(f"made in {out} (code-drawn, nothing spent):")
+    for k in ("reference", "frames", "thumbs", "motion"):
+        for p in (res[k] if isinstance(res[k], list) else [res[k]]):
+            print("  ", p)
+    if args.send:
+        style_samples.send(s, res)
+        print("sent to Telegram with Approve / Request changes buttons (production stays paused)")
+
+
 def cmd_competitors(args, s):
     """Competitor research: patterns from similar channels' last 90 days (YouTube Data API, read-only)."""
     from .research.competitors import YouTubeAPIError, render_markdown, run
@@ -777,6 +794,10 @@ def main(argv=None):
     ll.add_argument("--send", action="store_true")
     ll.add_argument("--verify", action="store_true", help="re-check every fact on its official page")
     ll.set_defaults(fn=cmd_launch_list)
+    ss = sub.add_parser("style-samples", help="doodle style samples for approval; --send to Telegram")
+    ss.add_argument("--send", action="store_true")
+    ss.add_argument("--out", default="")
+    ss.set_defaults(fn=cmd_style_samples)
     sc = sub.add_parser("shorts-check", help="list Shorts in the queue over 59 s; --remake to make them again")
     sc.add_argument("--remake", action="store_true")
     sc.add_argument("--no-telegram", action="store_true")

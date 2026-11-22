@@ -389,7 +389,20 @@ def render_and_review(job, script, brief, claims, ctx: dict, settings: Settings,
         Path(job.script_path).write_text(script.model_dump_json(indent=2))
         theme = getattr(settings, "theme", "editorial")
         thumb_how: list[str] = []
-        if script.format == "long":  # 3 options (AI + our own bold words); you pick one in Telegram
+        if theme == "doodle":  # code-drawn doodle thumbnails: statement + simple chart + Max (3 emotions)
+            from .art.doodle import thumbnail as doodle_thumb
+            from .art.ai_visuals import bold_words
+
+            opts_paths = []
+            for k, (words, emo) in enumerate(zip(bold_words(script, 3), ("shocked", "worried", "confident"))):
+                dst = out / (f"thumbnail_{k + 1}.jpg" if script.format == "long" else "thumbnail.jpg")
+                doodle_thumb(words, emo, dst, seed=k + 1)
+                opts_paths.append(dst)
+                if script.format != "long":
+                    break
+            thumb = opts_paths[0]
+            thumb_how = [f"doodle (code-drawn) \"{w}\"" for w in bold_words(script, len(opts_paths))]
+        elif script.format == "long":  # 3 options (AI + our own bold words); you pick one in Telegram
             from .art.ai_visuals import thumbnail_options
 
             opts_paths, thumb_how = thumbnail_options(
