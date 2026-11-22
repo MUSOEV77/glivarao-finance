@@ -127,6 +127,66 @@ def _match(v: float, idx) -> tuple | None:
     return None
 
 
+EXAMPLE_RE = re.compile(r"\b(?:example|illustrat\w*|hypothetical|calculat\w*|for instance|imagine|say you|let'?s say|"
+                        r"if you (?:owe|have|borrow|carry|pay|put|save|invest)\w*)\b", re.I)
+
+
+def _rates(brief, idx) -> list[tuple[float, str, str]]:
+    """Sourced percentages (APR, yields) that a worked example may use as its rate: (rate, label, url)."""
+    out = []
+    for f in brief.facts:
+        if f.url and f.kind == "DATA":
+            for m in re.finditer(r"(\d+(?:\.\d+)?)\s?(?:%|percent)", f.text):
+                out.append((float(m.group(1)) / 100, f.source or "Source", f.url))
+    return out
+
+
+def _example_results(principal: float, apr: float, payments: list[float], years: list[int]) -> list[float]:
+    """Results GLIVARAO's calculators give for THIS example's stated inputs only: simple interest, paying the
+    minimum, paying each stated monthly amount, and a loan over each stated number of years."""
+    from ..content import calculators as calc
+
+    vals = [principal * apr, principal * apr / 12]
+    c = calc.minimum_payment_payoff(principal, apr)
+    vals += [c.results["total_interest"], c.results["total_paid"], c.results["months"], c.results["years"]]
+    for pay in payments:
+        if pay > principal * apr / 12:
+            f = calc.fixed_payment_payoff(principal, apr, pay)
+            vals += [f.results.get(k, 0) for k in ("total_interest", "total_paid", "months", "years")]
+    for yrs in years:
+        lo = calc.amortized_loan(principal, apr, yrs)
+        vals += [lo.results.get(k, 0) for k in ("monthly_payment", "total_interest", "total_paid")]
+    return [float(v) for v in vals if isinstance(v, (int, float)) and v]
+
+
+def worked_example(text: str, values: list[float], brief, idx) -> tuple[str, str] | None:
+    """(label, url) if `text` is a clearly labeled worked example whose rate is a sourced fact and whose results
+    are reproduced by GLIVARAO's calculators from the stated inputs (balance, monthly payment, years); else None.
+    Real-world statistics never pass here (they need their own source)."""
+    if not EXAMPLE_RE.search(text):
+        return None
+    stated = numbers_in(text)
+    nums = [v for v in (values or stated) if v]
+    pays = [float(m.group(1).replace(",", "")) for m in
+            re.finditer(r"\$([\d,]+(?:\.\d+)?)\s*(?:a|per|each|every)\s*month", text, re.I)]
+    yrs = [int(m.group(1)) for m in re.finditer(r"\b(\d{1,2})[- ]years?\b", text, re.I)]
+    low = text.lower()
+    for rate, label, url in _rates(brief, idx):
+        rate_pct = rate * 100
+        if not (any(abs(v - rate_pct) <= 0.01 for v in stated) or "example" in low or "illustrat" in low):
+            continue
+        amounts = [v for v in stated if v >= 100 and abs(v - rate_pct) > 0.01 and v not in pays]
+        for principal in amounts:
+            inputs = {principal, rate_pct, *pays, *map(float, yrs)}
+            results = _example_results(principal, rate, pays, yrs)
+            outputs = [v for v in nums if not any(abs(v - x) <= 0.01 for x in inputs)]
+            if outputs and all(any(abs(v - r) <= max(0.51, 0.015 * abs(r), _rounding_unit(r) / 2 + 1e-9)
+                                   for r in results) for v in outputs):
+                return (f"Worked example (hypothetical ${principal:,.0f}; rate {rate_pct:g}% from {label}; math "
+                        "checked by GLIVARAO's calculators)", url)
+    return None
+
+
 def check_claims(script: Script, brief, creator_text: str = "") -> list[Claim]:
     idx = _index(brief)
     creator_nums = set(numbers_in(creator_text or ""))
@@ -144,9 +204,12 @@ def check_claims(script: Script, brief, creator_text: str = "") -> list[Claim]:
                 claims.append(Claim(i, sent, vals, "reference", ref[0], ref[1]))
                 continue
             hits = [_match(v, idx) for v in vals]
+            ex = None if all(hits) else worked_example(sent, vals, brief, idx)
             if all(hits):
                 status, label, url = next((h for h in hits if h[0] == "source"), hits[0])
                 claims.append(Claim(i, sent, vals, status, label, url))
+            elif ex:
+                claims.append(Claim(i, sent, vals, "calculation", ex[0], ex[1]))
             elif any(v in creator_nums for v in vals):
                 claims.append(Claim(i, sent, vals, "creator", "Your own input: confirm it's accurate"))
             else:
@@ -157,6 +220,18 @@ def check_claims(script: Script, brief, creator_text: str = "") -> list[Claim]:
             status = "calculation" if "calculat" in src.lower() else ("source" if url else "UNSOURCED")
             if status == "calculation":
                 src, url = _method(brief, "fees" if "fee" in scene.chart.title.lower() else "")
+            ex = None
+            vals_c = [float(v) for v in scene.chart.values if v]
+            chits = [_match(v, idx) for v in vals_c]
+            if not url and vals_c and all(chits) and EXAMPLE_RE.search(f"{scene.chart.title} {src}"):
+                # every number is one of the brief's own checked calculations (or a sourced fact)
+                h = next((x for x in chits if x[0] == "source"), chits[0])
+                ex = (f"Worked example: {h[1]}", h[2]) if h[2] else None
+            if not url and not ex:   # a clearly labeled example chart: inputs from a sourced fact, math re-done
+                text = " ".join([scene.chart.title, src, " ".join(scene.chart.labels), scene.narration])
+                ex = worked_example(text, list(scene.chart.values), brief, idx)
+            if ex:
+                status, src, url = "calculation", ex[0], ex[1]
             claims.append(Claim(i, f"Chart: {scene.chart.title}", list(scene.chart.values), status, src, url))
         if scene.chart.kind == "compound_growth":
             src, url = _method(brief) if brief.family in ("grow", "invest") else METHOD["grow"]

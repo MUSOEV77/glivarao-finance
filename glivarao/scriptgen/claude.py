@@ -223,6 +223,15 @@ def rewrite_for_originality(script: Script, reasons: list[str], phrases: list[st
     return out.model_copy(update={"style": script.style})
 
 
+def rewrite_for_compliance(script: Script, errors: list[str], facts: list[str], settings: Settings, client=None,
+                           ledger: ClaudeSpendLedger | None = None) -> Script:
+    """One paid fix-up after a compliance rejection, with the rejection reasons and the fact sheet."""
+    from .prompts import compliance_prompt
+
+    data = _ask(settings, compliance_prompt(script.model_dump_json(), errors, facts), script.format, client, ledger)
+    return _to_script(data, script.format, script.topic).model_copy(update={"style": script.style})
+
+
 def rewrite_for_sponsor(script: Script, issues: list[str], needs_what_to_do: bool, settings: Settings,
                         client=None, ledger: ClaudeSpendLedger | None = None,
                         evergreen_issues: list[str] | None = None) -> Script:

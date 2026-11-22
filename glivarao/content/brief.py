@@ -8,6 +8,8 @@ A script may only quote numbers that appear as DATA or CALCULATION facts.
 """
 from __future__ import annotations
 
+import re
+
 import json
 from dataclasses import asdict, dataclass, field
 from datetime import date
@@ -156,12 +158,20 @@ def build_brief(card: dict, today: date) -> Brief:
 
 def _add_calcs(b: Brief) -> None:
     if b.family == "card":
-        mp = calc.minimum_payment_payoff(5000, 0.24)
-        fx = calc.fixed_payment_payoff(5000, 0.24, 200)
+        # the worked example uses the SOURCED average card rate when the fact sheet has one (e.g. Fed G.19)
+        src = next(((float(m.group(1)) / 100, f) for f in b.facts if f.kind == "DATA" and f.url
+                    and re.search(r"credit card|card rate|cards charged", f.text, re.I)
+                    for m in [re.search(r"(\d{1,2}(?:\.\d+)?)\s?%", f.text)] if m), None)
+        apr = src[0] if src else 0.24
+        mp = calc.minimum_payment_payoff(5000, apr)
+        fx = calc.fixed_payment_payoff(5000, apr, 200)
         b.calcs = {"minimum": mp, "fixed": fx}
+        note = (f"Worked example: a hypothetical $5,000 balance at {apr * 100:g}%, the average card rate from "
+                f"{src[1].source} ({src[1].url}); check the APR on your own statement." if src else
+                "Example APR of 24% is hypothetical; check the APR on your own statement.")
         b.facts += [Fact("CALCULATION", mp.fact("years") + f"; total interest {calc.fmt_money(mp.results['total_interest'])}"),
                     Fact("CALCULATION", fx.fact("years") + f"; total interest {calc.fmt_money(fx.results['total_interest'])}"),
-                    Fact("EDITORIAL", "Example APR of 24% is hypothetical; check the APR on your own statement.")]
+                    Fact("EDITORIAL", note)]
     elif b.family == "loan":
         principal, apr, years = {"mortgage": (400_000, 0.065, 30), "rent_vs_buy": (400_000, 0.065, 30),
                                  "student_loan": (35_000, 0.065, 10), "auto_loan": (35_000, 0.08, 6),

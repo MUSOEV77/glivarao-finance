@@ -139,6 +139,19 @@ def sources_prompt(draft_json: str, unsourced: list[str]) -> str:
             f"education-only sentence.\n\nDRAFT:\n{draft_json}\n\nReturn only the revised JSON object.")
 
 
+def compliance_prompt(draft_json: str, errors: list[str], facts: list[str]) -> str:
+    """One fix-up request after GLIVARAO's automatic checks rejected a script: the exact reasons + the fact sheet."""
+    errs = "\n".join(f"- {e}" for e in errors[:15])
+    fs = "\n".join(f"- {f}" for f in facts[:40])
+    return ("GLIVARAO's automatic checks rejected this script for these reasons:\n" + errs + "\n\nFix every one of "
+            "them. Every real-world number must come from the fact sheet below (it has the sources). A worked example "
+            "is allowed when it is clearly labeled as an example (say 'for example' or 'if you owe ...'; chart title "
+            "ending with '(example)'), uses a rate from the fact sheet, and uses the fact sheet's calculation results; "
+            "otherwise remove the number. Keep the title idea, the structure, the host's 'creator' scene, the closing "
+            "'What to do' section and the education-only sentence in the final scene.\n\nFACT SHEET:\n" + fs +
+            f"\n\nDRAFT:\n{draft_json}\n\nReturn only the revised JSON object.")
+
+
 def sponsor_prompt(draft_json: str, issues: list[str], needs_what_to_do: bool,
                    evergreen_issues: list[str] | None = None) -> str:
     """Rewrite request when a draft breaks the sponsor-friendly rules or lacks the closing "What to do" section."""

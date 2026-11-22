@@ -398,6 +398,29 @@ def make_now(settings: Settings, store: JobStore, n: int, short: bool = False, s
                              (f"; {len(notes)} fact(s) dropped or unconfirmed" if notes else ""))
         _produce_drafts(drafts, brief, "", writer, True, card, None, {"ranked": []}, today, settings, store, send,
                         workers, result)
+        rejected = [j for j in result.jobs if j[2] == "rejected_compliance"]
+        if rejected:   # one automatic retry: Claude gets the exact rejection reasons and the fact sheet
+            from .models import Script as _Script
+            from .scriptgen.claude import rewrite_for_compliance
+
+            facts = [f"{f.text} [{f.source or f.kind}{' ' + f.url if f.url else ''}]" for f in brief.facts]
+            retry = []
+            for j in rejected:
+                cfile = settings.output_dir / j[0] / "compliance.txt"
+                errs = [ln[7:] for ln in (cfile.read_text().splitlines() if cfile.exists() else [])
+                        if ln.startswith("ERROR: ")] or [str(j[4])]
+                log.warning("make-now: %s rejected (%s); asking Claude to fix it once", j[0], "; ".join(errs)[:200])
+                try:
+                    old = _Script.model_validate_json(Path(store.get(j[0]).script_path).read_text())
+                    fixed = rewrite_for_compliance(old, errs, facts, settings)
+                except ClaudeUnavailable as exc:
+                    log.warning("make-now retry skipped: Claude unavailable (%s)", exc)
+                    continue
+                retry.append(_originality_gate(fixed, brief, today, history, settings, True, used, lambda k: fixed))
+            if retry:
+                result.note += f"; {len(retry)} rejected draft(s) fixed by Claude and checked again"
+                _produce_drafts(retry, brief, "", writer, True, card, None, {"ranked": []}, today, settings, store,
+                                send, workers, result)
         made = [j for j in result.jobs if j[2] in ("rendered", "pending_approval", "held")]
         if made and short:
             from .studio import buffer as _buffer

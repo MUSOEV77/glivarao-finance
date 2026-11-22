@@ -108,3 +108,26 @@ def test_make_now_long_reaches_review(paid, store, capsys):
     print(r.jobs)
     assert r.jobs[0][2] in ("rendered", "pending_approval"), r.jobs
     assert launch_plan.done(store) == [1]
+
+
+def test_make_now_retries_once_with_the_rejection_reason(paid, store, monkeypatch):
+    from glivarao.scriptgen import claude as C
+
+    s, _ = paid
+    prompts = []
+    good_ask = C._ask
+
+    def ask(settings_, prompt, fmt, client=None, ledger=None):
+        prompts.append(prompt)
+        d = good_ask(settings_, prompt, fmt)
+        if "rejected this script for these reasons" not in prompt:
+            d["scenes"][-2]["heading"] = "Recap"           # no closing "What to do" section -> rejected
+        return d
+
+    monkeypatch.setattr(C, "_ask", ask)
+    store.kv_set("launch_done", "[]")
+    r = daily_v2.make_now(s, store, 1, send=False)
+    assert [j[2] for j in r.jobs] == ["rejected_compliance", "rendered"], r.jobs
+    fix = next(p for p in prompts if "rejected this script for these reasons" in p)
+    assert "What to do" in fix and "FACT SHEET" in fix and "federalreserve.gov" in fix
+    assert "fixed by Claude and checked again" in r.note and launch_plan.done(store) == [1]
