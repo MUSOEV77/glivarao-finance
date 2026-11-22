@@ -1,5 +1,6 @@
 """Worked examples / calculations: allowed without their own URL when clearly labeled, the rate comes from a sourced
 fact and GLIVARAO's calculators reproduce the numbers. Real-world statistics still need a source."""
+import pytest
 from dataclasses import replace
 from datetime import date
 
@@ -95,3 +96,20 @@ def test_charts_not_built_from_the_fact_sheet_are_removed_not_rejected():
     assert not factcheck.needs_source(factcheck.check_claims(s, b))
     stat = Scene(heading="Stat", narration="About 21 million people enrolled last year.")
     assert factcheck.needs_source(factcheck.check_claims(_script(stat), b))     # real statistic: still needs a source
+
+
+@pytest.mark.parametrize("n,text,ok", [
+    (1, "At 22.36%, a $5,000 balance costs about $1,118 a year in interest. That's about $93 a month.", True),
+    (1, "Americans owe about $1.4 trillion in revolving credit.", True),
+    (1, "The average card rate is about 22%.", True),
+    (1, "If you owe $5,000 at 22.36%, you'd pay $9,999 in interest.", False),
+    (1, "Americans owe $987 billion on store cards.", False),
+    (2, "The poverty line is $15,960 for one person. 400% of that is $63,840.", True),
+    (2, "Say, with made-up numbers, two plans differ by $50 a month. Over a year, that's $600.", True),
+    (2, "Say you spend $40 a week on takeout. That's $2,080 a year.", True),
+    (2, "About 21 million people signed up.", False),
+])
+def test_how_claude_paraphrases_are_judged(n, text, ok):
+    b = build_brief(launch_plan.LAUNCH[n - 1].card(), date(2026, 11, 22))
+    claims = factcheck.check_claims(_script(Scene(heading="h", narration=text)), b)
+    assert (not factcheck.needs_source(claims)) is ok, [(c.text, c.status) for c in claims]

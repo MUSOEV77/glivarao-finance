@@ -479,12 +479,16 @@ def retry_rejected(settings: Settings, store: JobStore, day: date | None = None,
     guard(settings, "retry of rejected videos")
     if not paid_writer_allowed(settings):
         raise ValueError("Claude can't be used (ALLOW_PAID_APIS=false or WRITER=free)")
-    day = day or date.today()
+    from datetime import timedelta
+
+    days = [day] if day else [date.today(), date.today() - timedelta(days=1)]   # default: today and yesterday
+    stamps = tuple(d.strftime("%Y%m%d") for d in days)
+    day = days[0]
     done = set(json.loads(store.kv_get("rejected_retried", "[]")))
     fixed_from = json.loads(store.kv_get("fixed_from", "{}"))
     superseded = set(fixed_from.values())        # first drafts that already had an automatic fix attempt
     todo = [j for j in store.list(limit=500) if j.status == JobStatus.REJECTED_COMPLIANCE
-            and j.id.startswith(day.strftime("%Y%m%d")) and j.id not in done and j.id not in superseded]
+            and j.id.startswith(stamps) and j.id not in done and j.id not in superseded]
     lock = open(Path(settings.db_path).with_name("daily.lock"), "w")
     try:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -560,6 +564,9 @@ def render_and_review(job, script, brief, claims, ctx: dict, settings: Settings,
         from .content.short_fit import ShortTooLong
 
         tempo = 1.0
+        from .content.short_fit import merge_tiny_scenes
+
+        script = merge_tiny_scenes(script)   # no clip is voiced alone with only a few words
         if script.format == "short":  # voice + measure BEFORE rendering; held (not rendered) if it can't fit
             script, tempo, voiced = fit_short_voice(script, settings, out, job.id)
         if getattr(settings, "theme", "") == "doodle":  # full pictures: key scenes + library places + Max

@@ -881,7 +881,7 @@ def main(argv=None):
     mn.add_argument("--workers", type=int)
     mn.set_defaults(fn=cmd_make_now)
     rr = sub.add_parser("retry-rejected", help="make today's compliance-rejected videos again (Claude fixes them)")
-    rr.add_argument("--date", help="YYYY-MM-DD (default today)")
+    rr.add_argument("--date", help="YYYY-MM-DD (default: today and yesterday)")
     rr.add_argument("--no-telegram", action="store_true")
     rr.add_argument("--workers", type=int)
     rr.set_defaults(fn=cmd_retry_rejected)

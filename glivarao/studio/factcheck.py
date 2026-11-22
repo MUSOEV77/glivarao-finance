@@ -217,7 +217,8 @@ class _Pool:
             for m, (b, ub) in enumerate(self.scene + consts):
                 if m == n:
                     continue          # never a number with itself (x + x, x - x)
-                for r in (a * b, a + b, a - b, b - a) + ((a / b,) if b else ()) + ((b / a,) if a else ()):
+                for r in (a * b, a + b, a - b, b - a, a * b / 100, a * b / 1200) + ((a / b,) if b else ()) + \
+                        ((b / a,) if a else ()):
                     if r > 0 and _close(v, r):
                         return True, ua or ub
         for a, ua in self.sourced:
@@ -228,6 +229,31 @@ class _Pool:
                 if _close(v, a * p_ / 100):
                     return True, ua
         return False, ""
+
+
+INPUT_BEFORE = re.compile(r"(?:owe|owed|owing|borrow\w*|balance of|differ(?:s)? by|earn\w*|make|makes|save|saves|put|"
+                          r"puts|carry|carries|have|has|spend|spends|budget of|deposit|pay|pays|paying|charge of|"
+                          r"costs?|price of)\s+(?:about\s+|just\s+|only\s+|an extra\s+|another\s+)?$", re.I)
+RESULT_AFTER = re.compile(r"^\s*(?:in (?:interest|total|fees)|total|altogether|overall|over (?:the|a) (?:life|year))",
+                          re.I)
+
+
+def _is_input(sent: str, value: float) -> bool:
+    """True when the number is written as an example INPUT ('owe $5,000', 'a $5,000 balance', 'differ by $50',
+    'pay $200 a month'), not as a result ('you'd pay $1,800 in interest')."""
+    for m in DIGITS.finditer(sent):
+        try:
+            v = float(m.group(0).replace("$", "").replace(",", "").replace("%", "").strip())
+        except ValueError:
+            continue
+        if abs(v - value) > 1e-6:
+            continue
+        before, after = sent[:m.start()], sent[m.end():]
+        if RESULT_AFTER.search(after):
+            return False
+        if INPUT_BEFORE.search(before) or re.match(r"\s*(?:balance|loan|bill|budget|payment|difference)\b", after, re.I):
+            return True
+    return False
 
 
 def _percents(text: str) -> set[float]:
@@ -273,11 +299,17 @@ def check_claims(script: Script, brief, creator_text: str = "") -> list[Claim]:
             # simple arithmetic on sourced numbers (anywhere) and on labeled example inputs (in an example)
             pct = _percents(sent)
             ok, urls, hypo = True, [], []
-            for v in vals:
+            for v, h in zip(vals, hits):      # numbers the fact sheet vouches for directly are inputs of the sentence
+                if h is not None:
+                    pool.add(v, h[2])
+            for v, h in zip(vals, hits):
+                if h is not None:
+                    urls.append(h[2])
+                    continue
                 good, u = (False, "") if v in pct else pool.derive(v)   # a percentage must be sourced directly
                 if good:
                     urls.append(u)
-                elif labeled and not hypo and v <= HYPO_MAX and v not in pct:
+                elif labeled and not hypo and v <= HYPO_MAX and v not in pct and _is_input(sent, v):
                     hypo.append(v)          # ONE personal-scale hypothetical input per labeled example sentence
                     pool.add(v, "")         # ... and results in the same sentence may be computed from it
                 else:

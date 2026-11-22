@@ -92,6 +92,54 @@ def words_per_minute(text: str, audio: np.ndarray, sr: int = KOKORO_SR) -> float
     return len(text.split()) / sec * 60 if sec else 0.0
 
 
+def active_speech_seconds(audio: np.ndarray, sr: int = KOKORO_SR, pause: float = 0.6) -> float:
+    """Speech time without leading/trailing silence AND without pauses longer than `pause` seconds."""
+    if not len(audio):
+        return 0.0
+    win = max(1, int(sr * 0.02))
+    n = len(audio) // win
+    if n == 0:
+        return 0.0
+    rms = np.sqrt((audio[: n * win].reshape(n, win) ** 2).mean(axis=1))
+    loud = rms > 0.006
+    if not loud.any():
+        return 0.0
+    first, last = np.argmax(loud), n - 1 - np.argmax(loud[::-1])
+    seg = loud[first:last + 1]
+    total, run = 0, 0
+    max_gap = int(pause / 0.02)
+    for v in seg:
+        if v:
+            total += 1 + (run if run <= max_gap else 0)
+            run = 0
+        else:
+            run += 1
+    return total * 0.02
+
+
+def spoken_words(text: str) -> int:
+    """Roughly how many words the narrator SAYS: '$1,368.5 billion' is about 9 spoken words, '22.36%' about 5."""
+    import re as _re
+
+    n = 0
+    for tok in text.replace("*", "").split():
+        m = _re.search(r"\d[\d,]*(?:\.\d+)?", tok)
+        if not m:
+            n += 1
+            continue
+        num = m.group(0).replace(",", "")
+        whole, _, frac = num.partition(".")
+        digits = len(whole.lstrip("0")) or 1
+        n += {1: 1, 2: 2, 3: 4, 4: 5, 5: 6, 6: 8}.get(digits, 9) + (1 + len(frac) if frac else 0)
+        n += ("$" in tok) + ("%" in tok)
+    return n
+
+
+def spoken_wpm(text: str, audio: np.ndarray, sr: int = KOKORO_SR) -> float:
+    sec = active_speech_seconds(audio, sr)
+    return spoken_words(text) / sec * 60 if sec else 0.0
+
+
 def estimate_usd(text: str, price_per_m_audio: float, tokens_per_sec: float, chars_per_sec: float = 14.7) -> float:
     """Conservative pre-flight estimate (speech seconds from measured GLIVARAO narration rate)."""
     return len(text) / chars_per_sec * tokens_per_sec * price_per_m_audio / 1e6
@@ -184,8 +232,13 @@ class GeminiTTSNarrator:
 
     _wait = 0.0
 
+    STRICT = ("{style}\n\nRead ONLY the transcript below aloud, word for word. Do not read these instructions, do "
+              "not add anything.\nTRANSCRIPT:\n{text}")
+
     def _request_once(self, text: str) -> tuple[np.ndarray, int]:
-        body = {"contents": [{"parts": [{"text": f"{self.style}\n\n{text}"}]}],
+        prompt = (self.STRICT.format(style=self.style, text=text) if getattr(self, "_strict", False)
+                  else f"{self.style}\n\n{text}")
+        body = {"contents": [{"parts": [{"text": prompt}]}],
                 "generationConfig": {"responseModalities": ["AUDIO"],
                                      "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": self.voice}}}}}
         try:
@@ -230,19 +283,43 @@ class GeminiTTSNarrator:
         np.save(p, audio)
         return audio
 
+    def _save_debug(self, prepped: str, audio: np.ndarray, tag: str) -> None:
+        """Keep the rejected clip and its text for inspection (data/voice_debug/)."""
+        try:
+            import soundfile as sf
+
+            d = self.cache.parent / "voice_debug"
+            d.mkdir(parents=True, exist_ok=True)
+            stem = self._key_for(prepped).stem + f"_{tag}"
+            sf.write(d / f"{stem}.wav", audio, KOKORO_SR)
+            (d / f"{stem}.txt").write_text(prepped)
+        except Exception:  # noqa: BLE001  debugging aid only
+            pass
+
     def narrate(self, text: str, lead_in: float = 0.15, tail: float = 0.45) -> Narration:
         display = [s.replace("*", "") for s in split_sentences(" ".join(text.split()))]
         prepped = self._prep(text)
         audio = apply_tempo(self._scene_audio(prepped), self.speed)  # raw audio cached; tempo after
         n_words = len(text.split())
-        if n_words >= 12 and words_per_minute(text, audio) < MIN_SANE_WPM:
-            # far too much audio for the words (repeated or stretched speech): ask once more, never keep it
-            log.warning("scene audio abnormally slow (%.0f wpm); requesting it again", words_per_minute(text, audio))
+        if n_words >= 8 and spoken_wpm(text, audio) < MIN_SANE_WPM:
+            # far too much audio for the words: usually the model read the style instruction aloud too, or repeated
+            # itself. Ask again with the transcript clearly marked as the ONLY thing to read (same voice + style).
+            log.warning("scene audio abnormally slow (%.0f spoken wpm) for: %r; requesting it again (strict)",
+                        spoken_wpm(text, audio), text[:120])
+            self._save_debug(prepped, audio, "first")
             self._key_for(prepped).unlink(missing_ok=True)
-            audio = apply_tempo(self._scene_audio(prepped), self.speed)
-            if words_per_minute(text, audio) < MIN_SANE_WPM:
-                raise VoiceUnavailable(f"speech came back abnormally slow twice ({words_per_minute(text, audio):.0f} "
-                                       "words/min); the video is held instead of using it")
+            self._strict = True
+            try:
+                audio = apply_tempo(self._scene_audio(prepped), self.speed)
+            finally:
+                self._strict = False
+            if spoken_wpm(text, audio) < MIN_SANE_WPM:
+                self._save_debug(prepped, audio, "strict")
+                self._key_for(prepped).unlink(missing_ok=True)
+                raise VoiceUnavailable(
+                    f"speech came back abnormally slow twice ({spoken_wpm(text, audio):.0f} spoken words/min, "
+                    f"{active_speech_seconds(audio):.1f} s for {n_words} words) in the scene: \"{text[:160]}\"; "
+                    "the video is held instead of using it")
         idx = np.where(np.abs(audio) > 0.004)[0]  # trim leading/trailing silence, keep GLIVARAO lead-in/tail
         if len(idx):
             audio = audio[max(0, idx[0] - 480): idx[-1] + 720]
