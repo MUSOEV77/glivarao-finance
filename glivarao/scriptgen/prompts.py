@@ -56,11 +56,16 @@ Originality rules:
 Accuracy and compliance rules (US audience):
 - Educational content only. Never give personalized investment, tax or legal advice.
 - Never promise or imply guaranteed returns, "risk-free" gains, or getting rich quick.
-- Use only figures you are confident are accurate as of your knowledge. When a figure changes yearly
-  (tax brackets, contribution limits, rates), name the year and tell viewers to check the current number.
-- Charts: prefer kind "compound_growth" (computed from params, so always correct) or clearly labeled
-  hypothetical examples with source "Illustrative example". If you use a real statistic, put its
-  publisher in `source` (e.g. "U.S. Bureau of Labor Statistics"); a human will fact-check it.
+- NUMBERS (strict, checked by code; a script that breaks this is rejected): every number in the narration and
+  every value in a chart must be EITHER (a) on the fact sheet you are given (it has the official source URL),
+  OR (b) part of a clearly labeled worked example: say "for example" / "if you owe ...", use a rate or amount
+  from the fact sheet (or one round hypothetical amount such as a $5,000 balance or a $50-a-month difference),
+  and only simple arithmetic on those numbers (for example $50 a month x 12 = $600 a year). Never invent a
+  statistic, never write "made-up numbers", never use a number from memory. If a number you would like is not on
+  the fact sheet, say it in words without the number (e.g. "a few hundred dollars more each month").
+- Charts: build them ONLY from fact-sheet numbers (put that fact's source name in `source`) or from a labeled
+  worked example (title ending in "(example)", source "Calculated example"); kind "compound_growth" is computed
+  from params. If the fact sheet has no numbers for a chart, use kind "none".
 - For real US economic time series, set kind "line_series", leave labels/values empty and set source to
   one of: FRED:CPIAUCSL (inflation), FRED:FEDFUNDS, FRED:MORTGAGE30US, FRED:UNRATE, FRED:DGS10.
   The pipeline fills in official data. Do not quote exact recent values for these in narration;

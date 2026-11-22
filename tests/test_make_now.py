@@ -130,4 +130,27 @@ def test_make_now_retries_once_with_the_rejection_reason(paid, store, monkeypatc
     assert [j[2] for j in r.jobs] == ["rejected_compliance", "rendered"], r.jobs
     fix = next(p for p in prompts if "rejected this script for these reasons" in p)
     assert "What to do" in fix and "FACT SHEET" in fix and "federalreserve.gov" in fix
-    assert "fixed by Claude and checked again" in r.note and launch_plan.done(store) == [1]
+    assert "fixed by Claude, checked again" in r.note and launch_plan.done(store) == [1]
+
+
+def test_retry_rejected_makes_todays_rejected_videos_again_once(paid, store, monkeypatch):
+    from glivarao.scriptgen import claude as C
+
+    s, _ = paid
+    good_ask = C._ask
+    state = {"broken": True}
+
+    def ask(settings_, prompt, fmt, client=None, ledger=None):
+        d = good_ask(settings_, prompt, fmt)
+        if state["broken"]:
+            d["scenes"][-2]["heading"] = "Recap"          # always non-compliant while "broken"
+        return d
+
+    monkeypatch.setattr(C, "_ask", ask)
+    store.kv_set("launch_done", "[]")
+    r = daily_v2.make_now(s, store, 1, send=False)
+    assert [j[2] for j in r.jobs] == ["rejected_compliance", "rejected_compliance"]     # incl. the automatic fix
+    state["broken"] = False
+    jobs = daily_v2.retry_rejected(s, store, send=False)
+    assert len(jobs) == 1 and jobs[0][2] == "rendered", jobs           # one video: its latest attempt is fixed
+    assert daily_v2.retry_rejected(s, store, send=False) == []                            # never twice

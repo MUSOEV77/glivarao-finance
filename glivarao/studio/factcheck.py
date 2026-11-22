@@ -44,7 +44,7 @@ FEES_METHOD = ("Method: Investor.gov, expense ratios (SEC)",
                "https://www.investor.gov/introduction-investing/investing-basics/glossary/expense-ratio")
 DIGITS = re.compile(r"(?<![\w(])\$?\d[\d,]*(?:\.\d+)?(?:\s?%)?(?![\w(])")
 # account names, years and numbered labels ("myth number 2", "step 3", "option 2") are not claims
-NOT_A_CLAIM = re.compile(r"401\(k\)|403\(b\)|\bW-?[249]\b|\b1099(?:-[A-Z]+)?\b|\b1040\b|\b529 plan|\b(?:19|20)\d\d\b|\b(?:myth|step|option|tip|mistake|chapter|part|number)"
+NOT_A_CLAIM = re.compile(r"\b[A-Z]\.\d+\b|\bQ[1-4]\b|401\(k\)|403\(b\)|\bW-?[249]\b|\b1099(?:-[A-Z]+)?\b|\b1040\b|\b529 plan|\b(?:19|20)\d\d\b|\b(?:myth|step|option|tip|mistake|chapter|part|number)"
                          r"\s+(?:number\s+)?\d+\b", re.I)
 
 
@@ -108,9 +108,11 @@ def _index(brief) -> list[tuple[float, str, str, str]]:
         label, url = _method(brief, name)
         for d in (getattr(c, "inputs", {}), getattr(c, "results", {})):
             for v in d.values():
-                if isinstance(v, (int, float)):
-                    for x in {float(v), float(v) * 100, float(v) * 12}:
-                        idx.append((x, "calculation", label, url))
+                vs = v if isinstance(v, (list, tuple)) else [v]       # e.g. the yearly balance path of a payoff
+                for w in vs:
+                    if isinstance(w, (int, float)) and not isinstance(w, bool):
+                        for x in {float(w), float(w) * 100, float(w) * 12}:
+                            idx.append((x, "calculation", label, url))
     return idx
 
 
@@ -128,7 +130,10 @@ def _match(v: float, idx) -> tuple | None:
 
 
 EXAMPLE_RE = re.compile(r"\b(?:example|illustrat\w*|hypothetical|calculat\w*|for instance|imagine|say you|let'?s say|"
-                        r"if you (?:owe|have|borrow|carry|pay|put|save|invest)\w*)\b", re.I)
+                        r"say,|suppose|made[- ]up|picture this|if you (?:owe|have|borrow|carry|pay|put|save|invest)\w*)"
+                        r"\b", re.I)
+CONSTS = (12.0, 52.0, 100.0, 365.0)   # months, weeks, percent, days
+HYPO_MAX = 100_000.0     # a hypothetical example amount is personal-scale; bigger numbers must be sourced
 
 
 def _rates(brief, idx) -> list[tuple[float, str, str]]:
@@ -187,14 +192,63 @@ def worked_example(text: str, values: list[float], brief, idx) -> tuple[str, str
     return None
 
 
+def _close(a: float, b: float) -> bool:
+    """Arithmetic results must match closely (0.3%), not just within a rounding band."""
+    return abs(a - b) <= max(0.51, 0.003 * abs(b))
+
+
+class _Pool:
+    """What arithmetic may start from. `scene`: numbers this scene states (sourced or labeled example), which may be
+    combined in pairs; `sourced`: fact-sheet numbers the scene doesn't state, which may only be scaled by a time
+    constant (12, 52, 365, 100) or by a percentage that is itself on the fact sheet (e.g. 400% x $15,960)."""
+
+    def __init__(self, sourced: list[tuple[float, str]], pcts: list[float] | None = None):
+        self.sourced, self.scene, self.pcts = list(sourced), [], list(pcts or [])
+
+    def add(self, v: float, url: str = "") -> None:
+        self.scene.append((v, url))
+
+    def derive(self, v: float) -> tuple[bool, str]:
+        for a, ua in self.scene + self.sourced:
+            if _close(v, a):
+                return True, ua
+        consts = [(c, "") for c in CONSTS]
+        for n, (a, ua) in enumerate(self.scene):
+            for m, (b, ub) in enumerate(self.scene + consts):
+                if m == n:
+                    continue          # never a number with itself (x + x, x - x)
+                for r in (a * b, a + b, a - b, b - a) + ((a / b,) if b else ()) + ((b / a,) if a else ()):
+                    if r > 0 and _close(v, r):
+                        return True, ua or ub
+        for a, ua in self.sourced:
+            for c in (12.0, 100.0):         # unstated fact-sheet numbers: per month / per year, percent only
+                if _close(v, a * c) or _close(v, a / c):
+                    return True, ua
+            for p_ in self.pcts:
+                if _close(v, a * p_ / 100):
+                    return True, ua
+        return False, ""
+
+
+def _percents(text: str) -> set[float]:
+    return {float(m.group(1).replace(",", "")) for m in re.finditer(r"([\d,]+(?:\.\d+)?)\s?(?:%|percent)", text, re.I)}
+
+
 def check_claims(script: Script, brief, creator_text: str = "") -> list[Claim]:
     idx = _index(brief)
+    # arithmetic may only start from fact-sheet numbers (official sources), not from every calculator variant
+    sourced = [(v, f.url) for f in brief.facts if f.kind == "DATA" and f.url for v in numbers_in(f.text)]
+    fact_pcts = sorted({p for f in brief.facts if f.kind == "DATA" and f.url for p in _percents(f.text)})
     creator_nums = set(numbers_in(creator_text or ""))
     claims = []
     for i, scene in enumerate(script.scenes):
+        pool = _Pool(sourced, fact_pcts)   # per scene: what this scene states + scaled fact-sheet numbers
+        example_ctx = False
         for sent in _sentences(scene.narration):
             ref = next(((lab, url) for pat, lab, url in REFERENCES if re.search(pat, sent, re.I)), None)
             vals = numbers_in(sent)
+            labeled = bool(EXAMPLE_RE.search(sent))
+            example_ctx = example_ctx or labeled
             if not vals and not ref:
                 continue
             if scene.beat == "creator":
@@ -204,44 +258,92 @@ def check_claims(script: Script, brief, creator_text: str = "") -> list[Claim]:
                 claims.append(Claim(i, sent, vals, "reference", ref[0], ref[1]))
                 continue
             hits = [_match(v, idx) for v in vals]
-            ex = None if all(hits) else worked_example(sent, vals, brief, idx)
             if all(hits):
                 status, label, url = next((h for h in hits if h[0] == "source"), hits[0])
                 claims.append(Claim(i, sent, vals, status, label, url))
-            elif ex:
+                for v in vals:
+                    pool.add(v, url)
+                continue
+            ex = worked_example(sent, vals, brief, idx)
+            if ex:
                 claims.append(Claim(i, sent, vals, "calculation", ex[0], ex[1]))
+                for v in vals:
+                    pool.add(v, ex[1])
+                continue
+            # simple arithmetic on sourced numbers (anywhere) and on labeled example inputs (in an example)
+            pct = _percents(sent)
+            ok, urls, hypo = True, [], []
+            for v in vals:
+                good, u = (False, "") if v in pct else pool.derive(v)   # a percentage must be sourced directly
+                if good:
+                    urls.append(u)
+                elif labeled and not hypo and v <= HYPO_MAX and v not in pct:
+                    hypo.append(v)          # ONE personal-scale hypothetical input per labeled example sentence
+                    pool.add(v, "")         # ... and results in the same sentence may be computed from it
+                else:
+                    ok = False
+                    break
+            if ok and (example_ctx or not hypo):
+                for v in vals:
+                    pool.add(v, next((u for u in urls if u), ""))
+                url = next((u for u in urls if u), "")
+                what = (f"hypothetical input {', '.join(f'{h:,.0f}' for h in hypo)}; " if hypo else "")
+                claims.append(Claim(i, sent, vals, "calculation",
+                                    f"Worked example ({what}arithmetic checked by GLIVARAO)", url))
             elif any(v in creator_nums for v in vals):
                 claims.append(Claim(i, sent, vals, "creator", "Your own input: confirm it's accurate"))
             else:
                 claims.append(Claim(i, sent, vals, "UNSOURCED"))
         if scene.chart.kind != "none" and scene.chart.kind != "compound_growth" and scene.chart.values:
-            src = scene.chart.source
-            url = next((f.url for f in brief.facts if f.url and f.source and f.source in src), "")
-            status = "calculation" if "calculat" in src.lower() else ("source" if url else "UNSOURCED")
-            if status == "calculation":
-                src, url = _method(brief, "fees" if "fee" in scene.chart.title.lower() else "")
-            ex = None
-            vals_c = [float(v) for v in scene.chart.values if v]
-            chits = [_match(v, idx) for v in vals_c]
-            if not url and vals_c and all(chits) and EXAMPLE_RE.search(f"{scene.chart.title} {src}"):
-                # every number is one of the brief's own checked calculations (or a sourced fact)
-                h = next((x for x in chits if x[0] == "source"), chits[0])
-                ex = (f"Worked example: {h[1]}", h[2]) if h[2] else None
-            if not url and not ex:   # a clearly labeled example chart: inputs from a sourced fact, math re-done
-                text = " ".join([scene.chart.title, src, " ".join(scene.chart.labels), scene.narration])
-                ex = worked_example(text, list(scene.chart.values), brief, idx)
-            if ex:
-                status, src, url = "calculation", ex[0], ex[1]
-            claims.append(Claim(i, f"Chart: {scene.chart.title}", list(scene.chart.values), status, src, url))
+            claims.append(_chart_claim(i, scene, brief, idx, pool))
         if scene.chart.kind == "compound_growth":
             src, url = _method(brief) if brief.family in ("grow", "invest") else METHOD["grow"]
             claims.append(Claim(i, f"Chart: {scene.chart.title}", [], "calculation", src, url))
     return claims
 
 
+def _chart_claim(i: int, scene, brief, idx, pool: _Pool) -> Claim:
+    """A chart passes only if every value is a fact-sheet number, one arithmetic step from fact-sheet numbers or the
+    scene's example numbers, or a worked example our calculators reproduce."""
+    c = scene.chart
+    vals = [float(v) for v in c.values if v]
+    title = f"Chart: {c.title}"
+    hits = [_match(v, idx) for v in vals]
+    if vals and all(hits):
+        h = next((x for x in hits if x[0] == "source"), hits[0])
+        if h[2]:
+            return Claim(i, title, vals, h[0], h[1], h[2])
+    ex = worked_example(" ".join([c.title, c.source, " ".join(c.labels), scene.narration]), vals, brief, idx)
+    if ex:
+        return Claim(i, title, vals, "calculation", ex[0], ex[1])
+    derived = [pool.derive(v) for v in vals]
+    if vals and all(d[0] for d in derived):
+        url = next((d[1] for d in derived if d[1]), "")
+        return Claim(i, title, vals, "calculation", "Worked example (from fact-sheet numbers; arithmetic checked by "
+                     "GLIVARAO)", url)
+    return Claim(i, title, vals, "UNSOURCED")
+
+
+def sanitize_charts(script: Script, brief) -> tuple[Script, list[str]]:
+    """Charts are built only from fact-sheet data: a chart whose values can't be verified is removed (the scene
+    keeps its narration) instead of failing the whole video. Returns (script, removed chart titles)."""
+    from ..models import ChartSpec
+
+    bad = {c.scene for c in check_claims(script, brief) if c.text.startswith("Chart:") and c.status == "UNSOURCED"}
+    if not bad:
+        return script, []
+    scenes = list(script.scenes)
+    removed = [scenes[k].chart.title for k in sorted(bad)]
+    for k in bad:
+        scenes[k] = scenes[k].model_copy(update={"chart": ChartSpec()})
+    return script.model_copy(update={"scenes": scenes}), removed
+
+
 def needs_source(claims: list[Claim]) -> list[Claim]:
-    """Claims without a source URL (your own personal experience is listed separately, not counted here)."""
-    return [c for c in claims if c.status != "creator" and not c.url]
+    """Claims without a source URL (your own personal experience is listed separately, not counted here). A worked
+    example whose arithmetic GLIVARAO checked needs no URL of its own."""
+    return [c for c in claims if c.status != "creator" and not c.url
+            and not (c.status == "calculation" and c.source.startswith("Worked example"))]
 
 
 def report(claims: list[Claim], limit: int = 40) -> str:
@@ -276,4 +378,4 @@ def add_sources_to_description(description: str, claims: list[Claim]) -> str:
     return description.rstrip() + "\n\n" + block + "\n"
 
 
-__all__ = ["check_claims", "report", "needs_source", "source_urls", "add_sources_to_description", "Claim", "numbers_in"]
+__all__ = ["sanitize_charts", "check_claims", "report", "needs_source", "source_urls", "add_sources_to_description", "Claim", "numbers_in"]

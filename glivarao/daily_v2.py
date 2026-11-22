@@ -202,6 +202,11 @@ def run_daily_v2(settings: Settings, store: JobStore, today: date | None = None,
             return DailyResult("", "skipped", note=f"{pace_note}; no Shorts topic passed today's checks")
         style = "explainer"
     brief = build_brief(card, today)
+    if not settings.dry_run:   # the topic's library facts (e.g. HHS poverty guidelines) re-checked on official pages
+        from .studio.fact_library import verify_brief
+
+        for note in verify_brief(brief):
+            log.warning("fact: %s", note)
     if not style:
         style = choose_format(brief, format_history(store))
         push_format(store, style)
@@ -279,68 +284,104 @@ def run_daily_v2(settings: Settings, store: JobStore, today: date | None = None,
 
 
 def _produce_drafts(drafts, brief, creator, writer, paid, card, item, report, today, settings, store, send, workers,
-                    result) -> None:
-    """Fact-check, sponsor/evergreen rewrite, compliance, then render + Telegram review for every draft
-    (shared by the daily run and make-now)."""
+                    result, retry: bool = True) -> None:
+    """Fact-check, sponsor/evergreen rewrite, compliance, then render + Telegram review for every draft (shared by the
+    daily run, make-now and retry-rejected). Charts that aren't built from fact-sheet data are removed. A draft
+    rejected by compliance is fixed ONCE by Claude with the exact reasons and the fact sheet, and checked again."""
+    for script, sim in drafts:
+        r = _produce_one(script, sim, brief, creator, writer, paid, card, item, report, today, settings, store, send,
+                         workers)
+        result.jobs.append(r)
+        if r[2] == "rejected_compliance" and retry and paid:
+            fixed = _fix_rejected(r[0], brief, settings, store)
+            if fixed is not None:
+                result.note = (result.note + "; " if result.note else "") + f"{r[0]} fixed by Claude, checked again"
+                r2 = _produce_one(fixed, sim, brief, creator, writer, paid, card, item, report, today, settings, store,
+                                  send, workers)
+                result.jobs.append(r2)
+                chain = json.loads(store.kv_get("fixed_from", "{}"))
+                chain[r2[0]] = r[0]
+                store.kv_set("fixed_from", json.dumps(chain))
+
+
+def _fix_rejected(job_id: str, brief, settings: Settings, store: JobStore):
+    """Claude rewrites a rejected script with the exact rejection reasons + the fact sheet (None if unavailable)."""
+    from .models import Script as _Script
+    from .scriptgen.claude import ClaudeUnavailable, rewrite_for_compliance
+
+    cfile = settings.output_dir / job_id / "compliance.txt"
+    errs = [ln[7:] for ln in (cfile.read_text().splitlines() if cfile.exists() else []) if ln.startswith("ERROR: ")]
+    facts = [f"{f.text} [{f.source or f.kind}{' ' + f.url if f.url else ''}]" for f in brief.facts]
+    log.warning("%s rejected (%s); asking Claude to fix it once", job_id, "; ".join(errs)[:200])
+    try:
+        old = _Script.model_validate_json(Path(store.get(job_id).script_path).read_text())
+        return rewrite_for_compliance(old, errs or ["failed the automatic checks"], facts, settings)
+    except ClaudeUnavailable as exc:
+        log.warning("fix of %s skipped: Claude unavailable (%s)", job_id, exc)
+        return None
+
+
+def _produce_one(script, sim, brief, creator, writer, paid, card, item, report, today, settings, store, send,
+                 workers) -> tuple:
     from .studio import factcheck
 
-    for script, sim in drafts:
-        job = store.create(script.format, brief.topic)
-        out = settings.output_dir / job.id
-        out.mkdir(parents=True, exist_ok=True)
-        (out / "brief.json").write_text(brief.to_json())
-        (out / "fact_sheet.md").write_text(brief.fact_sheet_md())
-        claims = factcheck.check_claims(script, brief, creator)
-        missing = factcheck.needs_source(claims)
-        if missing and paid:  # every claim needs a source URL: ask Claude to source or remove the rest
-            from .scriptgen.claude import ClaudeUnavailable, rewrite_for_sources
+    script, dropped = factcheck.sanitize_charts(script, brief)   # charts only from fact-sheet data
+    if dropped:
+        log.warning("charts removed (values not on the fact sheet): %s", "; ".join(dropped))
+    job = store.create(script.format, brief.topic)
+    out = settings.output_dir / job.id
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "brief.json").write_text(brief.to_json())
+    (out / "fact_sheet.md").write_text(brief.fact_sheet_md())
+    claims = factcheck.check_claims(script, brief, creator)
+    missing = factcheck.needs_source(claims)
+    if missing and paid:  # every claim needs a source URL: ask Claude to source or remove the rest
+        from .scriptgen.claude import ClaudeUnavailable, rewrite_for_sources
 
-            try:
-                script = rewrite_for_sources(script, [c.text for c in missing], settings)
-                claims = factcheck.check_claims(script, brief, creator)
-                missing = factcheck.needs_source(claims)
-            except ClaudeUnavailable as exc:  # keep the draft; it is rejected below for the unsourced claims
-                log.warning("source rewrite skipped for %s: Claude unavailable (%s)", job.id, exc)
-        from .compliance import evergreen_issues, has_what_to_do, sponsor_issues
+        try:
+            script = rewrite_for_sources(script, [c.text for c in missing], settings)
+            claims = factcheck.check_claims(script, brief, creator)
+            missing = factcheck.needs_source(claims)
+        except ClaudeUnavailable as exc:  # keep the draft; it is rejected below for the unsourced claims
+            log.warning("source rewrite skipped for %s: Claude unavailable (%s)", job.id, exc)
+    from .compliance import evergreen_issues, has_what_to_do, sponsor_issues
 
-        issues = sponsor_issues(script)
-        ever = [] if brief.timely else evergreen_issues(script)
-        if (issues or ever or not has_what_to_do(script)) and paid:  # sponsor-safe, evergreen, "What to do"
-            from .scriptgen.claude import ClaudeUnavailable, rewrite_for_sponsor
+    issues = sponsor_issues(script)
+    ever = [] if brief.timely else evergreen_issues(script)
+    if (issues or ever or not has_what_to_do(script)) and paid:  # sponsor-safe, evergreen, "What to do"
+        from .scriptgen.claude import ClaudeUnavailable, rewrite_for_sponsor
 
-            try:
-                script = rewrite_for_sponsor(script, issues, not has_what_to_do(script), settings,
-                                             evergreen_issues=ever)
-                claims = factcheck.check_claims(script, brief, creator)
-                missing = factcheck.needs_source(claims)
-            except ClaudeUnavailable as exc:  # keep the draft; the compliance check below rejects it
-                log.warning("sponsor rewrite skipped for %s: Claude unavailable (%s)", job.id, exc)
-        (out / "fact_check.md").write_text("# " + factcheck.report(claims, limit=500).replace("\n", "\n\n") + "\n")
-        job.script_path = str(out / "script.json")
-        Path(job.script_path).write_text(script.model_dump_json(indent=2))
-        store.transition(job, JobStatus.SCRIPTED, f"{writer}; {script.style}; {script.word_count} words")
+        try:
+            script = rewrite_for_sponsor(script, issues, not has_what_to_do(script), settings,
+                                         evergreen_issues=ever)
+            claims = factcheck.check_claims(script, brief, creator)
+            missing = factcheck.needs_source(claims)
+        except ClaudeUnavailable as exc:  # keep the draft; the compliance check below rejects it
+            log.warning("sponsor rewrite skipped for %s: Claude unavailable (%s)", job.id, exc)
+    (out / "fact_check.md").write_text("# " + factcheck.report(claims, limit=500).replace("\n", "\n\n") + "\n")
+    job.script_path = str(out / "script.json")
+    Path(job.script_path).write_text(script.model_dump_json(indent=2))
+    store.transition(job, JobStatus.SCRIPTED, f"{writer}; {script.style}; {script.word_count} words")
 
-        ok, why = finance_only_check(script)
-        report_c = check_script(script, enforce_length=paid, evergreen=not brief.timely)
-        if not ok:
-            report_c.errors.append(f"Finance-only gate failed: {why}")
-        if not sim.ok:
-            report_c.errors.append("Too similar to earlier videos even after rewriting: " + "; ".join(sim.reasons))
-        if missing:
-            report_c.errors.append(f"{len(missing)} claim(s) without a source URL: "
-                                   + " | ".join(c.text[:80] for c in missing[:3]))
-        (out / "compliance.txt").write_text(report_c.summary() + "\n\n" + sim.summary())
-        if not report_c.ok:
-            store.transition(job, JobStatus.REJECTED_COMPLIANCE, report_c.summary()[:500])
-            result.jobs.append((job.id, script.format, "rejected_compliance", None, report_c.errors[0]))
-            continue
-        ctx = {"writer": writer, "creator": creator, "item_id": item.id if item is not None else None, "card": card,
-               "date": today.isoformat(), "compliance": report_c.summary(),
-               "sim": {"summary": sim.summary(), "phrase_overlap": sim.phrase_overlap,
-                       "structure_ratio": sim.structure_ratio}}
-        result.jobs.append(render_and_review(job, script, brief, claims, ctx, settings, store, send, workers,
-                                             report=report, item=item))
-
+    ok, why = finance_only_check(script)
+    report_c = check_script(script, enforce_length=paid, evergreen=not brief.timely)
+    if not ok:
+        report_c.errors.append(f"Finance-only gate failed: {why}")
+    if not sim.ok:
+        report_c.errors.append("Too similar to earlier videos even after rewriting: " + "; ".join(sim.reasons))
+    if missing:
+        report_c.errors.append(f"{len(missing)} claim(s) without a source URL: "
+                               + " | ".join(c.text[:80] for c in missing[:3]))
+    (out / "compliance.txt").write_text(report_c.summary() + "\n\n" + sim.summary())
+    if not report_c.ok:
+        store.transition(job, JobStatus.REJECTED_COMPLIANCE, report_c.summary()[:500])
+        return (job.id, script.format, "rejected_compliance", None, report_c.errors[0])
+    ctx = {"writer": writer, "creator": creator, "item_id": item.id if item is not None else None, "card": card,
+           "date": today.isoformat(), "compliance": report_c.summary(),
+           "sim": {"summary": sim.summary(), "phrase_overlap": sim.phrase_overlap,
+                   "structure_ratio": sim.structure_ratio}}
+    return render_and_review(job, script, brief, claims, ctx, settings, store, send, workers, report=report,
+                             item=item)
 
 
 class Busy(RuntimeError):
@@ -378,6 +419,11 @@ def make_now(settings: Settings, store: JobStore, n: int, short: bool = False, s
         card = _replace(v, facts=kept).card()
         today = date.today()
         brief = build_brief(card, today)
+        if not settings.dry_run:
+            from .studio.fact_library import verify_brief
+
+            for note in verify_brief(brief):
+                log.warning("fact: %s", note)
         style = v.format or choose_format(brief, format_history(store))
         used, history = originality.used_lines(store), originality.load_history(store)
         from .scriptgen.claude import LAST_WRITER, ClaudeUnavailable
@@ -398,29 +444,6 @@ def make_now(settings: Settings, store: JobStore, n: int, short: bool = False, s
                              (f"; {len(notes)} fact(s) dropped or unconfirmed" if notes else ""))
         _produce_drafts(drafts, brief, "", writer, True, card, None, {"ranked": []}, today, settings, store, send,
                         workers, result)
-        rejected = [j for j in result.jobs if j[2] == "rejected_compliance"]
-        if rejected:   # one automatic retry: Claude gets the exact rejection reasons and the fact sheet
-            from .models import Script as _Script
-            from .scriptgen.claude import rewrite_for_compliance
-
-            facts = [f"{f.text} [{f.source or f.kind}{' ' + f.url if f.url else ''}]" for f in brief.facts]
-            retry = []
-            for j in rejected:
-                cfile = settings.output_dir / j[0] / "compliance.txt"
-                errs = [ln[7:] for ln in (cfile.read_text().splitlines() if cfile.exists() else [])
-                        if ln.startswith("ERROR: ")] or [str(j[4])]
-                log.warning("make-now: %s rejected (%s); asking Claude to fix it once", j[0], "; ".join(errs)[:200])
-                try:
-                    old = _Script.model_validate_json(Path(store.get(j[0]).script_path).read_text())
-                    fixed = rewrite_for_compliance(old, errs, facts, settings)
-                except ClaudeUnavailable as exc:
-                    log.warning("make-now retry skipped: Claude unavailable (%s)", exc)
-                    continue
-                retry.append(_originality_gate(fixed, brief, today, history, settings, True, used, lambda k: fixed))
-            if retry:
-                result.note += f"; {len(retry)} rejected draft(s) fixed by Claude and checked again"
-                _produce_drafts(retry, brief, "", writer, True, card, None, {"ranked": []}, today, settings, store,
-                                send, workers, result)
         made = [j for j in result.jobs if j[2] in ("rendered", "pending_approval", "held")]
         if made and short:
             from .studio import buffer as _buffer
@@ -440,6 +463,69 @@ def make_now(settings: Settings, store: JobStore, n: int, short: bool = False, s
         lock.close()
 
 
+def retry_rejected(settings: Settings, store: JobStore, day: date | None = None, send: bool = True,
+                   workers: int | None = None) -> list:
+    """Make the videos rejected by compliance on `day` again: the fact sheet gets the topic's reviewed library facts
+    (re-checked on their official pages), charts not built from fact-sheet data are removed, Claude fixes the script
+    with the exact rejection reasons, then every check runs again and it is rendered and sent for review. Each
+    rejected video is retried only once. Returns the new job tuples."""
+    import fcntl
+
+    from .content.brief import load_brief
+    from .studio import buffer as _buffer
+    from .studio import fact_library
+    from .studio.pause import guard
+
+    guard(settings, "retry of rejected videos")
+    if not paid_writer_allowed(settings):
+        raise ValueError("Claude can't be used (ALLOW_PAID_APIS=false or WRITER=free)")
+    day = day or date.today()
+    done = set(json.loads(store.kv_get("rejected_retried", "[]")))
+    fixed_from = json.loads(store.kv_get("fixed_from", "{}"))
+    superseded = set(fixed_from.values())        # first drafts that already had an automatic fix attempt
+    todo = [j for j in store.list(limit=500) if j.status == JobStatus.REJECTED_COMPLIANCE
+            and j.id.startswith(day.strftime("%Y%m%d")) and j.id not in done and j.id not in superseded]
+    lock = open(Path(settings.db_path).with_name("daily.lock"), "w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        raise Busy("the daily run (or make-now) is running right now; try again when it finishes") from None
+    out_jobs = []
+    try:
+        for job in todo:
+            src = settings.output_dir / job.id
+            if not (src / "brief.json").exists() or not job.script_path:
+                continue
+            brief = load_brief(src / "brief.json")
+            fact_library.add_to_brief(brief)
+            if not settings.dry_run:
+                for note in fact_library.verify_brief(brief):
+                    log.warning("%s fact: %s", job.id, note)
+            fixed = _fix_rejected(job.id, brief, settings, store)
+            done.add(job.id)
+            store.kv_set("rejected_retried", json.dumps(sorted(done)[-500:]))
+            if fixed is None:
+                out_jobs.append((job.id, job.format, "rejected_compliance", None, "Claude unavailable: not retried"))
+                continue
+            # originality was checked when this video was first written; comparing it with its own earlier
+            # attempts would only find itself
+            sim = _Sim({"summary": f"Originality: checked when {job.id} was first written (same video, fixed)",
+                        "phrase_overlap": 0.0, "structure_ratio": 0.0})
+            r = _produce_one(fixed, sim, brief, "", "claude (fixed after a compliance rejection)", True, None, None,
+                             {"ranked": []}, day, settings, store, send, workers)
+            out_jobs.append(r)
+            if r[2] in ("rendered", "pending_approval", "held"):
+                if r[1] == "short":
+                    _buffer.record_shorts(store, day, 1)
+                else:
+                    dates = json.loads(store.kv_get("long_dates", "[]")) + [day.isoformat()]
+                    store.kv_set("long_dates", json.dumps(dates[-200:]))
+        return out_jobs
+    finally:
+        fcntl.flock(lock, fcntl.LOCK_UN)
+        lock.close()
+
+
 def clear_writer_hold(store: JobStore) -> dict:
     """Clear a stale 'Claude unavailable' hold (e.g. from the old Vertex writer). Returns what was cleared."""
     held = writer_held(store)
@@ -450,6 +536,7 @@ def clear_writer_hold(store: JobStore) -> dict:
 class _Sim:  # originality summary as saved for a held (voice-delayed) video
     def __init__(self, d: dict):
         self._s, self.phrase_overlap, self.structure_ratio = d["summary"], d["phrase_overlap"], d["structure_ratio"]
+        self.ok, self.reasons = True, []
 
     def summary(self) -> str:
         return self._s

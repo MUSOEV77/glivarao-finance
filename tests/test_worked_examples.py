@@ -61,3 +61,37 @@ def test_wrong_math_and_real_world_statistics_still_need_a_source():
     stat = Scene(heading="Stat", narration="Americans owe $987 billion on store cards.")
     for sc in (wrong, stat):
         assert factcheck.needs_source(factcheck.check_claims(_script(sc), b)), sc.narration
+
+
+def _aca_brief():
+    v = launch_plan.LAUNCH[1]                       # ACA deadline: fact library adds the HHS poverty guidelines
+    assert v.key == "aca_marketplace"
+    return build_brief(v.card(), date(2026, 11, 22))
+
+
+def test_aca_rejections_from_the_daily_run_now_pass():
+    b = _aca_brief()
+    assert any("15,960" in f.text and "aspe.hhs.gov" in f.url for f in b.facts)
+    fpl = Scene(heading="The income line", narration="The poverty guideline depends on household size.",
+                chart=ChartSpec(kind="bar_compare", title="2026 federal poverty guideline", labels=["1", "2", "3", "4"],
+                                values=[15960, 21640, 27320, 33000], source="HHS poverty guidelines (ASPE)"))
+    line = Scene(heading="Premium tax credit line", narration="You qualify up to 400% of the poverty level.",
+                 chart=ChartSpec(kind="bar_compare", title="Income line for premium tax credits",
+                                 labels=["1 person", "family of 4"], values=[63840, 132000], source="HealthCare.gov"))
+    plans = Scene(heading="Compare plans", narration="Say, for example, two plans differ by $50 a month. Over a year, "
+                                                    "that's $600.")
+    for sc in (fpl, line, plans):
+        claims = factcheck.check_claims(_script(sc), b)
+        assert not factcheck.needs_source(claims), [(c.text, c.status) for c in claims]
+
+
+def test_charts_not_built_from_the_fact_sheet_are_removed_not_rejected():
+    b = _aca_brief()
+    bad = Scene(heading="Premiums", narration="Premiums vary a lot by plan.",
+                chart=ChartSpec(kind="bar_compare", title="Average premium by plan", labels=["Bronze", "Gold"],
+                                values=[411, 637], source="Claude"))
+    s, dropped = factcheck.sanitize_charts(_script(bad), b)
+    assert dropped == ["Average premium by plan"] and s.scenes[0].chart.kind == "none"
+    assert not factcheck.needs_source(factcheck.check_claims(s, b))
+    stat = Scene(heading="Stat", narration="About 21 million people enrolled last year.")
+    assert factcheck.needs_source(factcheck.check_claims(_script(stat), b))     # real statistic: still needs a source

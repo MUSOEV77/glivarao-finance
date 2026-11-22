@@ -248,9 +248,12 @@ def write_with_claude(b: Brief, fmt: str, settings: Settings, angle: str = "", s
     from ..scriptgen.claude import generate_with_claude
     from ..studio.formats import FORMATS
 
-    facts = "\n".join(f"- [{f.kind}] {f.text}" for f in b.facts)
-    grounding = (f"{angle or b.angle}\n\nUse ONLY these facts and numbers; do not introduce any other statistic, "
-                 f"rate, limit or date:\n{facts}\n\nReal viewer questions to address:\n" +
+    facts = "\n".join(f"- [{f.kind}] {f.text}" + (f" (source: {f.source}, {f.url})" if f.url else "")
+                      for f in b.facts)
+    grounding = (f"{angle or b.angle}\n\nFACT SHEET. Every number in the narration and every chart value must come "
+                 "from this list, or be a clearly labeled worked example built from it with simple arithmetic (see "
+                 f"the NUMBERS rule). No other statistic, rate, limit, date or amount:\n{facts}\n\n"
+                 "Real viewer questions to address:\n" +
                  "\n".join(f"- {q['title']}" for q in b.viewer_questions) +
                  f"\nAudience: everyday people in the United States, ages 25-45, who struggle with money. "
                  f"Category: {b.category}. Finance only.")

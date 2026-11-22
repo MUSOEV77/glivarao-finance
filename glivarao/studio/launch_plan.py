@@ -290,6 +290,10 @@ def _page_text(url: str, session) -> str:
 
 
 def verify_facts(video: LaunchVideo, session=None) -> tuple[list[LaunchFact], list[tuple[LaunchFact, str]]]:
+    return verify_fact_list(video.facts, session)
+
+
+def verify_fact_list(facts: list[LaunchFact], session=None) -> tuple[list[LaunchFact], list[tuple[LaunchFact, str]]]:
     """(kept, notes). A fact with a `verify` phrase is DROPPED if the page opens and the phrase is gone (the number
     probably changed). If the page can't be opened (some agencies block automated readers), the fact is kept as
     checked on CHECKED and noted, so you can confirm it in the review. Facts without a phrase are kept."""
@@ -298,7 +302,7 @@ def verify_facts(video: LaunchVideo, session=None) -> tuple[list[LaunchFact], li
     session = session or requests.Session()
     cache: dict[str, str | Exception] = {}
     kept, dropped = [], []
-    for f in video.facts:
+    for f in facts:
         if not f.verify:
             kept.append(f)
             continue
@@ -349,6 +353,6 @@ def send_for_approval(settings, store, client=None) -> dict:
     return msg
 
 
-__all__ = ["LAUNCH", "LaunchVideo", "LaunchFact", "next_video", "mark_done", "done", "remaining", "verify_facts",
+__all__ = ["verify_fact_list", "LAUNCH", "LaunchVideo", "LaunchFact", "next_video", "mark_done", "done", "remaining", "verify_facts",
            "LAUNCH_STYLE", "VERSION", "approved", "approve", "awaiting_approval", "approval_text",
            "send_for_approval"]

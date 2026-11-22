@@ -512,6 +512,23 @@ def cmd_make_now(args, s):
         print("  nothing made (see the note above and Telegram)")
 
 
+def cmd_retry_rejected(args, s):
+    """Make today's compliance-rejected videos again (fact sheet completed, Claude fixes them once)."""
+    from datetime import date as _date
+
+    from .daily_v2 import Busy, retry_rejected
+
+    try:
+        jobs = retry_rejected(s, _store(s), _date.fromisoformat(args.date) if args.date else None,
+                              send=not args.no_telegram, workers=args.workers)
+    except (Busy, ValueError) as exc:
+        raise SystemExit(f"not started: {exc}")
+    if not jobs:
+        print("no rejected videos to retry for that day")
+    for j in jobs:
+        print(f"  {j[0]} {j[1]}: {j[2]} {j[4] or ''}")
+
+
 def cmd_clear_hold(args, s):
     """Clear a stale 'Claude unavailable' hold; --test makes one tiny call with the current writer."""
     from .daily_v2 import clear_writer_hold
@@ -863,6 +880,11 @@ def main(argv=None):
     mn.add_argument("--no-telegram", action="store_true")
     mn.add_argument("--workers", type=int)
     mn.set_defaults(fn=cmd_make_now)
+    rr = sub.add_parser("retry-rejected", help="make today's compliance-rejected videos again (Claude fixes them)")
+    rr.add_argument("--date", help="YYYY-MM-DD (default today)")
+    rr.add_argument("--no-telegram", action="store_true")
+    rr.add_argument("--workers", type=int)
+    rr.set_defaults(fn=cmd_retry_rejected)
     ch = sub.add_parser("clear-hold", help="clear a stale Claude hold; --test = one tiny call with the writer")
     ch.add_argument("--test", action="store_true")
     ch.set_defaults(fn=cmd_clear_hold)

@@ -139,6 +139,9 @@ def build_brief(card: dict, today: date) -> Brief:
               timely=bool(card.get("news")) or card.get("type") == "timely")
     for f in card.get("launch_facts", []):  # official facts checked for the launch list (with source URLs)
         b.facts.append(Fact("DATA", f["text"], f["source"], f["url"]))
+    from ..studio.fact_library import add_to_brief
+
+    add_to_brief(b)   # the topic's reviewed official facts (e.g. HHS poverty guidelines for ACA topics)
     for n in news[:3]:
         b.facts.append(Fact("DATA", f"{n['source']}, {n['date']}: {n['title']}. {n.get('summary', '')}".strip(),
                             n["source"], n["url"]))
