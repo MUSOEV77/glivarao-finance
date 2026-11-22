@@ -497,6 +497,36 @@ def cmd_style_samples(args, s):
         print("sent to Telegram with Approve / Request changes buttons (production stays paused)")
 
 
+def cmd_make_now(args, s):
+    """Make launch-list video #N now (long, or a Short with --short) and send it for review in Telegram."""
+    from .daily_v2 import Busy, make_now
+
+    try:
+        r = make_now(s, _store(s), args.n, short=args.short, send=not args.no_telegram, workers=args.workers)
+    except (Busy, ValueError) as exc:
+        raise SystemExit(f"not started: {exc}")
+    print(f"{r.topic} [{r.writer}] {r.note}")
+    for j in r.jobs:
+        print(f"  {j[0]} {j[1]}: {j[2]} {j[4] or ''}")
+    if not r.jobs:
+        print("  nothing made (see the note above and Telegram)")
+
+
+def cmd_clear_hold(args, s):
+    """Clear a stale 'Claude unavailable' hold; --test makes one tiny call with the current writer."""
+    from .daily_v2 import clear_writer_hold
+
+    held = clear_writer_hold(_store(s))
+    print(f"cleared hold since {held.get('since')}: {held.get('reason', '')[:120]}" if held else "no writer hold")
+    if args.test:
+        from .scriptgen.vertex_quota import live_test
+
+        ok, msg = live_test(s)
+        print(("OK   " if ok else "FAIL ") + f"writer={s.writer}: " + msg)
+        if not ok:
+            raise SystemExit(1)
+
+
 def cmd_competitors(args, s):
     """Competitor research: patterns from similar channels' last 90 days (YouTube Data API, read-only)."""
     from .research.competitors import YouTubeAPIError, render_markdown, run
@@ -827,6 +857,15 @@ def main(argv=None):
     ss.add_argument("--send-thumbs", action="store_true", help="send only the Max sheet + thumbnails")
     ss.add_argument("--cap", type=float, default=None, help="Nano Banana cap for this command in USD")
     ss.set_defaults(fn=cmd_style_samples)
+    mn = sub.add_parser("make-now", help="make launch-list video #N now (--short for a Short); review in Telegram")
+    mn.add_argument("n", type=int)
+    mn.add_argument("--short", action="store_true")
+    mn.add_argument("--no-telegram", action="store_true")
+    mn.add_argument("--workers", type=int)
+    mn.set_defaults(fn=cmd_make_now)
+    ch = sub.add_parser("clear-hold", help="clear a stale Claude hold; --test = one tiny call with the writer")
+    ch.add_argument("--test", action="store_true")
+    ch.set_defaults(fn=cmd_clear_hold)
     sc = sub.add_parser("shorts-check", help="list Shorts in the queue over 59 s; --remake to make them again")
     sc.add_argument("--remake", action="store_true")
     sc.add_argument("--no-telegram", action="store_true")

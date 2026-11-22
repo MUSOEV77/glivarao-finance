@@ -142,7 +142,8 @@ def check_settings(s, store) -> Report:
         r.row("warn", "FALLBACK_WRITER", "set in .env but ignored: the Gemini writer was removed (Claude only)")
     held = json.loads(store.kv_get("writer_held", "{}"))
     if held:
-        r.row("warn", "production", f"on hold since {held.get('since')}: Claude unavailable ({held.get('reason', '')[:80]})")
+        r.row("warn", "production", f"on hold since {held.get('since')}: Claude unavailable ({held.get('reason', '')[:80]})"
+              " -> if that was the old writer: python -m glivarao clear-hold --test")
     r.row("info", "Shorts length", f"max {s.short_max_words} words; voiced and measured before rendering; over "
           f"{s.short_redo_seconds:g} s re-voiced (2x); over {s.short_tempo_seconds:g} s sped up (max "
           f"x{s.short_max_tempo:g}); held over {s.short_max_seconds:g} s; never sent over {s.short_max_seconds:g} s")
@@ -197,11 +198,37 @@ def check_settings(s, store) -> Report:
             "16 long + 90 Shorts a month (3 a day)",
             f"{s.long_videos_per_month} long + {s.shorts_per_month} Shorts ({s.shorts_per_day}/day)", bad="warn")
     r.row("info", "buffer", f"{s.buffer_long} long + {s.buffer_shorts} Shorts ready, {s.production_lead_days} days ahead")
-    sys_tz = os.environ.get("TZ") or (Path("/etc/timezone").read_text().strip() if Path("/etc/timezone").exists() else "")
+    sys_tz = system_timezone()
     if sys_tz:
-        r.check(sys_tz == s.local_tz, "server clock", sys_tz,
-                f"{sys_tz} -> timedatectl set-timezone {s.local_tz}", bad="warn")
+        from datetime import datetime as _dt
+
+        same = sys_tz == s.local_tz or (_dt.now().astimezone().utcoffset() ==
+                                        _dt.now(ZoneInfo(s.local_tz)).utcoffset())
+        r.check(same, "server clock", f"{sys_tz} (UTC{_dt.now().astimezone().strftime('%z')})",
+                f"{sys_tz} -> sudo timedatectl set-timezone {s.local_tz}", bad="warn")
     return r
+
+
+def system_timezone() -> str:
+    """The zone the system clock really uses: TZ, then timedatectl, then the /etc/localtime link; /etc/timezone
+    (a Debian leftover that timedatectl doesn't always update) only as the last resort."""
+    import subprocess
+
+    if os.environ.get("TZ"):
+        return os.environ["TZ"].lstrip(":")
+    try:
+        out = subprocess.run(["timedatectl", "show", "-p", "Timezone", "--value"], capture_output=True, text=True,
+                             timeout=10).stdout.strip()
+        if out:
+            return out
+    except (OSError, subprocess.SubprocessError):
+        pass
+    lt = Path("/etc/localtime")
+    if lt.is_symlink():
+        target = os.path.realpath(lt)
+        if "zoneinfo/" in target:
+            return target.split("zoneinfo/", 1)[1]
+    return Path("/etc/timezone").read_text().strip() if Path("/etc/timezone").exists() else ""
 
 
 # ------------------------------------------------------------------------------------------- live checks

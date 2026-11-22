@@ -134,7 +134,7 @@ def _originality_gate(script, brief, today, history, settings, paid, used, regen
 def run_daily_v2(settings: Settings, store: JobStore, today: date | None = None, research_dir: Path | None = None,
                  send: bool = True, workers: int | None = None, shorts: int | None = None) -> DailyResult:
     from .research.run import run_research
-    from .studio import factcheck, originality
+    from .studio import originality
     from .studio.bot import format_history, push_format
     from .studio.formats import FORMATS, choose_format
     from .studio.queue import TopicQueue
@@ -262,6 +262,28 @@ def run_daily_v2(settings: Settings, store: JobStore, today: date | None = None,
 
         _mark_used(store, today, brief.topic_key, brief.category, brief.family, angle_text(card), news=is_news(card))
 
+    _produce_drafts(drafts, brief, creator, writer, paid, card, item, report, today, settings, store, send, workers,
+                    result)
+
+    produced = [j for j in result.jobs if j[2] in ("rendered", "pending_approval", "held")]  # held = made later
+    made_shorts = sum(j[1] == "short" for j in produced)
+    if made_shorts:
+        _buffer.record_shorts(store, today, made_shorts)
+    if any(j[1] == "long" for j in produced):
+        dates = json.loads(store.kv_get("long_dates", "[]")) + [today.isoformat()]
+        store.kv_set("long_dates", json.dumps(dates[-200:]))
+    if item is not None and produced:
+        TopicQueue(store).update(item.id, status="produced", produced_on=today.isoformat(),
+                                 jobs=[j[0] for j in result.jobs])
+    return result
+
+
+def _produce_drafts(drafts, brief, creator, writer, paid, card, item, report, today, settings, store, send, workers,
+                    result) -> None:
+    """Fact-check, sponsor/evergreen rewrite, compliance, then render + Telegram review for every draft
+    (shared by the daily run and make-now)."""
+    from .studio import factcheck
+
     for script, sim in drafts:
         job = store.create(script.format, brief.topic)
         out = settings.output_dir / job.id
@@ -319,17 +341,87 @@ def run_daily_v2(settings: Settings, store: JobStore, today: date | None = None,
         result.jobs.append(render_and_review(job, script, brief, claims, ctx, settings, store, send, workers,
                                              report=report, item=item))
 
-    produced = [j for j in result.jobs if j[2] in ("rendered", "pending_approval", "held")]  # held = made later
-    made_shorts = sum(j[1] == "short" for j in produced)
-    if made_shorts:
-        _buffer.record_shorts(store, today, made_shorts)
-    if any(j[1] == "long" for j in produced):
-        dates = json.loads(store.kv_get("long_dates", "[]")) + [today.isoformat()]
-        store.kv_set("long_dates", json.dumps(dates[-200:]))
-    if item is not None and produced:
-        TopicQueue(store).update(item.id, status="produced", produced_on=today.isoformat(),
-                                 jobs=[j[0] for j in result.jobs])
-    return result
+
+
+class Busy(RuntimeError):
+    pass
+
+
+def make_now(settings: Settings, store: JobStore, n: int, short: bool = False, send: bool = True,
+             workers: int | None = None) -> DailyResult:
+    """Make launch-list video #n NOW (long, or one Short with --short), outside the schedule: official facts
+    re-checked, Claude writes it (OpenRouter), same checks as every video, rendered and sent for review in
+    Telegram. Respects the pause and never runs at the same time as the daily run. Never publishes."""
+    import fcntl
+    from dataclasses import replace as _replace
+
+    from .studio import launch_plan, originality
+    from .studio.formats import choose_format
+    from .studio.bot import format_history
+    from .studio.pause import guard
+
+    guard(settings, f"make-now {n}")
+    if not 1 <= n <= len(launch_plan.LAUNCH):
+        raise ValueError(f"launch list has videos 1-{len(launch_plan.LAUNCH)}")
+    if not paid_writer_allowed(settings):
+        raise ValueError("Claude can't be used (ALLOW_PAID_APIS=false or WRITER=free): Claude only, so nothing is made")
+    lock = open(Path(settings.db_path).with_name("daily.lock"), "w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        raise Busy("the daily run (or another make-now) is running right now; try again when it finishes") from None
+    try:
+        v = launch_plan.LAUNCH[n - 1]
+        kept, notes = launch_plan.verify_facts(v)
+        for f, note in notes:
+            log.warning("launch #%d fact: %s (%s)", n, f.text[:80], note)
+        card = _replace(v, facts=kept).card()
+        today = date.today()
+        brief = build_brief(card, today)
+        style = v.format or choose_format(brief, format_history(store))
+        used, history = originality.used_lines(store), originality.load_history(store)
+        from .scriptgen.claude import LAST_WRITER, ClaudeUnavailable
+
+        try:
+            if short:
+                sh = _write_shorts(brief, style, 1, used, True, settings)[0]
+                drafts = [_originality_gate(sh, brief, today, history, settings, True, used, lambda k: sh)]
+            else:
+                drafts = [_originality_gate(_write_long(brief, style, "", used, True, settings), brief, today, history,
+                                            settings, True, used,
+                                            lambda k: _write_long(brief, style, "", used, True, settings, variant=k))]
+        except ClaudeUnavailable as exc:
+            return _hold_for_writer(settings, store, today, brief.topic, str(exc), send)
+        _release_writer_hold(settings, store, send)
+        writer = LAST_WRITER.get("name") or "claude"
+        result = DailyResult(brief.topic, writer, style=style, note=f"make-now launch #{n}" +
+                             (f"; {len(notes)} fact(s) dropped or unconfirmed" if notes else ""))
+        _produce_drafts(drafts, brief, "", writer, True, card, None, {"ranked": []}, today, settings, store, send,
+                        workers, result)
+        made = [j for j in result.jobs if j[2] in ("rendered", "pending_approval", "held")]
+        if made and short:
+            from .studio import buffer as _buffer
+
+            _buffer.record_shorts(store, today, len(made))
+            _mark_used(store, today, brief.topic_key, brief.category, brief.family, key="used_short_topics")
+        elif made:
+            launch_plan.mark_done(store, n)
+            dates = json.loads(store.kv_get("long_dates", "[]")) + [today.isoformat()]
+            store.kv_set("long_dates", json.dumps(dates[-200:]))
+            from .studio.pillars import is_news
+
+            _mark_used(store, today, brief.topic_key, brief.category, brief.family, news=is_news(card))
+        return result
+    finally:
+        fcntl.flock(lock, fcntl.LOCK_UN)
+        lock.close()
+
+
+def clear_writer_hold(store: JobStore) -> dict:
+    """Clear a stale 'Claude unavailable' hold (e.g. from the old Vertex writer). Returns what was cleared."""
+    held = writer_held(store)
+    store.kv_set("writer_held", "{}")
+    return held
 
 
 class _Sim:  # originality summary as saved for a held (voice-delayed) video
