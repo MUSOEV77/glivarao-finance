@@ -406,11 +406,14 @@ def render_and_review(job, script, brief, claims, ctx: dict, settings: Settings,
             from .art.ai_visuals import bold_words
 
             opts_paths = []
+            from .art.doodle import key_number
             from .art.max_assets import load_pose
 
+            value, y0, y1 = key_number([f.text for f in brief.facts if f.kind == "DATA" and f.url], today.year)
             for k, (words, emo) in enumerate(zip(bold_words(script, 3), ("shocked", "worried", "pointing"))):
                 dst = out / (f"thumbnail_{k + 1}.jpg" if script.format == "long" else "thumbnail.jpg")
-                doodle_thumb(words, emo, dst, seed=k + 1, max_img=load_pose(settings, emo))
+                doodle_thumb(words, emo, dst, seed=k + 1, max_img=load_pose(settings, emo), value=value,
+                             start_year=y0, end_year=y1)
                 opts_paths.append(dst)
                 if script.format != "long":
                     break

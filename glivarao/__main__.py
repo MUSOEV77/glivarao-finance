@@ -457,25 +457,30 @@ def cmd_launch_list(args, s):
 
 
 def cmd_style_samples(args, s):
-    """Doodle style v2 samples: designs Max once with Nano Banana (cap $2), 3 frames, 3 thumbnails; --send."""
+    """Doodle style v2 samples (Max designed once with Nano Banana). --repair-max re-cuts/redraws Max's poses and
+    rebuilds the thumbnails; --send-thumbs sends only the Max sheet + thumbnails. Prints the money spent."""
     from pathlib import Path
 
     from .art.gemini_image import GeminiImage, ImageUnavailable
-    from .art.max_assets import DesignBudget
+    from .art.max_assets import DesignBudget, MaxNotClean
     from .studio import style_samples
 
     out = Path(args.out) if args.out else s.output_dir / "style_samples" / style_samples.VERSION
+    cap = args.cap if args.cap is not None else (1.0 if args.repair_max else style_samples.CAP_USD)
     try:
         gi = GeminiImage(s)
     except ImageUnavailable as exc:
         raise SystemExit(f"Nano Banana is not usable: {exc}")
+    start = gi.spent_usd
     try:
-        res = style_samples.make(s, gi, out, redesign=args.redesign_max)
-    except DesignBudget as exc:
-        print(f"STOPPED: {exc}. Spent by this command: ${gi.spent_usd:.2f} (cap ${style_samples.CAP_USD:.2f})")
-        raise SystemExit(1)
-    except ImageUnavailable as exc:
-        print(f"STOPPED: Nano Banana failed ({exc}). Spent by this command: ${gi.spent_usd:.2f}")
+        if args.repair_max:
+            res = style_samples.repair(s, gi, out, cap=cap)
+        else:
+            res = style_samples.make(s, gi, out, redesign=args.redesign_max)
+            res["cap"] = style_samples.CAP_USD
+    except (DesignBudget, MaxNotClean, ImageUnavailable) as exc:
+        print(f"STOPPED, nothing sent: {exc}")
+        print(f"NANO BANANA SPENT BY THIS COMMAND: ${gi.spent_usd - start:.2f} (cap ${cap:.2f})")
         raise SystemExit(1)
     print(f"made in {out}:")
     for p in [res["sheet"]] + res["frames"] + res["thumbs"]:
@@ -483,8 +488,11 @@ def cmd_style_samples(args, s):
     for name, checks in res["checks"].items():
         print(f"   {name}: {', '.join(checks)}")
     print(style_samples.summary(s, res))
-    print(f"NANO BANANA SPENT BY THIS COMMAND: ${res['usd']:.2f} (cap ${style_samples.CAP_USD:.2f})")
-    if args.send:
+    print(f"NANO BANANA SPENT BY THIS COMMAND: ${res['usd']:.2f} (cap ${res['cap']:.2f})")
+    if args.send_thumbs:
+        style_samples.send_thumbs(s, res)
+        print("sent to Telegram: Max sheet + 3 thumbnails with Approve / Request changes (production stays paused)")
+    elif args.send:
         style_samples.send(s, res)
         print("sent to Telegram with Approve / Request changes buttons (production stays paused)")
 
@@ -814,6 +822,10 @@ def main(argv=None):
     ss.add_argument("--send", action="store_true")
     ss.add_argument("--out", default="")
     ss.add_argument("--redesign-max", action="store_true", help="design Max again (costs up to ~$0.60)")
+    ss.add_argument("--repair-max", action="store_true",
+                    help="re-cut Max's poses (strict magenta check), redraw failing ones, rebuild thumbnails")
+    ss.add_argument("--send-thumbs", action="store_true", help="send only the Max sheet + thumbnails")
+    ss.add_argument("--cap", type=float, default=None, help="Nano Banana cap for this command in USD")
     ss.set_defaults(fn=cmd_style_samples)
     sc = sub.add_parser("shorts-check", help="list Shorts in the queue over 59 s; --remake to make them again")
     sc.add_argument("--remake", action="store_true")

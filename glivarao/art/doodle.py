@@ -332,7 +332,7 @@ def icon(img: Image.Image, kind: str, cx: float, cy: float, s: float = 120.0, se
 
 # ------------------------------------------------------------------------------------------- charts
 def spike_chart(img: Image.Image, box, history=None, spike=None, seed: int = 11, labels: bool = False,
-                title: str = "", weight: float = 1.0) -> None:
+                title: str = "", weight: float = 1.0) -> dict:
     """Hand-drawn axes, a grey history line and a green line that jumps up at the end (gold dot)."""
     x0, y0, x1, y1 = box
     w, h = x1 - x0, y1 - y0
@@ -358,6 +358,7 @@ def spike_chart(img: Image.Image, box, history=None, spike=None, seed: int = 11,
     p.circle(pts[-1][0], pts[-1][1], lw * 1.9, width=lw * 0.5)
     if title:
         p.text((x0 + w * 0.5, y0 - h * 0.02), title, int(h * 0.09), INK, anchor="ms")
+    return {"end": pts[-1], "start_x": xs[0], "base_y": y1, "dot_r": lw * 1.9}
 
 
 def bar_chart(img: Image.Image, box, values: list[float], labels: list[str], seed: int = 13) -> None:
@@ -419,46 +420,164 @@ def statement(words: str) -> str:
                     (w if any(c.isdigit() for c in w) else w.capitalize()) for w in ws) + "."
 
 
+THUMB_PAPER = (236, 222, 192)        # warmer, slightly darker paper than the video frames
+THUMB_PANEL = (205, 231, 212)        # soft green panel behind the chart
+
+
+def _contrast(c1, c2) -> float:
+    """WCAG contrast ratio between two RGB colours."""
+    def lum(c):
+        v = [x / 255 for x in c[:3]]
+        v = [x / 12.92 if x <= 0.03928 else ((x + 0.055) / 1.055) ** 2.4 for x in v]
+        return 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2]
+    a, b = sorted((lum(c1), lum(c2)), reverse=True)
+    return (a + 0.05) / (b + 0.05)
+
+
 def thumbnail(text: str, emotion: str = "shocked", out: Path | None = None, seed: int = 1,
               size: tuple[int, int] = (1280, 720), history=None, spike=None,
-              max_img: Image.Image | None = None) -> Image.Image:
-    """Off-white paper, a 2-3 word statement ending with a period (huge), ONE simple chart (grey history line +
-    green spike with a gold dot) and Max with an emotion. Drawn at 2x, saved at 1280x720. No numbers on the chart."""
+              max_img: Image.Image | None = None, value: str = "", start_year: str = "", end_year: str = "",
+              info: dict | None = None) -> Image.Image:
+    """Warm paper, a 2-3 word statement ending with a period (huge), ONE simple chart on a soft green panel (grey
+    history line + green spike), the real key number in gold on a dark pill at the spike point, the start and end
+    year under the axis, and Max with an emotion. Drawn at 2x, saved at 1280x720. `info` receives the text boxes
+    (in output pixels) for the readability test."""
     W2, H2 = size[0] * 2, size[1] * 2
-    img = paper(W2, H2, seed=3 + seed).copy()
+    img = Image.blend(paper(W2, H2, seed=3 + seed).copy(), Image.new("RGB", (W2, H2), THUMB_PAPER), 0.6)
     p = Pen(img, seed=seed, width=12)
+    boxes = {"statement": [], "value": None, "years": []}
     st = statement(text)
     words = st.split()
     lines = [" ".join(words[:2]), " ".join(words[2:])] if len(words) == 3 else (
         [st] if hand(300).getlength(st) <= W2 * 0.58 else [words[0], " ".join(words[1:])])
     lines = [ln for ln in lines if ln]
     size_ = 420
-    while size_ > 160 and (max(hand(size_).getlength(ln) for ln in lines) > W2 * 0.6 or
-                           size_ * 0.92 * len(lines) > H2 * 0.5):
+    while size_ > 160 and (max(hand(size_).getlength(ln) for ln in lines) > W2 * 0.58 or
+                           size_ * 0.92 * len(lines) > H2 * 0.38):
         size_ -= 10
-    y = H2 * 0.06 + size_ * 0.5
+    y = H2 * 0.05 + size_ * 0.5
     for ln in lines:
         p.text((W2 * 0.045, y), ln, size_, INK, anchor="lm", bold=max(6, size_ // 28))
+        boxes["statement"].append(p.d.textbbox((W2 * 0.045, y), ln, font=hand(size_), anchor="lm",
+                                               stroke_width=max(6, size_ // 28)))
         y += size_ * 0.92
     last_w = hand(size_).getlength(lines[-1])
     underline(p, W2 * 0.05, W2 * 0.05 + last_w * 0.97, y - size_ * 0.27, GREEN, 26)
-    spike_chart(img, (W2 * 0.06, max(y, H2 * 0.6), W2 * 0.6, H2 * 0.94), history=history, spike=spike, seed=seed + 5,
-                weight=2.0)
+    # soft coloured panel behind the chart (with a shadow), so the chart stands out on YouTube
+    px0, py0, px1, py1 = W2 * 0.035, max(y - size_ * 0.27 + H2 * 0.03, H2 * 0.44), W2 * 0.6, H2 * 0.965
+    sh = Image.new("L", (W2, H2), 0)
+    ImageDraw.Draw(sh).rounded_rectangle((px0 + 16, py0 + 20, px1 + 16, py1 + 20), 40, fill=90)
+    from PIL import ImageFilter
+
+    img.paste((60, 40, 20), (0, 0), sh.filter(ImageFilter.GaussianBlur(18)))
+    p.d.rounded_rectangle((px0, py0, px1, py1), 40, fill=THUMB_PANEL, outline=INK, width=10)
+    ys = int(H2 * 0.092)                        # year labels
+    chart = spike_chart(img, (px0 + W2 * 0.035, py0 + H2 * 0.045, px1 - W2 * 0.03, py1 - ys * 1.3),
+                        history=history or [0.12, 0.15, 0.13, 0.16, 0.15, 0.18, 0.17, 0.19, 0.18, 0.2],
+                        spike=spike or [0.2, 0.42, 0.68, 0.95], seed=seed + 5, weight=2.0)
+    ex, ey = chart["end"]
+    for yr, x in ((start_year, chart["start_x"]), (end_year, ex)):
+        if yr:
+            yy = chart["base_y"] + ys * 0.15
+            p.d.text((x, yy), str(yr), font=hand(ys), fill=INK, anchor="mt", stroke_width=2, stroke_fill=INK)
+            boxes["years"].append(p.d.textbbox((x, yy), str(yr), font=hand(ys), anchor="mt", stroke_width=2))
+    if value:                                   # the real key number: gold on a dark pill at the spike point
+        vs = int(H2 * 0.13)
+        f = hand(vs)
+        tw = f.getlength(value)
+        padx, pady = vs * 0.35, vs * 0.18
+        bw_, bh_ = tw + 2 * padx, vs * 1.05 + 2 * pady
+        bx1 = min(ex - chart["dot_r"] * 2.2, px1 - W2 * 0.02)
+        bx0 = max(px0 + W2 * 0.02, bx1 - bw_)
+        by0 = min(max(py0 + H2 * 0.02, ey - bh_ * 0.35), py1 - bh_ - ys * 1.4)
+        p.d.rounded_rectangle((bx0, by0, bx0 + bw_, by0 + bh_), int(bh_ * 0.3), fill=INK)
+        p.d.text((bx0 + bw_ / 2, by0 + bh_ / 2), value, font=f, fill=GOLD, anchor="mm", stroke_width=3,
+                 stroke_fill=GOLD)
+        boxes["value"] = p.d.textbbox((bx0 + bw_ / 2, by0 + bh_ / 2), value, font=f, anchor="mm", stroke_width=3)
     if max_img is not None:   # the Nano Banana Max cutout (same file in every video)
         h = int(H2 * 0.96)
         s = h / max_img.height
         cut = max_img.resize((max(1, int(max_img.width * s)), h), Image.LANCZOS)
-        if cut.width > W2 * 0.42:
-            s2 = W2 * 0.42 / cut.width
+        if cut.width > W2 * 0.4:
+            s2 = W2 * 0.4 / cut.width
             cut = cut.resize((int(cut.width * s2), int(cut.height * s2)), Image.LANCZOS)
-        img.paste(cut, (int(W2 * 0.79 - cut.width / 2), H2 - cut.height + int(H2 * 0.04)), cut)
+        img.paste(cut, (int(W2 * 0.8 - cut.width / 2), H2 - cut.height + int(H2 * 0.04)), cut)
     else:
         draw_max(img, W2 * 0.8, H2 * 1.22, u=H2 * 0.125, emotion=emotion, seed=seed + 9)
     brand_mark(img, "tr", scale=2.2)
     out_img = finish(img, size)
+    if info is not None:
+        k = size[0] / W2
+        sc = lambda b: tuple(round(v * k) for v in b)  # noqa: E731
+        info.update({"statement": [sc(b) for b in boxes["statement"]],
+                     "value": sc(boxes["value"]) if boxes["value"] else None,
+                     "years": [sc(b) for b in boxes["years"]],
+                     "contrast_statement": _contrast(INK, THUMB_PAPER), "contrast_value": _contrast(GOLD, INK),
+                     "contrast_years": _contrast(INK, THUMB_PANEL)})
     if out is not None:
         out_img.save(out, "JPEG", quality=92, optimize=True)
     return out_img
+
+
+def compact_number(s: str) -> str:
+    """'$1,368.5 billion' -> '$1.4T', '$19.1 trillion' -> '$19.1T', '$208 billion' -> '$208B', '$400,400' -> '$400K',
+    '22.36%' -> '22.36%'."""
+    import re as _re
+
+    t = s.strip()
+    if "%" in t or "percent" in t.lower():
+        return _re.sub(r"\s*percent", "%", t, flags=_re.I).replace(" %", "%")
+    m = _re.search(r"([\d,]+(?:\.\d+)?)\s*(trillion|billion|million|thousand)?", t, _re.I)
+    if not m:
+        return t
+    v = float(m.group(1).replace(",", "")) * {"trillion": 1e12, "billion": 1e9, "million": 1e6,
+                                               "thousand": 1e3}.get((m.group(2) or "").lower(), 1)
+    cur = "$" if "$" in t else ""
+    for div, suf in ((1e12, "T"), (1e9, "B"), (1e6, "M"), (1e3, "K")):
+        if v >= div:
+            x = v / div
+            return f"{cur}{x:.1f}{suf}".replace(".0" + suf, suf) if x < 100 else f"{cur}{x:.0f}{suf}"
+    return f"{cur}{v:g}"
+
+
+def key_number(texts: list[str], today_year: int) -> tuple[str, str, str]:
+    """(value, start year, end year) for the thumbnail chart from the video's verified facts: the first fact with
+    a dollar amount or percentage; end year = the latest year it names (else this year); start year = the earliest
+    other year it names, or the year before for 'a year earlier'."""
+    import re as _re
+
+    from ..render.doodle import NUM
+
+    for t in texts:
+        m = NUM.search(t)
+        if not m:
+            continue
+        years = sorted({int(y) for y in _re.findall(r"\b(?:19|20)\d{2}\b", t)})
+        end = years[-1] if years else today_year
+        start = years[0] if years and years[0] < end else (end - 1 if _re.search(r"a year (?:earlier|ago)", t)
+                                                           else None)
+        return compact_number(m.group(0)), str(start) if start else "", str(end)
+    return "", "", ""
+
+
+def phone_readability(info: dict, size: tuple[int, int] = (1280, 720), phone=(160, 90)) -> list[str]:
+    """Problems reading the thumbnail on a phone (YouTube shows it about 160x90). Text heights are scaled to the
+    phone size: statement >= 12 px, number >= 8 px, years >= 5 px; contrast >= 7:1 (statement), 4.5:1 (others)."""
+    k = phone[1] / size[1]
+    probs = []
+    if info["statement"] and min(b[3] - b[1] for b in info["statement"]) * k < 12:
+        probs.append("statement too small on a phone")
+    if info.get("value") and (info["value"][3] - info["value"][1]) * k < 8:
+        probs.append("number too small on a phone")
+    if info.get("years") and min(b[3] - b[1] for b in info["years"]) * k < 5:
+        probs.append("years too small on a phone")
+    if info["contrast_statement"] < 7:
+        probs.append(f"statement contrast {info['contrast_statement']:.1f}:1")
+    if info["contrast_value"] < 4.5:
+        probs.append(f"number contrast {info['contrast_value']:.1f}:1")
+    if info["contrast_years"] < 4.5:
+        probs.append(f"years contrast {info['contrast_years']:.1f}:1")
+    return probs
 
 
 # ------------------------------------------------------------------------------------------- reference sheet
@@ -493,6 +612,6 @@ def reference_sheet(path: Path | None = None) -> Image.Image:
     return out
 
 
-__all__ = ["sparkle", "paper", "Pen", "draw_max", "max_figure", "icon", "spike_chart", "bar_chart", "thumbnail",
+__all__ = ["compact_number", "key_number", "phone_readability", "THUMB_PAPER", "THUMB_PANEL", "sparkle", "paper", "Pen", "draw_max", "max_figure", "icon", "spike_chart", "bar_chart", "thumbnail",
            "reference_sheet", "brand_mark", "statement", "wrap", "hand", "EMOTIONS", "GREEN", "GOLD", "INK", "PAPER",
            "GREY", "VERSION"]

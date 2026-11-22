@@ -22,12 +22,20 @@ class FakeNanoBanana:
     """Draws a simple character on magenta (poses) or a busy full-frame scene (16:9 / 9:16)."""
 
     def __init__(self):
-        self.spent_usd, self.calls = 0.0, []
+        self.spent_usd, self.calls, self._cache = 0.0, [], {}
 
     def price(self, size):
         return PRICES[size]
 
     def generate(self, prompt, size="1K", aspect="1:1", refs=None):
+        key = (prompt, size, aspect)
+        if key in self._cache:                       # like the real client: the same request is free
+            return self._cache[key].copy()
+        img = self._draw(prompt, size, aspect, refs)
+        self._cache[key] = img
+        return img.copy()
+
+    def _draw(self, prompt, size, aspect, refs):
         self.calls.append((prompt[:60], size, aspect, len(refs or [])))
         self.spent_usd += PRICES[size]
         r = random.Random(len(self.calls))
@@ -207,3 +215,87 @@ def test_thumbnail_uses_the_max_cutout(ds, tmp_path):
     green = (abs(arr[..., 0] - 31) < 25) & (abs(arr[..., 1] - 138) < 25) & (abs(arr[..., 2] - 76) < 25)
     assert img.size == (1280, 720) and green[:, 800:].sum() > 5000      # Max's sweater on the right
     assert D.statement("THE BNPL TRAP?") == "The BNPL Trap."
+
+
+def test_enclosed_magenta_next_to_the_face_is_removed_and_check_fails_above_0_1_percent():
+    img = FakeNanoBanana().generate("pose, magenta background", "1K", "3:4")
+    d = ImageDraw.Draw(img)
+    d.line([(480, 330), (560, 200), (470, 110)], fill=(0, 0, 0), width=14)        # an arm up to the head ...
+    d.polygon([(482, 300), (540, 205), (482, 140)], fill=(255, 0, 255))           # ... enclosing magenta
+    d.ellipse((330, 195, 342, 207), fill=(236, 40, 230))                          # a magenta-ish glint in the glasses
+    cut = max_assets.key_out(img)
+    assert max_assets.magenta_share(cut) <= max_assets.MAGENTA_MAX
+    assert max_assets.check_cutout(cut, img.size) == []
+    dirty = cut.copy()
+    ImageDraw.Draw(dirty).rectangle((100, 300, 135, 335), fill=(255, 0, 255, 255))   # ~0.5% magenta blob
+    probs = max_assets.check_cutout(dirty, img.size)
+    assert any("magenta" in x for x in probs)
+
+
+def test_a_pose_that_stays_dirty_fails_the_design_instead_of_being_kept(ds, monkeypatch):
+    monkeypatch.setattr(max_assets, "check_cutout", lambda cut, size: ["0.50% magenta left on the figure"])
+    gi = FakeNanoBanana()
+    with pytest.raises(max_assets.MaxNotClean, match="magenta"):
+        max_assets.design(ds, gi, cap_usd=2.0)
+    assert len(gi.calls) == 1 + 8 * len(max_assets.ATTEMPTS)                     # every pose tried 4 times
+    assert not max_assets.ready(ds)                                               # nothing kept
+
+
+def test_repair_recuts_cached_poses_for_free_and_keeps_the_master(ds, tmp_path):
+    from glivarao.studio import style_samples as S
+
+    gi = FakeNanoBanana()
+    max_assets.design(ds, gi)
+    master = (max_assets.max_dir(ds) / "master.png").read_bytes()
+    n = len(gi.calls)
+    res = S.repair(ds, gi, tmp_path / "fix", cap=1.0)
+    assert res["usd"] == 0 and len(gi.calls) == n                                   # cached: nothing paid
+    assert (max_assets.max_dir(ds) / "master.png").read_bytes() == master
+    assert len(res["thumbs"]) == 3 and all(v == ["readable at 160x90"] for v in res["checks"].values())
+
+
+@pytest.mark.parametrize("words,value,y0,y1", [("Debt Wins", "$19.1T", "2019", "2026"),
+                                              ("Homes Got Expensive", "7.28%", "2025", "2026"),
+                                              ("$40 Trillion Owed", "$40.7T", "2019", "2026"),
+                                              ("Minimum Payment Trap", "$1,368.5B", "2021", "2026")])
+def test_thumbnail_number_years_panel_and_phone_readability(ds, tmp_path, words, value, y0, y1):
+    max_assets.design(ds, FakeNanoBanana())
+    info = {}
+    img = D.thumbnail(words, "worried", tmp_path / "t.jpg", value=value, start_year=y0, end_year=y1,
+                      max_img=max_assets.load_pose(ds, "worried"), info=info)
+    assert D.phone_readability(info) == [], D.phone_readability(info)
+    assert info["value"] and len(info["years"]) == 2
+    for b in info["statement"] + [info["value"]] + info["years"]:
+        assert 0 <= b[0] and 0 <= b[1] and b[2] <= 1280 and b[3] <= 720             # inside the thumbnail
+    arr = np.asarray(img, dtype=np.int16)
+    vb = info["value"]
+    region = arr[vb[1]:vb[3], vb[0]:vb[2]]
+    gold = (abs(region[..., 0] - 224) < 40) & (abs(region[..., 1] - 165) < 40) & (region[..., 2] < 110)
+    assert gold.mean() > 0.08                                                         # the number is gold
+    bg = arr[5:40, 5:40].reshape(-1, 3).mean(axis=0)
+    assert bg.mean() < 236 and bg[0] > bg[2] + 15                                     # warmer, darker paper
+
+
+def test_key_number_from_facts_for_production_thumbnails():
+    assert D.compact_number("$1,368.5 billion") == "$1.4T" and D.compact_number("$208 billion") == "$208B"
+    assert D.key_number(["As of the third quarter of 2026, US household debt was $19.1 trillion, up $5 trillion "
+                         "since the end of 2019."], 2026) == ("$19.1T", "2019", "2026")
+    assert D.key_number(["As of November 19, 2026, the 30-year fixed mortgage rate averaged 7.28%, up from 6.26% a "
+                         "year earlier."], 2026) == ("7.28%", "2025", "2026")
+    assert D.key_number(["no numbers here"], 2026) == ("", "", "")
+
+
+def test_cli_repair_sends_only_sheet_and_thumbnails_and_prints_cost(ds, tmp_path, monkeypatch, capsys):
+    from glivarao import __main__ as cli
+    from glivarao.studio import style_samples as S
+
+    fake = FakeNanoBanana()
+    max_assets.design(ds, fake)
+    sent = {}
+    monkeypatch.setattr("glivarao.art.gemini_image.GeminiImage", lambda st: fake)
+    monkeypatch.setattr(cli, "get_settings", lambda: ds)
+    monkeypatch.setattr(S, "send_thumbs", lambda st, res, client=None: sent.update(res=res))
+    monkeypatch.setattr(S, "send", lambda *a, **k: pytest.fail("full samples must not be resent"))
+    cli.main(["style-samples", "--repair-max", "--send-thumbs", "--out", str(tmp_path / "o")])
+    out = capsys.readouterr().out
+    assert "NANO BANANA SPENT BY THIS COMMAND: $0.00 (cap $1.00)" in out and sent["res"]["frames"] == []

@@ -99,17 +99,22 @@ def key_out(img: Image.Image, tolerance: float = 70.0) -> Image.Image:
                 ImageDraw.floodfill(mask, (x, y), 128)
     cur = mask.point(lambda v: 255 if v == 128 else 0)
     bgmask = np.asarray(cur) > 0
+    is_magenta_key = bg[0] > 150 and bg[2] > 150 and bg[1] < 110
+    if is_magenta_key:   # the key colour never belongs to Max: remove it everywhere, also where it is enclosed
+        bgmask = bgmask | magenta_mask(rgb)
     alpha = np.where(bgmask, 0.0, 1.0)
     # soft edge: pixels near the background get partial alpha by colour distance
     edge = np.asarray(Image.fromarray((bgmask * 255).astype(np.uint8)).filter(ImageFilter.MaxFilter(5))) > 0
     band = edge & ~bgmask
     alpha[band] = np.clip((dist[band] - tolerance * 0.6) / (tolerance * 1.2), 0, 1)
     out = rgb.copy()
-    if bg[0] > 150 and bg[2] > 150 and bg[1] < 110:         # magenta key: remove pink spill on the edges
-        spill = band | (alpha < 1)
+    if is_magenta_key:   # despill: any remaining pink tint near the edge is pulled back to neutral
+        near = np.asarray(Image.fromarray((bgmask * 255).astype(np.uint8)).filter(ImageFilter.MaxFilter(9))) > 0
         g = out[..., 1]
-        out[..., 0] = np.where(spill, np.minimum(out[..., 0], g + 40), out[..., 0])
-        out[..., 2] = np.where(spill, np.minimum(out[..., 2], g + 40), out[..., 2])
+        tinted = near & (out[..., 0] - g > 25) & (out[..., 2] - g > 25)
+        out[..., 0] = np.where(tinted, np.minimum(out[..., 0], g + 25), out[..., 0])
+        out[..., 2] = np.where(tinted, np.minimum(out[..., 2], g + 25), out[..., 2])
+        alpha = np.where(magenta_mask(out) & (alpha < 1), 0.0, alpha)
     rgba = np.dstack([out, alpha * 255]).clip(0, 255).astype(np.uint8)
     res = Image.fromarray(rgba, "RGBA")
     bbox = res.getchannel("A").point(lambda a: 255 if a > 24 else 0).getbbox()
@@ -117,6 +122,23 @@ def key_out(img: Image.Image, tolerance: float = 70.0) -> Image.Image:
         m = 12
         res = res.crop((max(0, bbox[0] - m), max(0, bbox[1] - m), min(w, bbox[2] + m), min(h, bbox[3] + m)))
     return res
+
+
+MAGENTA_MAX = 0.001   # more than 0.1% magenta on the figure = FAIL (redrawn, never kept)
+
+
+def magenta_mask(rgb: np.ndarray) -> np.ndarray:
+    """Pixels that are the key colour or a shade/blend of it (pink-purple with green far below red and blue).
+    Max never contains these colours (skin, lips and tongue have blue well below red)."""
+    r, g, b = rgb[..., 0].astype(np.int16), rgb[..., 1].astype(np.int16), rgb[..., 2].astype(np.int16)
+    return (r > 120) & (b > 120) & (r - g > 70) & (b - g > 70) & (abs(r - b) < 90)
+
+
+def magenta_share(cut: Image.Image) -> float:
+    a = np.asarray(cut.getchannel("A"), dtype=np.float32) / 255
+    rgb = np.asarray(cut.convert("RGB"), dtype=np.int16)
+    vis = a > 0.1
+    return float((magenta_mask(rgb) & vis).sum() / max(1, vis.sum()))
 
 
 def check_cutout(cut: Image.Image, source_size: tuple[int, int]) -> list[str]:
@@ -129,9 +151,10 @@ def check_cutout(cut: Image.Image, source_size: tuple[int, int]) -> list[str]:
         probs.append(f"figure covers {cover:.0%} of its box (background not removed cleanly)")
     if cut.height < source_size[1] * 0.55:
         probs.append(f"figure too small ({cut.height}px of {source_size[1]}px)")
-    magenta = (rgb[..., 0] > 200) & (rgb[..., 2] > 200) & (rgb[..., 1] < 90) & (a > 0.5)
-    if magenta.mean() > 0.004:
-        probs.append(f"{magenta.mean():.1%} magenta left on the figure")
+    del rgb
+    m = magenta_share(cut)
+    if m > MAGENTA_MAX:
+        probs.append(f"{m:.2%} magenta left on the figure (max {MAGENTA_MAX:.1%})")
     return probs
 
 
@@ -168,12 +191,23 @@ class DesignBudget(RuntimeError):
     pass
 
 
-def design(settings, gi, cap_usd: float = 2.0, redesign: bool = False, log_fn=print) -> dict:
+class MaxNotClean(RuntimeError):
+    """A pose still fails the checks after every attempt: nothing is kept or sent."""
+
+
+ATTEMPTS = ["", " Make the expression and body language very clear and exaggerated.",
+            " Keep both hands and arms clearly away from the face and body so no background shows between them; "
+            "nothing on the character is pink or magenta.",
+            " Simple, compact pose with the arms close to the body; no gaps between arms and head; nothing on the "
+            "character is pink or magenta."]
+
+
+def design(settings, gi, cap_usd: float = 2.0, redesign: bool = False, log_fn=print, repair: bool = False) -> dict:
     """Generate the master + 8 poses (Nano Banana), key them out, check them, write the sheet.
     gi: a GeminiImage. Stops before any call that would take this run over cap_usd."""
     d = max_dir(settings)
     d.mkdir(parents=True, exist_ok=True)
-    if ready(settings) and not redesign:
+    if ready(settings) and not (redesign or repair):
         return {"made": False, "usd": 0.0, "dir": str(d)}
     start = gi.spent_usd
 
@@ -182,27 +216,35 @@ def design(settings, gi, cap_usd: float = 2.0, redesign: bool = False, log_fn=pr
             raise DesignBudget(f"would exceed the ${cap_usd:.2f} design cap")
         return gi.generate(prompt, size, aspect, refs)
 
-    master = gen(f"Character design: {CHARACTER}. Standing in a relaxed, friendly pose, smiling, front three-"
-                 f"quarter view. {LOOK} {KEY_BG}", "2K", "3:4", [])
     master_path = d / "master.png"
-    master.save(master_path, "PNG")
+    if not (repair and master_path.exists()):     # repair keeps the approved master design
+        master = gen(f"Character design: {CHARACTER}. Standing in a relaxed, friendly pose, smiling, front three-"
+                     f"quarter view. {LOOK} {KEY_BG}", "2K", "3:4", [])
+        master.save(master_path, "PNG")
     ref = master_path.read_bytes()
     cutouts, report = {}, {}
+    failed = {}
     for name, pose in POSES.items():
         cut, probs = None, ["not generated"]
-        for attempt in range(2):
-            extra = " Make the expression and body language very clear and exaggerated." if attempt else ""
+        for attempt, extra in enumerate(ATTEMPTS):
+            # the same prompt is served from the image cache (free): earlier drawings are re-cut before paying
             img = gen(f"The SAME character as in the reference image ({CHARACTER}), exactly the same face, glasses, "
                       f"hair, sweater, coin pin, trousers, shoes and proportions. Pose: {pose}.{extra} {LOOK} {KEY_BG}",
                       "1K", "3:4", [ref])
             cut = key_out(img)
             probs = check_cutout(cut, img.size)
             if not probs:
+                if attempt:
+                    log_fn(f"  pose {name}: clean on attempt {attempt + 1}")
                 break
-            log_fn(f"  pose {name}: {'; '.join(probs)}; trying once more" if attempt == 0 else
-                   f"  pose {name}: still {'; '.join(probs)} (kept, flagged in the report)")
+            log_fn(f"  pose {name} attempt {attempt + 1}: {'; '.join(probs)}")
+        if probs:
+            failed[name] = probs
+            continue
         cut.save(pose_path(settings, name), "PNG")
-        cutouts[name], report[name] = cut, probs
+        cutouts[name], report[name] = cut, [f"magenta {magenta_share(cut):.3%}"]
+    if failed:
+        raise MaxNotClean("; ".join(f"{n}: {'; '.join(p)}" for n, p in failed.items()))
     compose_sheet(cutouts, sheet_path(settings))
     meta = {"poses": list(POSES), "usd": round(gi.spent_usd - start, 4), "problems": report,
             "sha": {n: hashlib.sha256(pose_path(settings, n).read_bytes()).hexdigest()[:16] for n in POSES}}

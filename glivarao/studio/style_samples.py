@@ -26,6 +26,10 @@ VERSION = "doodle-v2"
 CAP_USD = 2.0
 MAX_EMPTY = 0.15
 
+# thumbnail chart data (official sources, checked 2026-11-22): key number + start/end year
+THUMB_DATA = [("$19.1T", "2019", "2026"),   # NY Fed HHDC 2026 Q3: household debt $19.1T, up $5T since end of 2019
+              ("7.28%", "2025", "2026"),    # Freddie Mac PMMS: 30-year rate 7.28% (Nov 19, 2026) vs 6.26% a year earlier
+              ("$40.7T", "2019", "2026")]   # Treasury Debt to the Penny: $23.1T (Nov 19, 2019) -> $40.7T (Nov 19, 2026)
 # (launch-list topic, thumbnail statement, Max pose, scene, shot kind, number)
 SAMPLES = [
     ("How to get out of credit card debt (a plan that works)", "Debt Wins", "worried",
@@ -47,6 +51,7 @@ class Spend:
     """Tracks this command's Nano Banana spend against the $2 cap."""
 
     def __init__(self, gi, cap: float = CAP_USD):
+        self.cap_label = cap
         self.gi, self.cap, self.start = gi, cap, gi.spent_usd
 
     @property
@@ -78,6 +83,33 @@ def compose_frame(bg_path: Path, scene: Scene, kind: str, num: str, seed: int = 
     return frame, ov
 
 
+def make_thumb(settings, k: int, words: str, pose: str, out_dir: Path):
+    value, y0, y1 = THUMB_DATA[k - 1]
+    info: dict = {}
+    tp = out_dir / f"thumbnail_{k}.jpg"
+    D.thumbnail(words, pose, tp, seed=k, max_img=max_assets.load_pose(settings, pose), value=value, start_year=y0,
+                end_year=y1, info=info)
+    return tp, info
+
+
+def repair(settings, gi, out_dir: Path, cap: float = 1.0, log=print) -> dict:
+    """Re-cut Max's poses with the stricter magenta check (cached drawings: free), redraw only poses that still
+    fail (within `cap`), rebuild the sheet and the 3 thumbnails. Video frames are not touched."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    sp = Spend(gi, cap)
+    d = max_assets.design(settings, sp, cap_usd=cap, repair=True, log_fn=log)
+    res = {"sheet": max_assets.sheet_path(settings), "frames": [], "thumbs": [], "topics": [], "checks": {},
+           "max": d}
+    for k, (topic, words, pose, _scene, _kind, _num) in enumerate(SAMPLES, 1):
+        tp, info = make_thumb(settings, k, words, pose, out_dir)
+        res["checks"][f"thumbnail_{k}"] = D.phone_readability(info) or ["readable at 160x90"]
+        res["thumbs"].append(tp)
+        res["topics"].append(topic)
+    res["usd"] = round(sp.spent, 4)
+    res["cap"] = cap
+    return res
+
+
 def frame_checks(frame, ov) -> list[str]:
     probs = []
     sx0, sy0, sx1, sy1 = R.safe_box(frame.size, False)
@@ -106,8 +138,8 @@ def make(settings, gi, out_dir: Path, redesign: bool = False, log=print) -> dict
         fp = out_dir / f"frame_{k}.png"
         frame.save(fp, "PNG")
         res["checks"][f"frame_{k}"] = frame_checks(frame, ov) + [f"empty {R.empty_ratio(frame):.0%}"]
-        tp = out_dir / f"thumbnail_{k}.jpg"
-        D.thumbnail(words, pose, tp, seed=k, max_img=max_assets.load_pose(settings, pose))
+        tp, info = make_thumb(settings, k, words, pose, out_dir)
+        res["checks"][f"thumbnail_{k}"] = D.phone_readability(info) or ["readable at 160x90"]
         res["frames"].append(fp)
         res["thumbs"].append(tp)
         res["topics"].append(topic)
@@ -120,12 +152,16 @@ def make(settings, gi, out_dir: Path, redesign: bool = False, log=print) -> dict
 
 def summary(settings, res: dict) -> str:
     est = doodle_prep.estimate(settings)
-    probs = [f"{k}: {'; '.join(v)}" for k, v in res["checks"].items() if any("outside" in x or "empty (" in x
-                                                                          for x in v)]
-    maxp = {p: v for p, v in (res["max"].get("problems") or {}).items() if v}
-    return (f"Nano Banana spent by this command: ${res['usd']:.2f} (cap ${CAP_USD:.2f}).\n"
-            f"Checks: {'all frames pass (text inside the safe area, at most 15% empty)' if not probs else ' | '.join(probs)}"
-            + (f"\nMax poses flagged: {maxp}" if maxp else "") + "\n\n"
+    probs = [f"{k}: {'; '.join(v)}" for k, v in res["checks"].items()
+             if any("outside" in x or "empty (" in x or "too small" in x or "contrast" in x for x in v)]
+    mag = {n: max_assets.magenta_share(max_assets.load_pose(settings, n)) for n in max_assets.POSES
+           if max_assets.pose_path(settings, n).exists()}
+    worst = max(mag.values()) if mag else 0.0
+    return (f"Nano Banana spent by this command: ${res['usd']:.2f} (cap ${res.get('cap', CAP_USD):.2f}).\n"
+            f"Max: {len(mag)} poses, magenta on the figure at most {worst:.3%} (fails above "
+            f"{max_assets.MAGENTA_MAX:.1%}).\n"
+            f"Checks: {'all pass (text inside the safe area, at most 15% empty, thumbnails readable at 160x90)' if not probs else ' | '.join(probs)}"
+            "\n\n"
             f"Estimated Nano Banana cost in this style: ${est['per_long']:.2f} per long video "
             f"({settings.doodle_key_scenes_long} key scenes at 2K), ${est['per_short']:.3f} per Short "
             f"({settings.doodle_key_scenes_short} key scene at 1K) = ${est['per_month']:.2f} a month for "
@@ -165,6 +201,35 @@ def send(settings, res: dict, client=None) -> None:
                                            {"text": "✏️ Request changes", "callback_data": "styleedit:x"}]]})
 
 
+def send_thumbs(settings, res: dict, client=None) -> None:
+    """Only the fixed Max sheet + the 3 thumbnails (+ the approve buttons)."""
+    from ..publish.telegram import _client
+
+    c = _client(settings, client)
+    chat = settings.telegram_approver_chat_id
+    c.call("sendMessage", chat_id=chat, text=(
+        "🔧 Fixes: Max's poses re-cut with a strict magenta check (fails above 0.1%), thumbnails with the real key "
+        "number in gold on the spike point, start/end years, warmer paper and a soft panel behind the chart "
+        "(checked readable at phone size, 160x90). Video frames unchanged.\n\n" + summary(settings, res)))
+    with open(res["sheet"], "rb") as fh:
+        c.call("sendPhoto", files={"photo": fh}, chat_id=chat, caption="Max: the 8 poses (fixed cutouts)")
+    handles = [open(p, "rb") for p in res["thumbs"]]
+    try:
+        media = [{"type": "photo", "media": f"attach://f{k}",
+                  **({"caption": "Thumbnails: " + " · ".join(f"{i + 1}. {t}" for i, t in enumerate(res["topics"]))}
+                     if k == 0 else {})} for k in range(len(handles))]
+        c.call("sendMediaGroup", files={f"f{k}": (Path(p).name, h) for k, (p, h) in
+                                        enumerate(zip(res["thumbs"], handles))}, chat_id=chat, media=media)
+    finally:
+        for h in handles:
+            h.close()
+    c.call("sendMessage", chat_id=chat, text=(
+        "Approve this style? Approving switches NEW videos to it once you resume production. Production stays "
+        "paused either way."),
+        reply_markup={"inline_keyboard": [[{"text": "✅ Approve style", "callback_data": f"style:{VERSION}"},
+                                           {"text": "✏️ Request changes", "callback_data": "styleedit:x"}]]})
+
+
 def approve(settings, store, env_path: Path | None = None) -> None:
     """Switch new videos to the doodle theme (in .env)."""
     from .voice_audition import write_env
@@ -178,5 +243,5 @@ def approved(store) -> bool:
     return json.loads(store.kv_get("style_approved", "{}")).get("version") == VERSION
 
 
-__all__ = ["make", "send", "summary", "approve", "approved", "compose_frame", "frame_checks", "Spend", "SAMPLES",
+__all__ = ["repair", "send_thumbs", "make_thumb", "THUMB_DATA", "make", "send", "summary", "approve", "approved", "compose_frame", "frame_checks", "Spend", "SAMPLES",
            "VERSION", "CAP_USD"]
