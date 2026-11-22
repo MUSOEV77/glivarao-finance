@@ -47,6 +47,10 @@ class Scene(BaseModel):
     beat: Optional[str] = None
     # AI scene illustration (long videos; set by art/ai_visuals.py). None/missing file = code-drawn plate.
     art_path: Optional[str] = None
+    # Doodle theme (set before rendering): the full picture behind the scene and the Max cutout standing in it
+    # (None when the picture is a key scene that already shows Max acting in it).
+    bg_path: Optional[str] = None
+    max_pose_path: Optional[str] = None
 
 
 class Script(BaseModel):

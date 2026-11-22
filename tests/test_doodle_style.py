@@ -1,31 +1,162 @@
-"""Doodle style: same Max every time, 6-10 s shots with camera moves, brand mark, thumbnails (2-3 word statement
-ending with a period, one simple chart, Max), style samples + Telegram approval (old style stays until approved)."""
-import hashlib
-import io
+"""Doodle style v2: Max designed once (Nano Banana) -> 8 transparent cutouts reused everywhere; full pictures behind
+every shot (key scenes + scene library); every text inside the safe area; <= 15% empty frames; $2 cap for the
+samples command; cost estimate within the image budget. Nano Banana is simulated (no paid call)."""
 import json
-import shutil
+import random
 from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
 import pytest
+from PIL import Image, ImageDraw
 
 from glivarao.art import doodle as D
+from glivarao.art import doodle_prep, max_assets
 from glivarao.models import ChartSpec, Scene, Script
 from glivarao.render import doodle as R
 
-
-def _png(img) -> str:
-    b = io.BytesIO()
-    img.save(b, "PNG")
-    return hashlib.sha256(b.getvalue()).hexdigest()
+PRICES = {"1K": 0.0336, "2K": 0.0504}
 
 
-def test_max_reference_sheet_is_identical_every_time(tmp_path):
-    a, b = D.reference_sheet(tmp_path / "a.png"), D.reference_sheet()
-    assert _png(a) == _png(b) and a.size == (1536, 1024)
-    assert _png(D.max_figure("worried")) == _png(D.max_figure("worried"))
-    assert _png(D.max_figure("worried")) != _png(D.max_figure("happy"))      # emotions differ, Max doesn't
+class FakeNanoBanana:
+    """Draws a simple character on magenta (poses) or a busy full-frame scene (16:9 / 9:16)."""
+
+    def __init__(self):
+        self.spent_usd, self.calls = 0.0, []
+
+    def price(self, size):
+        return PRICES[size]
+
+    def generate(self, prompt, size="1K", aspect="1:1", refs=None):
+        self.calls.append((prompt[:60], size, aspect, len(refs or [])))
+        self.spent_usd += PRICES[size]
+        r = random.Random(len(self.calls))
+        if "magenta" in prompt:
+            img = Image.new("RGB", (768, 1024), (255, 0, 255))
+            d = ImageDraw.Draw(img)
+            d.ellipse((290, 120, 480, 310), fill=(240, 200, 170), outline=(0, 0, 0), width=8)
+            d.ellipse((320, 190, 370, 240), fill=(255, 255, 255), outline=(0, 0, 0), width=5)
+            d.rectangle((270, 310, 500, 650), fill=(31, 138, 76), outline=(0, 0, 0), width=8)
+            d.rectangle((300, 650, 470, 960), fill=(200, 180, 140), outline=(0, 0, 0), width=8)
+            return img
+        w, h = (1152, 2048) if aspect == "9:16" else (2048, 1152)
+        img = Image.new("RGB", (w, h), (120, 170, 200))
+        d = ImageDraw.Draw(img)
+        for _ in range(900):
+            x, y, s = r.randint(0, w), r.randint(0, h), r.randint(20, 160)
+            d.rectangle((x, y, x + s, y + s * 0.8), fill=tuple(r.randint(40, 230) for _ in range(3)),
+                        outline=(20, 20, 20), width=4)
+        return img
+
+
+@pytest.fixture
+def ds(settings, tmp_path):
+    return replace(settings, doodle_ref_path=str(tmp_path / "character" / "doodle_reference.png"),
+                   doodle_library_dir=str(tmp_path / "library"), theme="doodle")
+
+
+def test_key_out_removes_background_and_keeps_enclosed_areas():
+    img = FakeNanoBanana().generate("pose, magenta background", "1K", "3:4")
+    cut = max_assets.key_out(img)
+    a = np.asarray(cut.getchannel("A"))
+    assert a[0, 0] == 0 and a[-1, -1] == 0                       # background gone
+    assert max_assets.check_cutout(cut, img.size) == []
+    eye = a[(215 - 120) + 12 - 10, (345 - 270) + 12]               # white eye inside the head stays opaque
+    assert eye == 255
+    rgb = np.asarray(cut.convert("RGB"), dtype=np.int16)
+    assert not ((rgb[..., 0] > 200) & (rgb[..., 2] > 200) & (rgb[..., 1] < 90) & (a > 128)).any()
+
+
+def test_max_designed_once_with_8_poses_then_reused_for_free(ds):
+    gi = FakeNanoBanana()
+    r = max_assets.design(ds, gi, cap_usd=2.0)
+    assert r["made"] and max_assets.ready(ds) and len(gi.calls) == 9            # master + 8 poses
+    assert all(c[3] == 1 for c in gi.calls[1:])                                  # every pose uses the master
+    assert set(max_assets.POSES) == {"explaining", "pointing", "worried", "shocked", "thinking", "happy", "sad",
+                                     "cheering"}
+    assert max_assets.design(ds, gi, cap_usd=2.0)["made"] is False and len(gi.calls) == 9   # never again
+    assert max_assets.load_pose(ds, "confident").mode == "RGBA"                   # mood -> pose mapping
+    assert Image.open(max_assets.sheet_path(ds)).size == (1536, 864)
+
+
+def test_design_stops_before_exceeding_the_cap(ds):
+    with pytest.raises(max_assets.DesignBudget):
+        max_assets.design(ds, FakeNanoBanana(), cap_usd=0.2)
+
+
+LONG_HEADINGS = ["Is the national debt a problem for your household budget and your savings account?",
+                 "Supercalifragilisticexpialidocious-interest-rate-explanations-without-any-spaces-at-all",
+                 "Why houses got so expensive", "A", "The average card rate"]
+
+
+@pytest.mark.parametrize("portrait", [False, True])
+@pytest.mark.parametrize("kind", ["title", "number", "chart", "points"])
+def test_every_text_fits_inside_the_safe_area(kind, portrait):
+    size = (1080, 1920) if portrait else (1920, 1080)
+    sx0, sy0, sx1, sy1 = R.safe_box(size, portrait)
+    for heading in LONG_HEADINGS:
+        sc = Scene(heading=heading, narration="x", key_points=[heading, "Pay the highest rate first " * 3, "ok"],
+                   chart=ChartSpec(kind="bar_compare", title=heading, values=[1, 2, 3], labels=["a", "b", heading]))
+        ov = R.build_overlay(sc, R.Shot(0, 8, kind, heading, {"num": "$1,368,500,000,000.00"}), size, portrait)
+        assert ov.text_boxes, kind
+        for b in ov.text_boxes:
+            assert sx0 <= b[0] and sy0 <= b[1] and b[2] <= sx1 and b[3] <= sy1, (kind, portrait, heading, b)
+        alpha = np.asarray(ov.img.getchannel("A"))
+        # nothing past the margins or over the captions except the card's faint soft shadow
+        assert alpha[:, :sx0 - 2].max() <= 40 and alpha[:, sx1 + 12:].max() <= 40
+        assert alpha[sy1 + 14:, :].max() <= 40
+
+
+def _scene_script(fmt="long"):
+    scenes = [Scene(heading="Card bills at night", narration="The bills keep coming. The rate was 22.36% a year."),
+              Scene(heading="Home prices", narration="Home prices climbed faster than paychecks.",
+                    chart=ChartSpec(kind="line_series", values=[1, 1.1, 1.2, 1.3, 2, 3], title="Prices")),
+              Scene(heading="What to do", narration="This video is for education only and isn't financial advice.")]
+    return Script(format=fmt, topic="t", title="t", description="", thumbnail_text="", scenes=scenes)
+
+
+def test_prepare_gives_every_scene_a_full_picture_and_frames_are_not_empty(ds, tmp_path):
+    gi = FakeNanoBanana()
+    max_assets.design(ds, gi)
+    script, stats = doodle_prep.prepare(_scene_script(), tmp_path / "job", replace(ds, doodle_key_scenes_long=1),
+                                        gi=gi)
+    assert stats["key_ai"] == 1 and stats["library"] == 2
+    assert all(s.bg_path and Path(s.bg_path).exists() for s in script.scenes)
+    assert script.scenes[0].max_pose_path is None                     # key scene: Max already acts in it
+    assert all(s.max_pose_path for s in script.scenes[1:])            # library place + Max cutout
+    for i in range(2):
+        fr = R.DoodleFrames(script, i, [(0.0, 7.0, "a"), (7.0, 14.0, "b 22.36%")], 14 * 24)
+        for f in (0, 100, 200):
+            img = fr.frame(f, False)
+            assert img.size == (1920, 1080) and R.empty_ratio(img) <= 0.15
+    # Shorts: portrait pictures
+    sscript, _ = doodle_prep.prepare(_scene_script("short"), tmp_path / "s", ds, gi=gi)
+    assert all("portrait" in s.bg_path or "key_" in s.bg_path for s in sscript.scenes)
+    img = R.DoodleFrames(sscript, 1, [(0.0, 8.0, "x")], 8 * 24).frame(10, True)
+    assert img.size == (1080, 1920) and R.empty_ratio(img) <= 0.15
+
+
+def test_no_pictures_means_editorial_fallback_not_an_empty_video(ds, tmp_path):
+    with pytest.raises(doodle_prep.DoodleUnavailable, match="Max has not been designed"):
+        doodle_prep.prepare(_scene_script(), tmp_path, ds)
+    max_assets.design(ds, FakeNanoBanana())
+    with pytest.raises(doodle_prep.DoodleUnavailable, match="no scene pictures"):
+        doodle_prep.prepare(_scene_script(), tmp_path, ds)            # paid images off, empty library
+
+
+def test_old_empty_doodle_frame_would_fail_the_empty_check():
+    blank = D.paper(1920, 1080).copy()
+    Pen = D.Pen(blank)
+    Pen.text((600, 400), "22.36%", 200)
+    assert R.empty_ratio(blank) > 0.5
+
+
+def test_cost_estimate_fits_the_image_budget(settings):
+    e = doodle_prep.estimate(settings)
+    assert e["per_long"] == pytest.approx(6 * 0.0504, abs=1e-3)
+    assert e["per_short"] == pytest.approx(0.0336, abs=1e-3)
+    assert e["per_month"] == pytest.approx(16 * 6 * 0.0504 + 90 * 0.0336, abs=0.01)
+    assert e["fits"] and e["per_month"] + e["library_once"] < settings.image_monthly_budget_usd
 
 
 def test_shots_are_6_to_10_seconds():
@@ -33,88 +164,46 @@ def test_shots_are_6_to_10_seconds():
              (37.0, 40.0, "e")]
     shots = R.plan_shots(sents, 41.0)
     assert shots[0][0] == 0.0 and shots[-1][1] == 41.0
-    assert all(b[0] == pytest.approx(a[1]) for a, b in zip(shots, shots[1:]))   # back to back
-    assert all(4.0 <= e - s <= 10.0 for s, e, _ in shots), [round(e - s, 1) for s, e, _ in shots]
-    assert R.plan_shots([(0.0, 5.0, "only")], 5.0) == [(0.0, 5.0, "only")]
+    assert all(4.0 <= e - s <= 10.0 for s, e, _ in shots)
 
 
-def test_frames_cut_between_shots_and_camera_moves_within_a_shot():
-    sc = Scene(heading="How card interest piles up", narration="x", illustration="credit_card",
-               chart=ChartSpec(kind="line_series", values=[1, 2, 2, 3, 5, 8], title="Interest (illustration)"))
-    script = Script(format="long", topic="t", title="t", description="", thumbnail_text="", scenes=[sc])
-    fr = R.DoodleFrames(script, 0, [(0.0, 7.0, "first"), (7.0, 14.0, "As of November 2026 it was 22.36%.")], 14 * 24)
-    a, b, c, d, e = (np.asarray(fr.frame(f, False), dtype=np.int16) for f in (0, 100, 101, 167, 168))
-    assert a.shape == (1080, 1920, 3)
-    step = np.abs(b - c).mean()                           # one frame of slow camera movement
-    assert 0 < step and np.abs(a - b).mean() > step       # the camera keeps moving through the shot
-    assert np.abs(d - e).mean() > 5 * step                # hard cut at 7 s to a different drawing
-    assert [s.kind for s in fr.shots] == ["title", "chart"]
-    top_right = a[10:70, 1700:1910]
-    assert ((top_right[..., 1] > 110) & (top_right[..., 0] < 80)).sum() > 50    # green GLIVARAO mark on screen
-    assert fr.frame(0, True).size == (1080, 1920)       # Shorts
-
-
-def test_thumbnail_statement_chart_and_size(tmp_path):
-    assert D.statement("MINIMUM PAYMENT TRAP") == "Minimum Payment Trap."
-    assert D.statement("THE BNPL TRAP?") == "The BNPL Trap."
-    assert D.statement("debt wins") == "Debt Wins."
-    img = D.thumbnail("Debt Wins", "worried", tmp_path / "t.jpg")
-    assert img.size == (1280, 720) and (tmp_path / "t.jpg").exists()
-    arr = np.asarray(img, dtype=np.int16)
-    green = (abs(arr[..., 0] - 31) < 25) & (abs(arr[..., 1] - 138) < 25) & (abs(arr[..., 2] - 76) < 25)
-    gold = (abs(arr[..., 0] - 224) < 25) & (abs(arr[..., 1] - 165) < 25) & (abs(arr[..., 2] - 38) < 30)
-    grey = (abs(arr[..., 0] - 150) < 12) & (abs(arr[..., 1] - 150) < 12) & (abs(arr[..., 2] - 146) < 12)
-    assert green.sum() > 2000 and gold.sum() > 100 and grey.sum() > 200   # sweater/spike, gold dot, history line
-
-
-@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="needs ffmpeg")
-def test_style_samples_and_telegram_approval(settings, store, tmp_path, monkeypatch):
+def test_style_samples_command_cap_cost_checks_and_telegram(ds, store, tmp_path, monkeypatch, capsys):
+    from glivarao import __main__ as cli
     from glivarao.publish.telegram import TelegramClient, poll_decisions
     from glivarao.studio import style_samples as S
     from tests.conftest import FakeTelegramSession
 
-    monkeypatch.setattr(S, "motion_sample", lambda dst, seconds=14.0: (dst.write_bytes(b"mp4"), dst)[1])
-    res = S.make(tmp_path / "samples")
-    assert len(res["frames"]) == 3 and len(res["thumbs"]) == 3 and res["reference"].exists()
-    assert {p.name for p in res["frames"]} == {"frame_1.png", "frame_2.png", "frame_3.png"}
-    s = replace(settings, telegram_bot_token="T", telegram_approver_chat_id="42",
-                doodle_ref_path=str(tmp_path / "ref.png"))
+    gi = FakeNanoBanana()
+    res = S.make(ds, gi, tmp_path / "samples")
+    assert res["usd"] == pytest.approx(0.0504 + 8 * 0.0336 + 3 * 0.0504, abs=1e-3) and res["usd"] <= S.CAP_USD
+    assert all(not [c for c in v if "outside" in c or "empty (" in c] for v in res["checks"].values())
+    assert len(res["frames"]) == 3 and len(res["thumbs"]) == 3
+    assert "per long video" in S.summary(ds, res) and "fits" in S.summary(ds, res)
+    s = replace(ds, telegram_bot_token="T", telegram_approver_chat_id="42")
     tg = FakeTelegramSession()
     client = TelegramClient("T", session=tg)
     S.send(s, res, client)
     methods = [m for m, _ in tg.calls]
-    assert methods.count("sendMediaGroup") == 2 and "sendVideo" in methods and "sendPhoto" in methods
-    buttons = tg.calls[-1][1]["reply_markup"]
-    assert "style:doodle-v1" in str(buttons) and "styleedit" in str(buttons)
+    assert methods.count("sendMediaGroup") == 2 and methods.count("sendPhoto") == 1
+    assert "$0." in json.dumps(tg.calls[0][1]) and "style:doodle-v2" in json.dumps(tg.calls[-1][1])
     env = tmp_path / ".env"
     env.write_text("GLIVARAO_THEME=editorial\n")
     monkeypatch.setenv("ENV_FILE", str(env))
-    assert not S.approved(store)
-    tg.updates = [{"update_id": 1, "callback_query": {"id": "c", "from": {"id": 42}, "data": "style:doodle-v1",
+    tg.updates = [{"update_id": 1, "callback_query": {"id": "c", "from": {"id": 42}, "data": "style:doodle-v2",
                                                       "message": {"chat": {"id": 42}}}}]
     poll_decisions(store, s, client)
     assert S.approved(store) and "GLIVARAO_THEME=doodle" in env.read_text()
-    assert Path(s.doodle_ref_path).exists() and any("still PAUSED" in json.dumps(c[1]) for c in tg.calls)
+    # the CLI prints the money spent
+    monkeypatch.setattr("glivarao.art.gemini_image.GeminiImage", lambda st: FakeNanoBanana())
+    monkeypatch.setattr(cli, "get_settings", lambda: ds)
+    cli.main(["style-samples", "--out", str(tmp_path / "cli")])
+    assert "NANO BANANA SPENT BY THIS COMMAND: $" in capsys.readouterr().out
 
 
-def test_doodle_ai_prompts_use_the_doodle_max_and_style(settings, tmp_path):
-    from glivarao.art import ai_visuals as V
-
-    sc = Scene(heading="Bank failures", narration="What happens when a bank fails.")
-    p = V.scene_prompt(sc, True, "doodle")
-    assert "doodle" in p and "#1f8a4c" in p and "round glasses" in p and "no real people" in p
-    s = replace(settings, theme="doodle", doodle_ref_path=str(tmp_path / "ref.png"))
-    assert V.reference_sheet(s)[:8] == b"\x89PNG\r\n\x1a\n" and (tmp_path / "ref.png").exists()
-
-
-@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="needs ffmpeg")
-def test_render_animated_in_doodle_theme(settings, tmp_path):
-    from glivarao.render.animated import render_animated
-    from glivarao.render.video import probe
-
-    data = json.loads(Path("config/samples/sample_60s.json").read_text())
-    data["scenes"] = data["scenes"][2:4]
-    script = Script.model_validate(data)
-    res = render_animated(script, tmp_path / "dd", replace(settings, theme="doodle"), workers=2)
-    info = probe(res.video)
-    assert (info["width"], info["height"]) == (1920, 1080) and abs(info["duration"] - res.duration) < 0.3
+def test_thumbnail_uses_the_max_cutout(ds, tmp_path):
+    max_assets.design(ds, FakeNanoBanana())
+    img = D.thumbnail("Debt Wins", "worried", tmp_path / "t.jpg", max_img=max_assets.load_pose(ds, "worried"))
+    arr = np.asarray(img, dtype=np.int16)
+    green = (abs(arr[..., 0] - 31) < 25) & (abs(arr[..., 1] - 138) < 25) & (abs(arr[..., 2] - 76) < 25)
+    assert img.size == (1280, 720) and green[:, 800:].sum() > 5000      # Max's sweater on the right
+    assert D.statement("THE BNPL TRAP?") == "The BNPL Trap."

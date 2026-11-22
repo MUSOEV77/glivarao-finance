@@ -345,7 +345,13 @@ def spike_chart(img: Image.Image, box, history=None, spike=None, seed: int = 11,
     n = len(hist) + len(sp) - 1
     xs = [x0 + w * 0.06 + w * 0.84 * k / n for k in range(n + 1)]
     ys = [y1 - h * 0.08 - h * 0.84 * v for v in hist + sp[1:]]
-    p.line(list(zip(xs[:len(hist)], ys[:len(hist)])), lw * 1.1, GREY)
+    base_y = y1 - lw
+    hist_pts = list(zip(xs[:len(hist)], ys[:len(hist)]))
+    spike_pts = list(zip(xs[len(hist) - 1:], ys[len(hist) - 1:]))
+    tint = (lambda c: c + (255,)) if img.mode == "RGBA" else (lambda c: c)
+    p.d.polygon(hist_pts + [(hist_pts[-1][0], base_y), (hist_pts[0][0], base_y)], fill=tint((214, 214, 208)))
+    p.d.polygon(spike_pts + [(spike_pts[-1][0], base_y), (spike_pts[0][0], base_y)], fill=tint((190, 226, 203)))
+    p.line(hist_pts, lw * 1.1, GREY)
     pts = list(zip(xs[len(hist) - 1:], ys[len(hist) - 1:]))
     p.line(pts, lw * 1.5, GREEN)
     p.dot(pts[-1][0], pts[-1][1], lw * 1.9, GOLD)
@@ -414,7 +420,8 @@ def statement(words: str) -> str:
 
 
 def thumbnail(text: str, emotion: str = "shocked", out: Path | None = None, seed: int = 1,
-              size: tuple[int, int] = (1280, 720), history=None, spike=None) -> Image.Image:
+              size: tuple[int, int] = (1280, 720), history=None, spike=None,
+              max_img: Image.Image | None = None) -> Image.Image:
     """Off-white paper, a 2-3 word statement ending with a period (huge), ONE simple chart (grey history line +
     green spike with a gold dot) and Max with an emotion. Drawn at 2x, saved at 1280x720. No numbers on the chart."""
     W2, H2 = size[0] * 2, size[1] * 2
@@ -437,7 +444,16 @@ def thumbnail(text: str, emotion: str = "shocked", out: Path | None = None, seed
     underline(p, W2 * 0.05, W2 * 0.05 + last_w * 0.97, y - size_ * 0.27, GREEN, 26)
     spike_chart(img, (W2 * 0.06, max(y, H2 * 0.6), W2 * 0.6, H2 * 0.94), history=history, spike=spike, seed=seed + 5,
                 weight=2.0)
-    draw_max(img, W2 * 0.8, H2 * 1.22, u=H2 * 0.125, emotion=emotion, seed=seed + 9)
+    if max_img is not None:   # the Nano Banana Max cutout (same file in every video)
+        h = int(H2 * 0.96)
+        s = h / max_img.height
+        cut = max_img.resize((max(1, int(max_img.width * s)), h), Image.LANCZOS)
+        if cut.width > W2 * 0.42:
+            s2 = W2 * 0.42 / cut.width
+            cut = cut.resize((int(cut.width * s2), int(cut.height * s2)), Image.LANCZOS)
+        img.paste(cut, (int(W2 * 0.79 - cut.width / 2), H2 - cut.height + int(H2 * 0.04)), cut)
+    else:
+        draw_max(img, W2 * 0.8, H2 * 1.22, u=H2 * 0.125, emotion=emotion, seed=seed + 9)
     brand_mark(img, "tr", scale=2.2)
     out_img = finish(img, size)
     if out is not None:

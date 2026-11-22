@@ -354,17 +354,29 @@ def render_and_review(job, script, brief, claims, ctx: dict, settings: Settings,
     today = date.fromisoformat(ctx["date"])
     creator, writer, sim = ctx["creator"], ctx["writer"], _Sim(ctx["sim"])
     try:
-        art_stats = {}
-        if script.format == "long":  # AI scene illustrations (Nano Banana); code-drawn where they fail
-            from .art.ai_visuals import illustrate_scenes
-
-            script, art_stats = illustrate_scenes(script, out, settings, store)
+        art_stats, rs = {}, settings          # rs: the settings this video is rendered with
         from .content.short_fit import ShortTooLong
 
         tempo = 1.0
         if script.format == "short":  # voice + measure BEFORE rendering; held (not rendered) if it can't fit
             script, tempo, voiced = fit_short_voice(script, settings, out, job.id)
-        res = _render_with_retry(render_animated, script, out, settings, workers, tempo)
+        if getattr(settings, "theme", "") == "doodle":  # full pictures: key scenes + library places + Max
+            from dataclasses import replace as _replace
+
+            from .art.doodle_prep import DoodleUnavailable, prepare
+
+            try:
+                script, art_stats = prepare(script, out, settings, store)
+            except DoodleUnavailable as exc:   # never a half-empty doodle video: this one uses the editorial style
+                log.warning("doodle style unavailable for %s: %s", job.id, exc)
+                rs = _replace(settings, theme="editorial")
+                art_stats = {"note": f"doodle style unavailable ({exc}); made in the editorial style"}
+        if script.format == "long" and getattr(rs, "theme", "") != "doodle":  # AI illustrations (editorial)
+            from .art.ai_visuals import illustrate_scenes
+
+            script, more = illustrate_scenes(script, out, rs, store)
+            art_stats = {**more, **({"note": art_stats["note"]} if art_stats.get("note") else {})}
+        res = _render_with_retry(render_animated, script, out, rs, workers, tempo)
         if script.format == "short":  # the FINISHED file is measured too; never sent over the limit
             res.duration = max(res.duration, _video_seconds(res.video))
             if res.duration > settings.short_max_seconds:
@@ -387,16 +399,18 @@ def render_and_review(job, script, brief, claims, ctx: dict, settings: Settings,
         script = script.model_copy(update={"description": finalize_description(
             desc, [s.heading for s in script.scenes], res.scene_starts or [], script.format == "long")})
         Path(job.script_path).write_text(script.model_dump_json(indent=2))
-        theme = getattr(settings, "theme", "editorial")
+        theme = getattr(rs, "theme", "editorial")
         thumb_how: list[str] = []
         if theme == "doodle":  # code-drawn doodle thumbnails: statement + simple chart + Max (3 emotions)
             from .art.doodle import thumbnail as doodle_thumb
             from .art.ai_visuals import bold_words
 
             opts_paths = []
-            for k, (words, emo) in enumerate(zip(bold_words(script, 3), ("shocked", "worried", "confident"))):
+            from .art.max_assets import load_pose
+
+            for k, (words, emo) in enumerate(zip(bold_words(script, 3), ("shocked", "worried", "pointing"))):
                 dst = out / (f"thumbnail_{k + 1}.jpg" if script.format == "long" else "thumbnail.jpg")
-                doodle_thumb(words, emo, dst, seed=k + 1)
+                doodle_thumb(words, emo, dst, seed=k + 1, max_img=load_pose(settings, emo))
                 opts_paths.append(dst)
                 if script.format != "long":
                     break

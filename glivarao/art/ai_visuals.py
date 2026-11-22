@@ -43,6 +43,10 @@ STOP = set("the a an and or of to in on for is are your you what how why this th
 # ------------------------------------------------------------------------------------------- character
 def doodle_reference_sheet(settings) -> bytes:
     """PNG bytes of the doodle Max style reference (art/doodle.py), created once and reused."""
+    from .max_assets import ready, sheet_path
+
+    if ready(settings):            # the Nano Banana Max (8 poses) once he is designed
+        return sheet_path(settings).read_bytes()
     path = Path(getattr(settings, "doodle_ref_path", "data/character/doodle_reference.png"))
     if not path.exists():
         from .doodle import reference_sheet as draw_sheet

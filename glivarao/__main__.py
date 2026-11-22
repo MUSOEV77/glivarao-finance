@@ -457,17 +457,33 @@ def cmd_launch_list(args, s):
 
 
 def cmd_style_samples(args, s):
-    """Doodle style samples (Max reference sheet, 3 frames, 3 thumbnails, a motion clip); --send to Telegram."""
+    """Doodle style v2 samples: designs Max once with Nano Banana (cap $2), 3 frames, 3 thumbnails; --send."""
     from pathlib import Path
 
+    from .art.gemini_image import GeminiImage, ImageUnavailable
+    from .art.max_assets import DesignBudget
     from .studio import style_samples
 
     out = Path(args.out) if args.out else s.output_dir / "style_samples" / style_samples.VERSION
-    res = style_samples.make(out)
-    print(f"made in {out} (code-drawn, nothing spent):")
-    for k in ("reference", "frames", "thumbs", "motion"):
-        for p in (res[k] if isinstance(res[k], list) else [res[k]]):
-            print("  ", p)
+    try:
+        gi = GeminiImage(s)
+    except ImageUnavailable as exc:
+        raise SystemExit(f"Nano Banana is not usable: {exc}")
+    try:
+        res = style_samples.make(s, gi, out, redesign=args.redesign_max)
+    except DesignBudget as exc:
+        print(f"STOPPED: {exc}. Spent by this command: ${gi.spent_usd:.2f} (cap ${style_samples.CAP_USD:.2f})")
+        raise SystemExit(1)
+    except ImageUnavailable as exc:
+        print(f"STOPPED: Nano Banana failed ({exc}). Spent by this command: ${gi.spent_usd:.2f}")
+        raise SystemExit(1)
+    print(f"made in {out}:")
+    for p in [res["sheet"]] + res["frames"] + res["thumbs"]:
+        print("  ", p)
+    for name, checks in res["checks"].items():
+        print(f"   {name}: {', '.join(checks)}")
+    print(style_samples.summary(s, res))
+    print(f"NANO BANANA SPENT BY THIS COMMAND: ${res['usd']:.2f} (cap ${style_samples.CAP_USD:.2f})")
     if args.send:
         style_samples.send(s, res)
         print("sent to Telegram with Approve / Request changes buttons (production stays paused)")
@@ -797,6 +813,7 @@ def main(argv=None):
     ss = sub.add_parser("style-samples", help="doodle style samples for approval; --send to Telegram")
     ss.add_argument("--send", action="store_true")
     ss.add_argument("--out", default="")
+    ss.add_argument("--redesign-max", action="store_true", help="design Max again (costs up to ~$0.60)")
     ss.set_defaults(fn=cmd_style_samples)
     sc = sub.add_parser("shorts-check", help="list Shorts in the queue over 59 s; --remake to make them again")
     sc.add_argument("--remake", action="store_true")

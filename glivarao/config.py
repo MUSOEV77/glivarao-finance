@@ -175,6 +175,11 @@ class Settings:
     character_ref_path: str = field(default_factory=lambda: _env("CHARACTER_REF_PATH", "data/character/reference.png"))
     doodle_ref_path: str = field(default_factory=lambda: _env("DOODLE_REF_PATH",
                                                               "data/character/doodle_reference.png"))
+    doodle_library_dir: str = field(default_factory=lambda: _env("DOODLE_LIBRARY_DIR", "data/scene_library"))
+    # Nano Banana key scenes per video in the doodle style (Max acting in the scene); every other shot uses a
+    # reusable place from the scene library with a Max cutout. Long: 2K 16:9; Shorts: 1K 9:16.
+    doodle_key_scenes_long: int = field(default_factory=lambda: int(_env("DOODLE_KEY_SCENES_LONG", "6")))
+    doodle_key_scenes_short: int = field(default_factory=lambda: int(_env("DOODLE_KEY_SCENES_SHORT", "1")))
     gemini_tts_tokens_per_sec: float = field(default_factory=lambda: float(_env("GEMINI_TTS_TOKENS_PER_SEC", "32")))
     tts_spend_ledger_path: str = field(default_factory=lambda: _env("TTS_SPEND_LEDGER_PATH", "data/tts_spend.json"))
     tts_cache_dir: str = field(default_factory=lambda: _env("TTS_CACHE_DIR", "data/tts_cache"))
