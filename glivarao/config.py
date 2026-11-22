@@ -145,6 +145,10 @@ class Settings:
     # Speaking speed: pitch-preserving tempo applied after synthesis (1.0 = as generated). Chosen in the voice
     # audition so the narrator lands at TTS_TARGET_WPM; locked with the voice.
     gemini_tts_speed: float = field(default_factory=lambda: float(_env("GEMINI_TTS_SPEED", "1.0")))
+    # The few words of direction sent before every scene ("<direction>: <text>"). At most 10 words: a long style
+    # paragraph in the prompt gets read aloud by the model.
+    gemini_tts_direction: str = field(default_factory=lambda: _env("GEMINI_TTS_DIRECTION",
+                                                                   "Say in a warm, confident, upbeat voice"))
     tts_target_wpm: int = field(default_factory=lambda: int(_env("TTS_TARGET_WPM", "170")))
     # Shorts length: script capped before voicing; real audio measured after; never sent over SHORT_MAX_SECONDS
     # Shorts must be 30-55 s: <=120 words; voiced and measured BEFORE rendering; over 55 s -> trim + re-voice (2x);

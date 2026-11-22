@@ -529,6 +529,23 @@ def cmd_retry_rejected(args, s):
         print(f"  {j[0]} {j[1]}: {j[2]} {j[4] or ''}")
 
 
+def cmd_voice_test(args, s):
+    """Voice 3 real scenes with the real Gemini API; print spoken wpm; send audio to Telegram. Exit 1 if any scene
+    is outside 130-190 spoken words/min."""
+    from .tts import voice_test
+
+    results = voice_test.run(s)
+    for r in results:
+        print(f"{'OK  ' if r['ok'] else 'FAIL'} {r['scene']:10s} {r['wpm']:4d} spoken wpm  ({r['words']} words, "
+              f"{r['seconds']} s of speech, {r['total_seconds']} s total)  prompt: {r['prompt']}")
+    if not args.no_telegram:
+        voice_test.send(s, results)
+        print("audio sent to Telegram")
+    if not all(r["ok"] for r in results):
+        raise SystemExit("voice test FAILED: nothing else should run")
+    print(f"voice test passed ({voice_test.LOW:.0f}-{voice_test.HIGH:.0f} spoken words/min)")
+
+
 def cmd_clear_hold(args, s):
     """Clear a stale 'Claude unavailable' hold; --test makes one tiny call with the current writer."""
     from .daily_v2 import clear_writer_hold
@@ -885,6 +902,9 @@ def main(argv=None):
     rr.add_argument("--no-telegram", action="store_true")
     rr.add_argument("--workers", type=int)
     rr.set_defaults(fn=cmd_retry_rejected)
+    vt = sub.add_parser("voice-test", help="voice 3 real scenes (real API), print wpm, send audio to Telegram")
+    vt.add_argument("--no-telegram", action="store_true")
+    vt.set_defaults(fn=cmd_voice_test)
     ch = sub.add_parser("clear-hold", help="clear a stale Claude hold; --test = one tiny call with the writer")
     ch.add_argument("--test", action="store_true")
     ch.set_defaults(fn=cmd_clear_hold)

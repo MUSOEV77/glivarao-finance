@@ -876,8 +876,11 @@ def _tts_record(settings: Settings) -> dict:
         return {"provider": settings.tts_provider}
     from .tts.voice_lock import style_prompt
 
+    from .tts.gemini_tts import PROMPT_VERSION
+
     return {"provider": "gemini_tts", "model": settings.gemini_tts_model, "voice": settings.gemini_tts_voice,
             "pace": settings.gemini_tts_pace, "style": settings.gemini_tts_style, "style_sent": style_prompt(settings),
+            "direction_sent": settings.gemini_tts_direction, "prompt": PROMPT_VERSION,
             "speed": settings.gemini_tts_speed}
 
 

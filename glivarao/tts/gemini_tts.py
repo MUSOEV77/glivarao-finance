@@ -40,6 +40,16 @@ PERMANENT = {402: "Gemini prepay balance is empty (buy credits on the AI Studio 
              400: "the request was refused", 401: "the API key was rejected", 403: "the API key has no access "
              "(check billing / API enabled)", 404: "the pinned model was not found (retired?)"}
 BRAND_RESPELL = {"GLIVARAO": "Gli-VAR-oh"}     # prompt-based models take respellings, not IPA
+# Google's documented short form: a few words of direction, a colon, then the text. A long style paragraph in the
+# prompt gets READ ALOUD by the model (measured: 22-word scene -> 29 s of speech), so it is never sent.
+DIRECTION = "Say in a warm, confident, upbeat voice"
+PROMPT_VERSION = "say-v2"          # part of the cache key: clips made with the old long prompt are never reused
+
+
+def tts_prompt(text: str, direction: str = DIRECTION) -> str:
+    if len(direction.split()) > 10:
+        raise ValueError("the TTS direction must be at most 10 words (longer text gets read aloud)")
+    return f"{direction}: {text}"
 
 
 class _Retryable(Exception):
@@ -183,11 +193,15 @@ class GeminiTTSNarrator:
     def __init__(self, api_key: str, model: str = DEFAULT_MODEL, voice: str = DEFAULT_VOICE, style: str = DEFAULT_STYLE,
                  price_per_m_audio: float = 18.0, tokens_per_sec: float = 32.0, monthly_budget_usd: float = 20.0,
                  cache_dir: Path = Path("data/tts_cache"), ledger: SpendLedger | None = None, session=None,
-                 retries: int = 5, backoff_sec: float = 5.0, sleep=time.sleep, speed: float = 1.0):
+                 retries: int = 5, backoff_sec: float = 5.0, sleep=time.sleep, speed: float = 1.0,
+                 direction: str = DIRECTION):
         if not api_key:
             raise VoiceUnavailable("GEMINI_API_KEY is not set")
         check_model(model)
+        # `style` is the approved style (kept in the voice lock and the metadata); only the short `direction` is sent
         self._key, self.model, self.voice, self.style = api_key, model, voice, style
+        tts_prompt("x", direction)               # validates: at most 10 words
+        self.direction = direction
         self.retries, self.backoff, self._sleep = retries, backoff_sec, sleep
         self.speed = speed
         self.price, self.tps, self.budget = price_per_m_audio, tokens_per_sec, monthly_budget_usd
@@ -198,7 +212,7 @@ class GeminiTTSNarrator:
 
     # -- budget ------------------------------------------------------------------------------------------
     def _key_for(self, text: str) -> Path:
-        h = hashlib.sha256(f"{self.model}|{self.voice}|{self.style}|{text}".encode()).hexdigest()[:24]
+        h = hashlib.sha256(f"{self.model}|{self.voice}|{PROMPT_VERSION}|{self.direction}|{text}".encode()).hexdigest()[:24]
         return self.cache / f"gem_{h}.npy"
 
     def uncached_estimate_usd(self, texts: list[str]) -> float:
@@ -232,13 +246,8 @@ class GeminiTTSNarrator:
 
     _wait = 0.0
 
-    STRICT = ("{style}\n\nRead ONLY the transcript below aloud, word for word. Do not read these instructions, do "
-              "not add anything.\nTRANSCRIPT:\n{text}")
-
     def _request_once(self, text: str) -> tuple[np.ndarray, int]:
-        prompt = (self.STRICT.format(style=self.style, text=text) if getattr(self, "_strict", False)
-                  else f"{self.style}\n\n{text}")
-        body = {"contents": [{"parts": [{"text": prompt}]}],
+        body = {"contents": [{"parts": [{"text": tts_prompt(text, self.direction)}]}],
                 "generationConfig": {"responseModalities": ["AUDIO"],
                                      "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": self.voice}}}}}
         try:
@@ -302,19 +311,15 @@ class GeminiTTSNarrator:
         audio = apply_tempo(self._scene_audio(prepped), self.speed)  # raw audio cached; tempo after
         n_words = len(text.split())
         if n_words >= 8 and spoken_wpm(text, audio) < MIN_SANE_WPM:
-            # far too much audio for the words: usually the model read the style instruction aloud too, or repeated
-            # itself. Ask again with the transcript clearly marked as the ONLY thing to read (same voice + style).
-            log.warning("scene audio abnormally slow (%.0f spoken wpm) for: %r; requesting it again (strict)",
+            # far too much audio for the words (read-aloud instructions or repeated speech): ask once more with the
+            # same short prompt; if it is still slow the video is HELD (never published with bad audio)
+            log.warning("scene audio abnormally slow (%.0f spoken wpm) for: %r; requesting it again",
                         spoken_wpm(text, audio), text[:120])
             self._save_debug(prepped, audio, "first")
             self._key_for(prepped).unlink(missing_ok=True)
-            self._strict = True
-            try:
-                audio = apply_tempo(self._scene_audio(prepped), self.speed)
-            finally:
-                self._strict = False
+            audio = apply_tempo(self._scene_audio(prepped), self.speed)
             if spoken_wpm(text, audio) < MIN_SANE_WPM:
-                self._save_debug(prepped, audio, "strict")
+                self._save_debug(prepped, audio, "second")
                 self._key_for(prepped).unlink(missing_ok=True)
                 raise VoiceUnavailable(
                     f"speech came back abnormally slow twice ({spoken_wpm(text, audio):.0f} spoken words/min, "

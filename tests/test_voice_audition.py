@@ -36,7 +36,8 @@ def test_audition_sends_five_labelled_samples_with_buttons(vs, store, tmp_path):
     voices = [c["json"]["generationConfig"]["speechConfig"]["voiceConfig"]["prebuiltVoiceConfig"]["voiceName"]
               for c in g.calls]
     assert voices == ["Puck", "Sadachbia", "Fenrir", "Achird", "Charon"]
-    assert all("170 words per minute" in c["json"]["contents"][0]["parts"][0]["text"] for c in g.calls)
+    sent = [c["json"]["contents"][0]["parts"][0]["text"] for c in g.calls]          # only the short direction
+    assert all(t.startswith("Say in a warm, confident, upbeat voice: ") and "words per minute" not in t for t in sent)
     tg = RecTG()
     assert VA.send_samples(vs, res, tg) == 5
     audio = [p for m, p in tg.calls if m == "sendAudio"]
