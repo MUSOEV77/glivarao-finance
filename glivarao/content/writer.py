@@ -254,6 +254,13 @@ def write_with_claude(b: Brief, fmt: str, settings: Settings, angle: str = "", s
                  "\n".join(f"- {q['title']}" for q in b.viewer_questions) +
                  f"\nAudience: everyday people in the United States, ages 25-45, who struggle with money. "
                  f"Category: {b.category}. Finance only.")
+    grounding += ("\n\nTIMELY video (date-bound): dates and deadlines may appear where they matter. State current "
+                  "numbers as 'as of <Month Year>'." if b.timely else
+                  "\n\nEVERGREEN video: it must stay correct for years. The title and script contain NO dates, no "
+                  "years (except history, such as 2008), no 'this week', 'this month', 'today', 'recently', 'just "
+                  "announced' or 'breaking'. Teach how it works. Every current number is stated as 'as of <Month "
+                  "Year>' (for example 'as of November 2026, the average card rate was 22.36%') so it is easy to "
+                  "update.")
     if style and style in FORMATS:
         grounding += f"\n\nFORMAT: {FORMATS[style].label}. {FORMATS[style].claude_structure}"
     if creator_text.strip():

@@ -16,7 +16,7 @@ def _long_scenes(topic: str, target_words: int) -> list[Scene]:
         Scene(heading="Why this matters", character="max", pose="talk", illustration="lightbulb",
               narration=(f"Today we're digging into {t.lower()}. It sounds dry, but it quietly shapes how much "
                          "money you keep every single year. By the end, you'll know exactly how it works, "
-                         "the mistakes that cost people the most, and three moves you can make this week."),
+                         "the mistakes that cost people the most, and three moves you can make in the next seven days."),
               key_points=["How it works", "Costly mistakes", "What to do next"]),
         Scene(heading="Meet Penny", character="duo", pose="cheer", illustration="coin_stack",
               narration=("I'm Max, and this is Penny, our resident coin with a lot of questions. Penny, what "

@@ -51,7 +51,7 @@ CATEGORY_FOR_TOPIC = {
     **dict.fromkeys(("budgeting", "cost_of_living", "spending_psych", "money_relationships", "paycheck", "bnpl",
                      "auto_loan", "bank_fees", "money_mistakes"), "budgeting app"),
     **dict.fromkeys(("hysa", "emergency_fund", "cd_gic", "fed_rates", "recession", "us_banks", "deposit_insurance",
-                     "national_debt", "treasury_market", "us_housing", "mortgage", "rent_vs_buy", "us_stock_market",
+                     "national_debt", "treasury_market", "us_housing", "financial_crisis", "mortgage", "rent_vs_buy", "us_stock_market",
                      "inflation_personal", "retirement_401k", "ira_roth", "bank_account"), "high-yield savings"),
     **dict.fromkeys(("income_tax", "tax_filing", "tax_refund", "tax_credits", "tax_withholding", "side_income_tax"),
                     "tax software"),

@@ -224,12 +224,13 @@ def rewrite_for_originality(script: Script, reasons: list[str], phrases: list[st
 
 
 def rewrite_for_sponsor(script: Script, issues: list[str], needs_what_to_do: bool, settings: Settings,
-                        client=None, ledger: ClaudeSpendLedger | None = None) -> Script:
+                        client=None, ledger: ClaudeSpendLedger | None = None,
+                        evergreen_issues: list[str] | None = None) -> Script:
     """One paid rewrite that removes profanity/panic/political-side wording and adds the "What to do" section."""
     from .prompts import sponsor_prompt
 
-    data = _ask(settings, sponsor_prompt(script.model_dump_json(), issues, needs_what_to_do), script.format, client,
-                ledger)
+    data = _ask(settings, sponsor_prompt(script.model_dump_json(), issues, needs_what_to_do, evergreen_issues),
+                script.format, client, ledger)
     return _to_script(data, script.format, script.topic).model_copy(update={"style": script.style})
 
 

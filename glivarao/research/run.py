@@ -20,7 +20,7 @@ def run_research(today: date, out_dir: Path, store: JobStore | None = None, sess
     stamp = today.isoformat()
     raw = out_dir / "raw" / stamp
     http = Http(raw_dir=raw, session=session)
-    from .signals import google_trends, official_news, search_questions
+    from .signals import evergreen_signals, google_trends, official_news, search_questions
 
     results = [stackexchange(http, today), cfpb(http, today), wiki_top(http, today),
                youtube_unavailable("not configured: no YouTube Data API key")]
@@ -45,6 +45,13 @@ def run_research(today: date, out_dir: Path, store: JobStore | None = None, sess
             fetched += 1
     results.append(type(results[0])("Wikipedia pageview history", fetched > 0,
                                     f"{fetched} articles, 400 days of daily views", [], http.calls))
+
+    # long-term demand (evergreen rule): Google Trends 12-month/5-year stability + YouTube search suggestions
+    ev = evergreen_signals(http, {c.key: c.label for c in concept_cands[:30]}, cache_path=out_dir / "trends_cache.json",
+                           today=today)
+    results.append(ev)
+    for key, d in (ev.items[0] if ev.items else {}).items():
+        cands[key].evergreen = d
 
     for c in cands.values():
         compute_metrics(c, today)

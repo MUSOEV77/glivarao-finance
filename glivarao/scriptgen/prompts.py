@@ -139,12 +139,17 @@ def sources_prompt(draft_json: str, unsourced: list[str]) -> str:
             f"education-only sentence.\n\nDRAFT:\n{draft_json}\n\nReturn only the revised JSON object.")
 
 
-def sponsor_prompt(draft_json: str, issues: list[str], needs_what_to_do: bool) -> str:
+def sponsor_prompt(draft_json: str, issues: list[str], needs_what_to_do: bool,
+                   evergreen_issues: list[str] | None = None) -> str:
     """Rewrite request when a draft breaks the sponsor-friendly rules or lacks the closing "What to do" section."""
     asks = []
     if issues:
         asks.append("Remove or rephrase these (no profanity, no panic clickbait, no political sides; calm, factual, "
                     "neutral):\n" + "\n".join(f"- {i}" for i in issues[:15]))
+    if evergreen_issues:
+        asks.append("This is an EVERGREEN video that must stay correct for years. Fix these: no dates, months or "
+                    "'this week'-style words in the title; no time-bound wording in the script; every current number "
+                    "as 'as of <Month Year>':\n" + "\n".join(f"- {i}" for i in evergreen_issues[:15]))
     if needs_what_to_do:
         asks.append("Add a closing section before the disclaimer whose heading starts with \"What to do\": 3-5 "
                     "concrete steps for a US household, free options first; where it fits naturally one step names "

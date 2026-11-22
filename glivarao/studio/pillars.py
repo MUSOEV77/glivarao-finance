@@ -55,6 +55,7 @@ PILLARS: dict[str, Pillar] = {p.key: p for p in [
     Pillar("economy", "The US economy and your money", "the Fed, housing, stock market, national debt, banks, "
            "recession signals", frozenset({"fed_rates", "us_housing", "us_stock_market", "national_debt",
                                             "treasury_market", "us_banks", "recession", "deposit_insurance",
+                                            "financial_crisis",
                                             "rent_vs_buy", "inflation_personal"}),
            ("high-yield savings", "budgeting app"),
            avoid="No predictions, no panic, no political sides: explain the official number, then what a US "
@@ -74,7 +75,8 @@ TAX_SEASON_MAX = 3        # taxes may take 3 of the last 5 in tax season (still 
 FOCUS_PILLAR = "debt"
 FOCUS_MIN_IN_5 = 3
 OTHER_MAX_IN_5 = 1        # each other pillar at most once in 5 long videos (taxes: 2 in tax season)
-NEWS_EVERY = 4            # long videos: at most 1 news-driven video in 4
+NEWS_EVERY = 4            # long videos: at most 1 news-driven (date-bound) video in 4 -> 75% evergreen / 25% timely
+NEWS_PER_WEEK = 1         # and at most 1 date-bound video in any 7 days
 EVERGREEN_BONUS = 5.0
 
 

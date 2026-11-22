@@ -69,6 +69,7 @@ def pick_topic(report: dict, store, free_writer: bool, history_key: str = "used_
     last_pillar = P.PILLARS[recent_pillars[-1]].name if recent_pillars else None
     angles = [h[4] for h in hist if len(h) > 4 and h[4]]
     recent_news = any(len(h) > 5 and h[5] for h in hist[-(P.NEWS_EVERY - 1):])
+    week_news = sum(1 for h in hist if len(h) > 5 and h[5] and (today - date.fromisoformat(h[0])).days < 7)
     skipped: dict[str, int] = {}
 
     def skip(reason):
@@ -114,6 +115,9 @@ def pick_topic(report: dict, store, free_writer: bool, history_key: str = "used_
             if long_video and P.is_news(c) and recent_news:
                 skip(f"news limit: at most 1 news video in {P.NEWS_EVERY} long videos")
                 continue
+            if long_video and P.is_news(c) and week_news >= P.NEWS_PER_WEEK:
+                skip(f"news limit: at most {P.NEWS_PER_WEEK} date-bound video per week")
+                continue
             sim = max((similarity(angle_text(c), a) for a in angles), default=0.0)
             if sim >= ANGLE_SIMILAR:
                 skip(f"angle similar to a recent video ({sim:.0%} overlap)")
@@ -136,8 +140,11 @@ def pick_topic(report: dict, store, free_writer: bool, history_key: str = "used_
     if focus_note:
         why.insert(1, focus_note)
     if long_video:
-        why.append("Type: " + ("news-driven (max 1 in 4 long videos)" if P.is_news(c) else
-                               f"{c.get('type') or 'evergreen'} (preferred)"))
+        why.append("Type: " + ("timely/date-bound (max 1 in 4 long videos, 1 per week)" if P.is_news(c) else
+                               f"{c.get('type') or 'evergreen'} (preferred: steady search demand for years)"))
+        ev = c.get("scores", {}).get("evergreen", {})
+        if ev.get("value") is not None:
+            why.append(f"Long-term demand: {ev['value']}/10 ({ev.get('note', '')})")
     prac = c.get("scores", {}).get("practical", {}).get("value")
     if prac is not None:
         why.append(f"Practical value for viewers: {prac}/10")

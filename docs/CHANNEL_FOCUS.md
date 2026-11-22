@@ -1,3 +1,9 @@
+> **Evergreen rule (2026-11-22).** Topics are ranked by steady long-term search demand (Google Trends 12-month and
+> 5-year stability, cached 30 days; YouTube search suggestions; Wikipedia monthly views), not one-week spikes. Long
+> videos: at most 1 timely/date-bound video in 4 (75% evergreen) and at most 1 per week. Evergreen titles and scripts
+> carry no dates or "this week" wording (checked in code; one Claude rewrite, else rejected); current numbers are
+> stated "as of <Month Year>". Launch list: 14 evergreen + 2 timely (max 2).
+
 > **Final rule since 2026-11-22: US-only.** The audience is ordinary Americans; every video is about a US problem
 > and its effect on a US household's money. Macro topics (US housing, the US stock market, the Fed, the national
 > debt, US banks, recession signals) are allowed in a 6th pillar, "The US economy and your money"; other countries

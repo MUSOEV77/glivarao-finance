@@ -107,7 +107,7 @@ def test_launch_list_waits_for_approval_then_comes_first_with_checked_facts(sett
     launch_plan.approve(store)                                  # the new list starts from video 1
     item = plan_next(settings, store, NOV, tmp_path, send=False)
     assert item.topic == launch_plan.LAUNCH[0].topic and item.card["launch"] == 1
-    assert item.card["affiliate_category"] == "high-yield savings" and item.card["market"] == "US"
+    assert item.card["affiliate_category"] == launch_plan.LAUNCH[0].affiliate and item.card["market"] == "US"
     assert any("DROPPED" in w for w in item.why)
     first = launch_plan.LAUNCH[0].facts[0].text
     assert first not in [f["text"] for f in item.card["launch_facts"]]     # a dropped fact never reaches the script

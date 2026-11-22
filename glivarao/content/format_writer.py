@@ -24,7 +24,7 @@ SHORT_HOOKS = {
                 "One {topic} habit that quietly costs you."),
     "question": ("Someone asked: {question}", "Real question, quick answer: {question}",
                  "Here's a question people keep asking: {question}"),
-    "tip": ("One move that makes {topic} easier.", "If you do one thing about {topic} this week, do this.",
+    "tip": ("One move that makes {topic} easier.", "If you do one thing about {topic} in the next seven days, do this.",
             "Here's the simplest fix for {topic}."),
 }
 

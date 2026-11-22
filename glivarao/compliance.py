@@ -51,6 +51,32 @@ def sponsor_issues(script: Script) -> list[str]:
     return list(dict.fromkeys(out))
 
 
+MONTHS = r"(?:january|february|march|april|may|june|july|august|september|october|november|december)"
+TIME_WORDS = (r"\b(?:this week|last week|next week|this month|last month|next month|yesterday|tomorrow|earlier today|"
+              r"just announced|breaking(?: news)?|as we speak|this morning|tonight)\b")
+
+
+def evergreen_issues(script: Script, today_year: int | None = None) -> list[str]:
+    """Evergreen videos must stay correct for years: no dates or time-bound words in the title or thumbnail, and no
+    "this week"-style wording in the script (current numbers go in as "as of <Month Year>")."""
+    from datetime import date
+
+    year = today_year or date.today().year
+    out = []
+    head = f"{script.title} {script.thumbnail_text or ''}"
+    for m in re.finditer(r"\b(?:19|20)\d\d\b", head):
+        if int(m.group(0)) >= year - 3:       # recent years date the video; history (2008) is fine
+            out.append(f"date in the title: '{m.group(0)}'")
+    for m in re.finditer(rf"\b{MONTHS}\b", head, flags=re.I):
+        out.append(f"month in the title: '{m.group(0)}'")
+    for m in re.finditer(TIME_WORDS, head + " " + script.full_narration, flags=re.I):
+        out.append(f"time-bound wording: '{m.group(0)}'")
+    for m in re.finditer(r"\b(?:right now|currently)\b[^.]{0,40}?(?:\d+(?:\.\d+)?\s?%|\$\d)", script.full_narration,
+                         flags=re.I):
+        out.append(f"current number without 'as of <Month Year>': '{m.group(0)[:50]}'")
+    return list(dict.fromkeys(out))
+
+
 def has_what_to_do(script: Script) -> bool:
     """Long videos end with a practical "What to do" section (Shorts: a one-line takeaway is enough)."""
     if script.format != "long":
@@ -93,8 +119,11 @@ def overlap_ratio(a: str, b: str, n: int = 8) -> float:
 
 
 def check_script(script: Script, enforce_length: bool = True,
-                 previous_scripts: list[str] | None = None) -> ComplianceReport:
+                 previous_scripts: list[str] | None = None, evergreen: bool = False) -> ComplianceReport:
     r = ComplianceReport()
+    if evergreen:
+        for issue in evergreen_issues(script):
+            (r.errors if enforce_length else r.warnings).append(f"Not evergreen: {issue}")
     text = script.full_narration
 
     for pat in BANNED_PATTERNS:

@@ -19,7 +19,9 @@ from .finance_filter import CONCEPTS, Concept, category_of, gate, market_of, mat
 
 # practical value: money saving, debt, credit, taxes, investing basics, banking (rule-based, see PRACTICAL)
 WEIGHTS = {"practical": 10, "demand": 20, "potential_views": 20, "competition": 15, "curiosity": 10, "thumbnail": 10,
-           "title": 10, "relevance": 8, "monetization": 7}
+           "title": 10, "relevance": 8, "monetization": 7, "evergreen": 25}
+# Evergreen rule: topics are ranked by STEADY long-term search demand. A one-week spike no longer adds points to the
+# score (it only marks a topic "timely", and timely videos are capped at 1 in 4 and 1 per week).
 MAX_FRESHNESS_BONUS = 8.0
 # A criterion we CAN measure today but found no data for (for this topic) counts as weak evidence rather than
 # being dropped; otherwise topics with little evidence would be scored mostly on estimates. Criteria whose
@@ -73,6 +75,7 @@ class Candidate:
     market: str = "both"
     total: float = 0.0
     freshness: float = 0.0
+    evergreen: dict = field(default_factory=dict)   # Google Trends 12m/5y stability + YouTube suggestions
     confidence: str = "low"
     kind: str = "evergreen"
     why: list = field(default_factory=list)
@@ -244,6 +247,13 @@ def compute_metrics(c: Candidate, today: date) -> None:
     if c.trends:
         m["trends_searches"] = len(c.trends)
         m["trends_traffic"] = sum(t["traffic"] for t in c.trends)
+    ev = c.evergreen
+    for name in ("t12m", "t5y"):
+        if ev.get(name):
+            for k in ("cv", "spike", "recent_vs_avg"):
+                m[f"trends_{name}_{k}"] = ev[name][k]
+    if "yt_suggestions" in ev:
+        m["youtube_suggestions"] = ev["yt_suggestions"]
     if c.searches:
         m["search_suggestions"] = len(c.searches)
         m["search_question_share"] = round(sum(bool(QUESTION_RE.search(q)) or q.split()[0] in
@@ -315,6 +325,9 @@ def score_all(cands: list[Candidate]) -> None:
         sc["monetization"] = (MONETIZATION[c.category], "ESTIMATE", "category sponsor potential (industry pattern)")
         prac = PRACTICAL.get(c.concept.key if c.concept else "", 6)
         sc["practical"] = (prac, "RULE", "practical value for viewers (saving, debt, credit, taxes, investing basics)")
+        ev = evergreen_score(c.metrics)
+        sc["evergreen"] = (ev[0], "MEASURED", ev[1]) if ev else \
+            (NO_EVIDENCE, "MEASURED", "no long-term search history found for this topic")
         c.scores = sc
 
         avail = {k: v for k, v in sc.items() if v[0] is not None}
@@ -328,15 +341,45 @@ def score_all(cands: list[Candidate]) -> None:
         mom = statistics.mean(moms) if moms else None
         c.metrics["momentum_percentile"] = round(mom, 1) if mom is not None else None
         c.freshness = round(max(0.0, (mom - 5) / 5) * MAX_FRESHNESS_BONUS, 1) if mom is not None else 0.0
-        c.total = round(min(100.0, c.total + c.freshness), 1)
-        var = c.metrics.get("wiki_monthly_variation")
-        c.kind = "timely" if c.freshness >= 4 else ("evergreen" if var is None or var < 0.35 else "seasonal")
+        # spikes are NOT added to the score (evergreen rule); they only mark the topic as timely
+        steady = sc["evergreen"][0]
+        var = c.metrics.get("trends_t5y_cv", c.metrics.get("wiki_monthly_variation"))
+        c.kind = ("timely" if c.freshness >= 4 and steady < 6 else
+                  ("evergreen" if var is None or var < 0.35 or steady >= 6 else "seasonal"))
         measured_w = sum(WEIGHTS[k] for k, v in avail.items() if v[1] == "MEASURED")
         share = measured_w / sum(WEIGHTS.values())
         n_src = len(c.sources)
         c.confidence = "high" if share >= 0.5 and n_src >= 2 else ("medium" if share >= 0.25 and n_src >= 2
                                                                    else "low")
         c.why = explain(c)
+
+
+def evergreen_score(m: dict) -> tuple[float, str] | None:
+    """0-10: how steadily people search for it month after month for years (not this week's spike)."""
+    parts, notes = [], []
+    for name, label in (("t5y", "5-year"), ("t12m", "12-month")):
+        cv = m.get(f"trends_{name}_cv")
+        if cv is not None:
+            parts.append(max(0.0, min(10.0, 10 * (1 - (cv - 0.15) / 0.85))))
+            notes.append(f"Google Trends {label} variation {cv:.2f}")
+    spike = m.get("trends_t12m_spike")
+    if spike is not None:
+        parts.append(max(0.0, min(10.0, 10 - 2 * (spike - 1.5))))
+        notes.append(f"12-month peak {spike:.1f}x the typical week")
+    fading = m.get("trends_t5y_recent_vs_avg")
+    if fading is not None and fading < 0.6:
+        parts.append(3.0)
+        notes.append("interest fading over 5 years")
+    if m.get("youtube_suggestions") is not None:
+        parts.append(min(10.0, float(m["youtube_suggestions"])))
+        notes.append(f"{m['youtube_suggestions']} YouTube search suggestions")
+    var = m.get("wiki_monthly_variation")
+    if var is not None:
+        parts.append(max(0.0, min(10.0, 10 * (1 - var))))
+        notes.append(f"Wikipedia monthly variation {var:.2f}")
+    if not parts:
+        return None
+    return round(statistics.mean(parts), 1), "; ".join(notes)
 
 
 def explain(c: Candidate) -> list[str]:

@@ -75,6 +75,7 @@ class Brief:
     calcs: dict = field(default_factory=dict)
     news: list = field(default_factory=list)        # fresh official releases (each with its URL)
     search_questions: list = field(default_factory=list)
+    timely: bool = False      # date-bound (news/deadline); False = evergreen: no dates or "this week" wording
 
     def to_json(self) -> str:
         return json.dumps(asdict(self), indent=2, default=str)
@@ -132,7 +133,8 @@ def build_brief(card: dict, today: date) -> Brief:
         angle = card["angle"]
     b = Brief(today.isoformat(), key, card["topic"], card["category"], card["market"], fam, card["score"],
               card["confidence"], card["why"], angle, questions, problems[:3], news=news[:3],
-              search_questions=card.get("search_questions", [])[:10])
+              search_questions=card.get("search_questions", [])[:10],
+              timely=bool(card.get("news")) or card.get("type") == "timely")
     for f in card.get("launch_facts", []):  # official facts checked for the launch list (with source URLs)
         b.facts.append(Fact("DATA", f["text"], f["source"], f["url"]))
     for n in news[:3]:
