@@ -96,14 +96,14 @@ def _tg(settings):
     return replace(settings, telegram_bot_token="T", telegram_approver_chat_id="42")
 
 
-def test_short_script_capped_at_120_words_and_revoiced_before_rendering(settings, store, monkeypatch):
+def test_short_script_capped_at_130_words_and_revoiced_before_rendering(settings, store, monkeypatch):
     b, sh = a_short(300)
     voiced = _voice_stub(monkeypatch, [64.0, 49.0])
     renders = _render_stub(monkeypatch, [49.0])
     sent = _review_spy(monkeypatch)
     s = _tg(settings)
     r = render_and_review(_job(store, s, sh, b), sh, b, [], dict(CTX), s, store, True, 1)
-    assert voiced[0][0] <= 120 and len(voiced) == 2 and voiced[1][0] < voiced[0][0]   # capped, trimmed, re-voiced
+    assert voiced[0][0] <= settings.short_max_words == 130 and len(voiced) == 2 and voiced[1][0] < voiced[0][0]   # capped, trimmed, re-voiced
     assert renders == [(voiced[1][0], 1.0)]                                       # rendered ONCE, after fitting
     assert r[2] == "pending_approval" and "LENGTH: 0:49" in sent["checks"] and "limit 0:59" in sent["checks"]
     from glivarao.models import Script

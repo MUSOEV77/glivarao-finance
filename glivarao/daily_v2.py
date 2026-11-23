@@ -586,6 +586,58 @@ def make_now(settings: Settings, store: JobStore, n: int, short: bool = False, s
         lock.close()
 
 
+def recheck(settings: Settings, store: JobStore, job_id: str) -> list[str]:
+    """The errors a saved draft would get TODAY with the current rules (no Claude call, nothing rendered). The
+    originality result stays as it was (it compares with the history at the time it was written)."""
+    from .compliance import absolute_claim_issues
+    from .content.brief import load_brief
+    from .models import Script
+    from .studio import factcheck, variety
+
+    out = settings.output_dir / job_id
+    script = Script.model_validate_json((out / "script.json").read_text())
+    brief = load_brief(out / "brief.json")
+    claims = factcheck.check_claims(script, brief, "")
+    missing = factcheck.needs_source(claims)
+    report_c = check_script(script, enforce_length=True, evergreen=not brief.timely, retention=True,
+                            previous_video=variety.previous(store, script.format))
+    errs = list(report_c.errors)
+    errs += [f"Overstated: {i}" for i in absolute_claim_issues(script, [f.text for f in brief.facts])]
+    ok, why = finance_only_check(script)
+    if not ok:
+        errs.append(f"Finance-only gate failed: {why}")
+    if missing:
+        errs.append(f"{len(missing)} claim(s) without a source URL")
+    old = (out / "compliance.txt").read_text() if (out / "compliance.txt").exists() else ""
+    errs += [ln[7:] for ln in old.splitlines() if ln.startswith("ERROR: Too similar")]
+    return errs
+
+
+def recheck_rejected(settings: Settings, store: JobStore, day: date | None = None) -> dict:
+    """Today's rejected drafts: how many were rejected (before) and how many the CURRENT rules would still reject
+    (after), with the reasons. Free: nothing is written, voiced or rendered."""
+    from .studio import week
+
+    day = day or week.today_tk()
+    rows = []
+    for job in store.list(JobStatus.REJECTED_COMPLIANCE, limit=500):
+        if week._made_on(job) != day:
+            continue
+        out = settings.output_dir / job.id
+        if not (out / "script.json").exists() or not (out / "brief.json").exists():
+            continue
+        old = (out / "compliance.txt").read_text() if (out / "compliance.txt").exists() else ""
+        before = [ln[7:] for ln in old.splitlines() if ln.startswith("ERROR: ")]
+        try:
+            after = recheck(settings, store, job.id)
+        except Exception as exc:  # noqa: BLE001  a broken draft stays rejected
+            after = [f"could not re-check: {type(exc).__name__}: {exc}"[:200]]
+        rows.append({"job": job.id, "format": getattr(job.format, "value", str(job.format)), "before": before,
+                     "after": after})
+    return {"date": day.isoformat(), "rows": rows, "before": len(rows),
+            "after": sum(1 for r in rows if r["after"])}
+
+
 def batch_make(settings: Settings, store: JobStore, slug: str, part: int, send: bool = True,
                workers: int | None = None, with_shorts: bool = False, force: bool = False) -> DailyResult:
     """Make one batch part NOW, exactly as the batch plan defines it (its lead fact first = hook and thumbnail

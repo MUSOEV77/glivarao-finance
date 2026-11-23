@@ -36,7 +36,7 @@ def test_before_and_after_hook():
 
 def test_hook_must_be_concrete():
     vague = retention_issues(_s("long", ["Money is a tricky topic for everyone these days.", DISC]))
-    assert any("not a concrete hook" in i for i in vague)
+    assert any("not a hook" in i for i in vague)
     assert not [i for i in retention_issues(_s("short", ["You're paying 22.36% on that card.", DISC]))
                 if "hook" in i]
 

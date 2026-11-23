@@ -1,6 +1,6 @@
 """Keep Shorts at 30-55 seconds, never over 59 (see daily_v2.fit_short_voice).
 
-1. Before voicing, the script is trimmed to SHORT_MAX_WORDS (120) words: whole sentences are removed from the
+1. Before voicing, the script is trimmed to SHORT_MAX_WORDS (130) words: whole sentences are removed from the
    middle scenes (the hook in the first scene and the closing scene are kept), longest scenes first.
 2. It is voiced BEFORE rendering and the real audio length is measured with ffprobe; over SHORT_REDO_SECONDS (55 s)
    the script is trimmed in proportion and voiced again (at most 2 times).

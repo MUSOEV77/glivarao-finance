@@ -89,16 +89,18 @@ def opening_issues(script: Script) -> list[str]:
     def span(a: float, b: float) -> str:
         return " ".join(words[int(a * WPS):int(b * WPS) + 1])
 
+    def hooky(t: str) -> bool:      # a hook passes with ANY ONE of: a real number, a costly mistake, "you"
+        return bool(NUM_RE.search(t) or MISTAKE_RE.search(t) or YOU_RE.search(t))
+
     if script.format == "short":
         head = span(0, 1.5)                                            # ~4 words
-        if not (NUM_RE.search(head) or YOU_RE.search(head)):
-            out.append(f"hook doesn't land in 1.5 s: the first words \"{head}\" have no real number and no 'you'")
-        if not (YOU_RE.search(first) and (NUM_RE.search(first) or MISTAKE_RE.search(first))):
-            out.append(f"first line must be a real number or costly mistake said to 'you': \"{first[:80]}\"")
+        if not hooky(head) and not hooky(first):
+            out.append(f"hook doesn't land in 1.5 s: \"{first[:80]}\" has no real number, no costly mistake and "
+                       "no 'you'")
     else:
         a, b, c = span(0, 5), span(5, 15), span(15, 32)
-        if not (YOU_RE.search(a) and (NUM_RE.search(a) or MISTAKE_RE.search(a))):
-            out.append(f"0-5 s must hit 'you' with a shocking real number or a costly mistake: \"{a[:90]}\"")
+        if not hooky(a):
+            out.append(f"0-5 s needs a real number, a costly mistake or 'you': \"{a[:90]}\"")
         if not (YOU_RE.search(b) and COST_RE.search(b)):
             out.append(f"5-15 s must say what it costs 'you' (money, interest, years): \"{b[:90]}\"")
         if not PROMISE_RE.search(c):
@@ -162,10 +164,6 @@ def retention_issues(script: Script, previous: dict | None = None) -> list[str]:
     """Hook in the first seconds, no intro, short sentences to 'you', open loops every 45-60 s (long videos), the
     0-30 s opening structure, and no repeats of the previous video (studio/variety.py)."""
     out = opening_issues(script)
-    if previous is not None:
-        from .studio.variety import script_issues
-
-        out += script_issues(script, previous)
     first_scene = script.scenes[0].narration if script.scenes else ""
     sents = _sentences_of(first_scene)
     hook = sents[0] if sents else ""
@@ -176,8 +174,8 @@ def retention_issues(script: Script, previous: dict | None = None) -> list[str]:
         out.append(f"first sentence has {len(hook.split())} words (hook must land in "
                    f"{'2' if script.format == 'short' else '5'} seconds: max {limit})")
     if not (re.search(r"\d|percent|dollar|million|billion|trillion", hook, re.I) or
-            re.search(r"\byou(?:r|'re|'ll|'d)?\b", hook, re.I)):
-        out.append(f"first sentence is not a concrete hook (no real number, not a mistake 'you' make): \"{hook[:80]}\"")
+            re.search(r"\byou(?:r|'re|'ll|'d)?\b", hook, re.I) or MISTAKE_RE.search(hook)):
+        out.append(f"first sentence is not a hook (no real number, no costly mistake, no 'you'): \"{hook[:80]}\"")
     body = [s for sc in script.scenes for s in _sentences_of(sc.narration)]
     words = [len(s.split()) for s in body]
     if words and sum(words) / len(words) > 16:
@@ -246,7 +244,7 @@ def has_what_to_do(script: Script) -> bool:
 
 LENGTH_RULES = {  # spoken words at ≈170 wpm (the energetic narrator pace)
     "long": (2550, 3100),   # ~15-18 minutes
-    "short": (75, 120),     # 30-55 seconds after voicing (SHORT_MAX_WORDS=120; real length measured before rendering)
+    "short": (75, 130),     # 30-55 seconds after voicing (SHORT_MAX_WORDS=130; real length measured before rendering)
 }
 
 
@@ -285,6 +283,10 @@ def check_script(script: Script, enforce_length: bool = True,
     if retention:
         for issue in retention_issues(script, previous_video):
             (r.errors if enforce_length else r.warnings).append(f"Won't hold viewers: {issue}")
+        if previous_video is not None:      # variety repeats: a warning in the review, never a rejection
+            from .studio.variety import script_issues
+
+            r.warnings += [f"⚠ VARIETY: {i}" for i in script_issues(script, previous_video)]
     if evergreen:
         for issue in evergreen_issues(script):
             (r.errors if enforce_length else r.warnings).append(f"Not evergreen: {issue}")

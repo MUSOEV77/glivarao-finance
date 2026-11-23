@@ -295,6 +295,24 @@ def cmd_batch_plan(args, s):
         print("sent to Telegram")
 
 
+def cmd_recheck_rejected(args, s):
+    """Today's rejected drafts re-checked with the current rules: rejected before vs. would be rejected now."""
+    from datetime import date as _d
+
+    from .daily_v2 import recheck_rejected
+
+    r = recheck_rejected(s, _store(s), _d.fromisoformat(args.date) if args.date else None)
+    print(f"{r['date']}: {r['before']} drafts rejected before; with the current rules {r['after']} would still be "
+          f"rejected, {r['before'] - r['after']} would pass")
+    for row in r["rows"]:
+        mark = "STILL REJECTED" if row["after"] else "would pass"
+        print(f"\n{row['job']} ({row['format']}): {mark}")
+        for e in row["before"][:3]:
+            print(f"   before: {e[:140]}")
+        for e in row["after"][:3]:
+            print(f"   now:    {e[:140]}")
+
+
 def cmd_batch_make(args, s):
     """Make one batch part now, exactly as planned (lead fact, angle, hook rotation); counted automatically."""
     from .daily_v2 import Busy, batch_make
@@ -1032,6 +1050,9 @@ def main(argv=None):
     bp = sub.add_parser("batch-plan", help="the batch test's 4-week plan (--send: to Telegram)")
     bp.add_argument("--send", action="store_true")
     bp.set_defaults(fn=cmd_batch_plan)
+    rr = sub.add_parser("recheck-rejected", help="re-check today's rejected drafts with the current rules (free)")
+    rr.add_argument("--date", help="YYYY-MM-DD (default today, Tashkent)")
+    rr.set_defaults(fn=cmd_recheck_rejected)
     bk = sub.add_parser("batch-make", help="make one batch part now (its lead fact, angle, hook); counted")
     bk.add_argument("topic", help="batch topic, e.g. aca-dec-15")
     bk.add_argument("part", choices=["1", "2", "3"])

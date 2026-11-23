@@ -169,7 +169,7 @@ class Settings:
     # Shorts length: script capped before voicing; real audio measured after; never sent over SHORT_MAX_SECONDS
     # Shorts must be 30-55 s: <=120 words; voiced and measured BEFORE rendering; over 55 s -> trim + re-voice (2x);
     # over 58 s -> atempo up to 1.15x; over 59 s -> held (never rendered or sent). The final file is checked again.
-    short_max_words: int = field(default_factory=lambda: int(_env("SHORT_MAX_WORDS", "120")))
+    short_max_words: int = field(default_factory=lambda: int(_env("SHORT_MAX_WORDS", "130")))
     short_redo_seconds: float = field(default_factory=lambda: float(_env("SHORT_REDO_SECONDS", "55")))
     short_target_seconds: float = field(default_factory=lambda: float(_env("SHORT_TARGET_SECONDS", "48")))
     short_tempo_seconds: float = field(default_factory=lambda: float(_env("SHORT_TEMPO_SECONDS", "58")))

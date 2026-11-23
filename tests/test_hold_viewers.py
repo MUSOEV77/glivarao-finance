@@ -48,8 +48,12 @@ def test_first_line_must_match_title_and_thumbnail():
 
 def test_short_hook_lands_in_1_5_seconds():
     assert opening_issues(_script("Your card charges you 22.36% a year.", "short", thumb="Your Card Rate")) == []
-    late = opening_issues(_script("Here is something about cards that charges you 22.36%.", "short"))
+    late = opening_issues(_script("Here is something about cards and banks today.", "short"))
     assert any("1.5 s" in i for i in late)
+    # any ONE of a real number, a costly mistake or "you" is enough
+    for ok in ("7.28% mortgage rates can matter more than price.", "The minimum payment trap is real.",
+               "Your card statement hides this."):
+        assert not any("1.5 s" in i for i in opening_issues(_script(ok, "short", title="Mortgage rates", thumb=""))), ok
 
 
 def _video(durations, sentence_len=3.0):
@@ -134,7 +138,11 @@ def test_script_repeats_are_errors_claude_must_fix(store):
                     "easy to miss.", ending="Tonight, write down every balance and its rate.", style="myth_vs_fact",
                     slot=2)
     assert variety.script_issues(other, prev) == []
-    assert any("Won't" not in i for i in retention_issues(same, prev))
+    assert not any("same" in i for i in retention_issues(same, prev))        # variety never blocks or rewrites
+    from glivarao.compliance import check_script
+
+    rep = check_script(same, retention=True, previous_video=prev)
+    assert any(w.startswith("⚠ VARIETY") for w in rep.warnings) and not any("VARIETY" in e for e in rep.errors)
 
 
 def test_seven_videos_in_a_row_never_repeat(store):
@@ -286,7 +294,7 @@ def test_hook_type_is_compared_only_with_the_same_format(store):
     assert any("hook type" in i for i in variety.script_issues(short, variety.previous(store, "short")))
 
 
-def test_after_two_rewrites_a_variety_only_failure_is_sent_with_a_warning(world, monkeypatch):  # noqa: F811
+def test_variety_repeats_are_a_warning_never_a_rejection(world, monkeypatch):  # noqa: F811
     """Claude keeps writing a question hook: the first draft is rejected for variety, the automatic fix still
     repeats it -> the Short is sent for review with a VARIETY warning instead of being rejected."""
     import json as _json
@@ -310,9 +318,9 @@ def test_after_two_rewrites_a_variety_only_failure_is_sent_with_a_warning(world,
 
     monkeypatch.setattr(C, "_ask", stubborn)
     r = daily_v2.make_now(s, store, 1, short=True, send=False)
-    assert [j[2] for j in r.jobs] == ["rejected_compliance", "rendered"], r.jobs
+    assert [j[2] for j in r.jobs] == ["rendered"], r.jobs                  # never rejected, no paid rewrite
     comp = (s.output_dir / r.jobs[-1][0] / "compliance.txt").read_text()
-    assert "VARIETY (sent anyway after 2 rewrites)" in comp and "hook type" in comp
+    assert "WARN: ⚠ VARIETY" in comp and "hook type" in comp
 
 
 def test_other_failures_are_still_rejected_on_the_final_attempt():
@@ -320,3 +328,45 @@ def test_other_failures_are_still_rejected_on_the_final_attempt():
 
     assert VARIETY_ERR.search("Won't hold viewers: same hook type as the previous video (question): ...")
     assert not VARIETY_ERR.search("2 claim(s) without a source URL")
+
+
+def test_shorts_may_have_up_to_130_words():
+    from glivarao.compliance import LENGTH_RULES
+
+    assert LENGTH_RULES["short"][1] == 130
+
+
+def test_recheck_rejected_before_and_after(settings, store):
+    """Drafts rejected under the old, stricter rules are re-checked for free with the current rules."""
+    import json as _json
+
+    from glivarao import daily_v2
+    from glivarao.content.brief import Brief, Fact
+    from glivarao.models import JobStatus
+    from glivarao.studio import week
+
+    fact = Fact("DATA", "As of November 19, 2026, the 30-year fixed mortgage rate averaged 7.28%.", "Freddie Mac",
+                "https://www.freddiemac.com/pmms")
+    b = Brief("2026-11-23", "mortgage", "Mortgage rates", "housing", "US", "mortgage", 1.0, "high", [], "", [], [],
+              facts=[fact])
+    words = " ".join(["Rates move in steps and the payment follows them over time."] * 9)
+    passing = _script("7.28% mortgage rates can matter more than price. " + words, "short",
+                      title="Mortgage Rates: 7.28% Explained", thumb="Mortgage Rates")
+    broken = _script("Here is something about homes.", "short", title="Homes", thumb="")
+    ids = []
+    for sc in (passing, broken):
+        job = store.create("short", "Mortgage rates")
+        out = settings.output_dir / job.id
+        out.mkdir(parents=True)
+        (out / "script.json").write_text(sc.model_dump_json())
+        (out / "brief.json").write_text(b.to_json())
+        (out / "compliance.txt").write_text("errors=1\nERROR: Won't hold viewers: first line must be a real number "
+                                            "or costly mistake said to 'you'")
+        store.transition(job, JobStatus.SCRIPTED, "")
+        store.transition(job, JobStatus.REJECTED_COMPLIANCE, "old rules")
+        ids.append(job.id)
+    r = daily_v2.recheck_rejected(settings, store, week.today_tk())
+    rows = {row["job"]: row for row in r["rows"]}
+    assert r["before"] == 2
+    assert not any("hook" in e or "1.5 s" in e or "Word count" in e for e in rows[ids[0]]["after"]), rows[ids[0]]
+    assert any("1.5 s" in e or "hook" in e for e in rows[ids[1]]["after"])
