@@ -55,6 +55,10 @@ def long_due(store, today: date, settings) -> tuple[int, int]:
 def shorts_quota(store, today: date, settings, buffer: dict | None = None) -> int:
     """Shorts to make today: SHORTS_PER_DAY (3 -> 90 a month); up to twice that when the Shorts buffer is low;
     never above SHORTS_PER_MONTH for the calendar month."""
+    if getattr(settings, "pace_mode", "monthly") == "weekly":   # Mon-Sun: what's left of 21, spread over the week
+        from . import week
+
+        return week.today_quota(store, settings, today)[1]
     counts = json.loads(store.kv_get("short_counts", "{}"))
     made = sum(n for d, n in counts.items() if d[:7] == today.isoformat()[:7])
     want = settings.shorts_per_day

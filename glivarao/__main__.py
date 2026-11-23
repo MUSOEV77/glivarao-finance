@@ -267,11 +267,24 @@ def cmd_voice_lock(args, s):
     print(f"held videos: {len(held)}" + "".join(f"\n  {k}: since {v['since']}: {v['reason']}" for k, v in held.items()))
 
 
+def cmd_week_status(args, s):
+    """This Monday-Sunday week (Tashkent): what is counted, what is still to make, catch-up publish slots."""
+    from .studio import week
+
+    text = week.status_text(_store(s), s)
+    print(text)
+    if args.send:
+        from .publish.telegram import _client
+
+        _client(s, None).call("sendMessage", chat_id=s.telegram_approver_chat_id, text=text[:4000])
+        print("sent to Telegram")
+
+
 def cmd_batch_plan(args, s):
     """The current batch test's 4-week plan (long parts, Shorts, lead facts, rule checks)."""
     from .studio import batch
 
-    text = batch.plan_text(_store(s))
+    text = batch.plan_text(_store(s), settings=s)
     print(text)
     if args.send:
         from .publish.telegram import _client
@@ -280,6 +293,20 @@ def cmd_batch_plan(args, s):
         for k in range(0, len(text), 3900):
             c.call("sendMessage", chat_id=s.telegram_approver_chat_id, text=text[k:k + 3900])
         print("sent to Telegram")
+
+
+def cmd_batch_make(args, s):
+    """Make one batch part now, exactly as planned (lead fact, angle, hook rotation); counted automatically."""
+    from .daily_v2 import Busy, batch_make
+
+    try:
+        res = batch_make(s, _store(s), args.topic, int(args.part), send=not args.no_telegram, workers=args.workers,
+                         with_shorts=args.with_shorts, force=args.force)
+    except (ValueError, Busy) as exc:
+        raise SystemExit(f"not started: {exc}")
+    print(f"topic: {res.topic}\nformat: {res.style}\nwriter: {res.writer}\n{res.note}")
+    for job_id, fmt, status, video, note in res.jobs:
+        print(f"  {job_id:28s} {fmt:5s} {status:20s} {video or ''} {note}")
 
 
 def cmd_batch_mark_done(args, s):
@@ -999,9 +1026,20 @@ def main(argv=None):
     cr.add_argument("--days", type=int, default=30, help="period in days (default 30)")
     cr.add_argument("--json", action="store_true")
     cr.set_defaults(fn=cmd_cost_report)
+    ws = sub.add_parser("week-status", help="this week (Mon-Sun): counted videos, what's left, catch-up slots")
+    ws.add_argument("--send", action="store_true")
+    ws.set_defaults(fn=cmd_week_status)
     bp = sub.add_parser("batch-plan", help="the batch test's 4-week plan (--send: to Telegram)")
     bp.add_argument("--send", action="store_true")
     bp.set_defaults(fn=cmd_batch_plan)
+    bk = sub.add_parser("batch-make", help="make one batch part now (its lead fact, angle, hook); counted")
+    bk.add_argument("topic", help="batch topic, e.g. aca-dec-15")
+    bk.add_argument("part", choices=["1", "2", "3"])
+    bk.add_argument("--with-shorts", action="store_true", help="also make this part's single-idea Shorts")
+    bk.add_argument("--force", action="store_true", help="make it even if the daily run already planned it")
+    bk.add_argument("--no-telegram", action="store_true")
+    bk.add_argument("--workers", type=int)
+    bk.set_defaults(fn=cmd_batch_make)
     bm = sub.add_parser("batch-mark-done", help="count a video you made by hand in the batch (part 1-3 or short)")
     bm.add_argument("topic", help="batch topic, e.g. how-credit-scores-work")
     bm.add_argument("part", choices=["1", "2", "3", "short"])

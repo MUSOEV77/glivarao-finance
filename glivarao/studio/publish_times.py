@@ -45,7 +45,14 @@ def next_slot(store, fmt: str, settings, now: datetime | None = None, job_id: st
     long_days = {datetime.fromisoformat(v["slot"]).date() for v in book.values() if v["format"] == "long"}
     day = earliest.date()
     for _ in range(60):
-        for slot in _slots_for_day(day, fmt, settings):
+        slots = _slots_for_day(day, fmt, settings)
+        if fmt != "long" and getattr(settings, "pace_mode", "") == "weekly":
+            from . import week
+
+            if all(s.isoformat() in used or s < earliest for s in slots) and \
+                    week.week_has_room(store, settings, day, fmt):   # catching up: the extra slots this week
+                slots = slots + [datetime.combine(day, t, NY) for t in _times(settings.publish_times_shorts_catchup)]
+        for slot in slots:
             if slot < earliest or slot.isoformat() in used:
                 continue
             if fmt == "long" and slot.date() in long_days:

@@ -57,6 +57,11 @@ def pace_check(store: JobStore, today: date, settings: Settings) -> tuple[bool, 
     approved long videos is low, the next one may be made early (still within the monthly total)."""
     from .studio import buffer
 
+    if getattr(settings, "pace_mode", "monthly") == "weekly":   # Mon-Sun: exactly 4 long + 21 Shorts a week
+        from .studio import week
+
+        n_long, _, why = week.today_quota(store, settings, today)
+        return (True, "") if n_long else (False, f"weekly pace: no long video due today ({why})")
     dates = [date.fromisoformat(d) for d in json.loads(store.kv_get("long_dates", "[]"))]
     made, due = buffer.long_due(store, today, settings)
     target = settings.long_videos_per_month
@@ -566,6 +571,102 @@ def make_now(settings: Settings, store: JobStore, n: int, short: bool = False, s
             from .studio.pillars import is_news
 
             _mark_used(store, today, brief.topic_key, brief.category, brief.family, news=is_news(card))
+        return result
+    finally:
+        fcntl.flock(lock, fcntl.LOCK_UN)
+        lock.close()
+
+
+def batch_make(settings: Settings, store: JobStore, slug: str, part: int, send: bool = True,
+               workers: int | None = None, with_shorts: bool = False, force: bool = False) -> DailyResult:
+    """Make one batch part NOW, exactly as the batch plan defines it (its lead fact first = hook and thumbnail
+    number, the part's angle, the hook-type rotation, earlier parts' openings avoided), and count it in the batch
+    automatically (never made again). with_shorts: also that part's single-idea Shorts. Same checks as every
+    video; review in Telegram; never publishes. Respects the pause and the daily run's lock."""
+    import fcntl
+
+    from .studio import batch, originality
+    from .studio.bot import format_history
+    from .studio.formats import choose_format, eligible
+    from .studio.launch_plan import LaunchFact, verify_fact_list
+    from .studio.pause import guard
+
+    guard(settings, f"batch-make {slug} {part}")
+    if slug not in [t.slug for t in batch.topics(store)]:
+        raise ValueError(f"{slug} is not in the current batch ({', '.join(t.slug for t in batch.topics(store))})")
+    if part not in (1, 2, 3):
+        raise ValueError("part must be 1, 2 or 3")
+    entry = next((e for e in batch.plan(batch.topics(store)) if e["id"] == f"{slug}:p{part}"), None)
+    if entry is None:
+        raise ValueError(f"{slug} Part {part} is already made (it is not in the plan any more)")
+    planned = json.loads(store.kv_get("batch_state", "{}") or "{}").get("planned", {})
+    if entry["id"] in planned and not force:
+        raise ValueError(f"{slug} Part {part} was already planned on {planned[entry['id']]} (use --force to make it "
+                         "anyway)")
+    if not paid_writer_allowed(settings):
+        raise ValueError("Claude can't be used (ALLOW_PAID_APIS=false or WRITER=free): Claude only, so nothing is made")
+    lock = open(Path(settings.db_path).with_name("daily.lock"), "w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        raise Busy("the daily run (or another make-now) is running right now; try again when it finishes") from None
+    try:
+        from dataclasses import asdict
+
+        card = batch.card_for(store, entry)
+        kept, notes = verify_fact_list([LaunchFact(**f) for f in card["launch_facts"]])
+        for f, note in notes:
+            log.warning("batch %s fact: %s (%s)", entry["id"], f.text[:80], note)
+        card["launch_facts"] = [asdict(f) for f in kept]
+        today = date.today()
+        brief = build_brief(card, today)
+        if not settings.dry_run:
+            from .studio.fact_library import verify_brief
+
+            for note in verify_brief(brief):
+                log.warning("fact: %s", note)
+        hist = format_history(store)
+        want = card["batch"]["format"]
+        style = want if want in eligible(brief) and (not hist or hist[-1] != want) else choose_format(brief, hist)
+        used, history = originality.used_lines(store), originality.load_history(store)
+        from .scriptgen.claude import LAST_WRITER, ClaudeUnavailable
+
+        try:
+            long_ = _originality_gate(_write_long(brief, style, "", used, True, settings, store=store), brief, today,
+                                      history, settings, True, used,
+                                      lambda k: _write_long(brief, style, "", used, True, settings, variant=k,
+                                                            store=store))
+            drafts = [long_]
+            if with_shorts:
+                angles = batch.short_angles(store, card)
+                session = list(history)
+                for sh in _write_shorts(brief, style, len(angles), used + [long_[0].hook], True, settings,
+                                        store=store, angles=angles):
+                    sh, sim = _originality_gate(sh, brief, today, session, settings, True, used, lambda k, sh=sh: sh)
+                    drafts.append((sh, sim))
+                    session.append(originality.entry(sh, brief.topic_key, today))
+        except ClaudeUnavailable as exc:
+            return _hold_for_writer(settings, store, today, brief.topic, str(exc), send)
+        _release_writer_hold(settings, store, send)
+        writer = LAST_WRITER.get("name") or "claude"
+        result = DailyResult(brief.topic, writer, style=style, note=f"batch-make {slug} Part {part}" +
+                             (f"; {len(notes)} fact(s) dropped or unconfirmed" if notes else ""))
+        _produce_drafts(drafts, brief, "", writer, True, card, None, {"ranked": []}, today, settings, store, send,
+                        workers, result)
+        made = [j for j in result.jobs if j[2] in ("rendered", "pending_approval", "held")]
+        if any(j[1] == "long" for j in made):
+            batch.mark_planned(store, entry["id"])          # counted: never made again
+            dates = json.loads(store.kv_get("long_dates", "[]")) + [today.isoformat()]
+            store.kv_set("long_dates", json.dumps(dates[-200:]))
+            from .studio.pillars import is_news
+
+            _mark_used(store, today, brief.topic_key, brief.category, brief.family, news=is_news(card))
+        shorts_made = sum(j[1] == "short" for j in made)
+        if shorts_made:
+            from .studio import buffer as _buffer
+
+            _buffer.record_shorts(store, today, shorts_made)
+        batch.record_jobs(store, card, result.jobs, settings.output_dir)
         return result
     finally:
         fcntl.flock(lock, fcntl.LOCK_UN)

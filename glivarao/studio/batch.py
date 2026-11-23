@@ -185,15 +185,28 @@ def plan_issues(batch: list[BatchTopic], entries: list[dict]) -> list[str]:
     return out
 
 
-def plan_text(store, start: date = START) -> str:
+def plan_text(store, start: date = START, settings=None) -> str:
     batch = topics(store)
     entries = plan(batch, start)
+    first_monday = start - timedelta(days=start.weekday())
+    head = "Publish dates are suggestions for YouTube Studio (I never upload)."
+    if settings is not None and getattr(settings, "pace_mode", "") == "weekly":
+        # weekly pace (Mon-Sun): the day each part is MADE (then reviewed and given a publish slot)
+        from . import week as _week
+
+        planned = _state(store).get("planned", {})
+        left = [e for e in entries if e["id"] not in planned]
+        days = iter(_week.long_days(store, settings, len(left)))
+        entries = [dict(e, publish=planned[e["id"]]) if e["id"] in planned else dict(e, publish=next(days).isoformat())
+                   for e in entries]
+        entries.sort(key=lambda e: e["publish"])
+        head = "Dates = the day each part is made (4 long a week, Mon-Sun Tashkent); publish slots come at approval."
     lines = [f"📅 GLIVARAO batch test ({version(store)}): 5 topics x 3 long parts + 3-5 Shorts each",
-             "Publish dates are suggestions for YouTube Studio (I never upload). Never two parts of one topic in a row."]
+             head + " Never two parts of one topic in a row."]
     week = None
     for e in entries:
         d = date.fromisoformat(e["publish"])
-        w = (d - start).days // 7 + 1
+        w = (d - first_monday).days // 7 + 1
         if w != week:
             week = w
             lines.append(f"\nWEEK {w}")

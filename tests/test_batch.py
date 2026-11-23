@@ -224,3 +224,25 @@ def test_manual_videos_count_and_free_their_slot(bstore, settings, capsys, monke
     text = batch.plan_text(bstore)
     assert f"Part 1 (already made, {long_.id})" in text and f"Short {fed.id} (made by you)" in text
     assert "Checks: all rules OK" in text
+
+
+def test_batch_make_makes_exactly_that_part_and_counts_it(world, monkeypatch):  # noqa: F811
+    from glivarao import daily_v2
+    from glivarao.studio import launch_plan
+
+    s, store, calls = world
+    store.kv_set("batch_mode", "on")
+    monkeypatch.setattr(launch_plan, "verify_fact_list", lambda facts, session=None: (facts, []))
+    r = daily_v2.batch_make(s, store, "aca-dec-15", 1, send=False, with_shorts=True)
+    made = [j for j in r.jobs if j[2] == "rendered"]
+    assert [j[1] for j in made].count("long") == 1 and [j[1] for j in made].count("short") == 2, r.jobs
+    brief = json.loads((s.output_dir / made[0][0] / "brief.json").read_text())
+    assert "100% and 400%" in brief["facts"][0]["text"]                 # Part 1's lead fact = hook + thumbnail
+    meta = json.loads((s.output_dir / made[0][0] / "metadata.json").read_text())
+    assert meta["series"] == "ACA 2027 Checklist"
+    assert {j["job"] for j in batch.topic_jobs(store, "aca-dec-15")} >= {j[0] for j in made}
+    assert batch.next_long(store)["id"] != "aca-dec-15:p1"                # counted: never made again
+    with pytest.raises(ValueError, match="already planned"):
+        daily_v2.batch_make(s, store, "aca-dec-15", 1, send=False)
+    with pytest.raises(ValueError, match="not in the current batch"):
+        daily_v2.batch_make(s, store, "snowball-vs-avalanche", 1, send=False)

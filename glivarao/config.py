@@ -102,6 +102,13 @@ class Settings:
     publish_times_long_weekday: str = field(default_factory=lambda: _env("PUBLISH_TIMES_LONG_WEEKDAY", "14:00"))
     publish_times_long_weekend: str = field(default_factory=lambda: _env("PUBLISH_TIMES_LONG_WEEKEND", "11:00"))
     publish_times_shorts: str = field(default_factory=lambda: _env("PUBLISH_TIMES_SHORTS", "11:00,15:00,19:30"))
+    # extra Short slots (New York) used only while a week is catching up to WEEK_SHORTS
+    publish_times_shorts_catchup: str = field(default_factory=lambda: _env("PUBLISH_TIMES_SHORTS_CATCHUP",
+                                                                             "09:00,13:00,17:00"))
+    # weekly pace (Mon-Sun, Tashkent): exactly WEEK_LONG long + WEEK_SHORTS Shorts a week (studio/week.py)
+    pace_mode: str = field(default_factory=lambda: _env("PACE_MODE", "weekly"))
+    week_long: int = field(default_factory=lambda: int(_env("WEEK_LONG", "4")))
+    week_shorts: int = field(default_factory=lambda: int(_env("WEEK_SHORTS", "21")))
     publish_lead_hours: float = field(default_factory=lambda: float(_env("PUBLISH_LEAD_HOURS", "2")))
     # Buffer: approved videos ready ahead of their publish slot; production runs PRODUCTION_LEAD_DAYS ahead
     buffer_long: int = field(default_factory=lambda: int(_env("BUFFER_LONG", "2")))
