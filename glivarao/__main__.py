@@ -267,6 +267,24 @@ def cmd_voice_lock(args, s):
     print(f"held videos: {len(held)}" + "".join(f"\n  {k}: since {v['since']}: {v['reason']}" for k, v in held.items()))
 
 
+def cmd_drop_held(args, s):
+    """Take held videos off the voice hold for good (marked failed, never sent; files kept)."""
+    from datetime import date as _d
+
+    from .daily_v2 import drop_held, held_videos
+
+    if not args.job_ids and not args.all_before:
+        held = held_videos(_store(s))
+        print("held videos:" if held else "no videos are on hold")
+        for jid, info in held.items():
+            print(f"  {jid}  since {info.get('since')}: {info.get('reason', '')[:80]}")
+        print("drop with: python -m glivarao drop-held <job_id> [...] or --all-before YYYY-MM-DD")
+        return
+    before = _d.fromisoformat(args.all_before) if args.all_before else None
+    for jid, result in drop_held(_store(s), args.job_ids, before):
+        print(f"{jid}: {result}")
+
+
 def cmd_retry_held(args, s):
     """Hourly (glivarao-voice-retry.timer): re-render videos held for the voice, and re-run today's production if
     it was held because Claude couldn't write. Never crash-loops; the next hour tries again."""
@@ -937,6 +955,10 @@ def main(argv=None):
     cr.add_argument("--days", type=int, default=30, help="period in days (default 30)")
     cr.add_argument("--json", action="store_true")
     cr.set_defaults(fn=cmd_cost_report)
+    dh = sub.add_parser("drop-held", help="take held videos off hold for good (marked failed, never sent)")
+    dh.add_argument("job_ids", nargs="*", help="job ids to drop (none: list the held videos)")
+    dh.add_argument("--all-before", metavar="YYYY-MM-DD", help="drop every held video made before this date")
+    dh.set_defaults(fn=cmd_drop_held)
     vt = sub.add_parser("voice-test", help="voice 3 real scenes (real API), print wpm, send audio to Telegram")
     vt.add_argument("--no-telegram", action="store_true")
     vt.set_defaults(fn=cmd_voice_test)

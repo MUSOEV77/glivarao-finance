@@ -175,7 +175,10 @@ def run_daily_v2(settings: Settings, store: JobStore, today: date | None = None,
     _t0 = _time.monotonic()
     today = today or date.today()
     if held_videos(store):  # videos held for the voice go first (they are already scripted and approved by checks)
-        retry_held_videos(settings, store, send=send, workers=workers)
+        try:                # a broken held video never stops today's production (each job is also isolated)
+            retry_held_videos(settings, store, send=send, workers=workers)
+        except Exception:   # noqa: BLE001
+            log.exception("retry of held videos failed; continuing with today's production")
     from .studio import buffer as _buffer
 
     if shorts is None:
@@ -898,35 +901,93 @@ def retry_held_videos(settings: Settings, store: JobStore, send: bool = True, wo
     done = []
     for job_id in list(held_videos(store)):
         try:
-            job = store.get(job_id)
-        except KeyError:
-            _release_held(store, job_id)
+            r = _retry_one_held(job_id, settings, store, send, workers, build_brief, load_brief, Script, factcheck,
+                                TopicQueue)
+        except Exception as exc:  # noqa: BLE001  one broken job: log, alert once, release it, continue
+            log.exception("held video %s could not be retried", job_id)
+            _drop_broken_held(settings, store, job_id, exc, send)
             continue
-        if job.status != JobStatus.SCRIPTED:
-            _release_held(store, job_id)
+        if r is None:
             continue
-        out = settings.output_dir / job.id
-        ctx = json.loads((out / "held_render.json").read_text())
-        if (out / "brief.json").exists():   # the exact fact sheet the video was checked against
-            brief = load_brief(out / "brief.json")
-        elif ctx.get("card"):
-            brief = build_brief(ctx["card"], date.fromisoformat(ctx["date"]))
-        else:   # nothing to rebuild the facts from: keep it held and say why (never a TypeError loop)
-            log.warning("held video %s has no saved brief and no topic card; skipped", job.id)
-            continue
-        script = Script.model_validate_json(Path(job.script_path).read_text())
-        claims = factcheck.check_claims(script, brief, ctx["creator"])
-        item = TopicQueue(store).get(ctx["item_id"]) if ctx.get("item_id") else None
-        cached = Path("reports/research") / f"{ctx['date']}.json"
-        report = json.loads(cached.read_text()) if cached.exists() else None
-        r = render_and_review(job, script, brief, claims, ctx, settings, store, send, workers, report, item)
         done.append(r)
         if r[2] == "held":
             break  # the voice is still down: don't hammer the API with the rest
-        if send:
-            _notify(settings, f"▶️ GLIVARAO: held video {job.id} (\"{brief.topic}\") rendered with the Charon voice; "
-                              "the review is in Telegram.")
     return done
+
+
+def _retry_one_held(job_id, settings, store, send, workers, build_brief, load_brief, Script, factcheck, TopicQueue):
+    try:
+        job = store.get(job_id)
+    except KeyError:
+        _release_held(store, job_id)
+        return None
+    if job.status != JobStatus.SCRIPTED:
+        _release_held(store, job_id)
+        return None
+    out = settings.output_dir / job.id
+    ctx = json.loads((out / "held_render.json").read_text())
+    if (out / "brief.json").exists():   # the exact fact sheet the video was checked against
+        brief = load_brief(out / "brief.json")
+    elif ctx.get("card"):
+        brief = build_brief(ctx["card"], date.fromisoformat(ctx["date"]))
+    else:
+        raise ValueError("no saved brief.json and no topic card to rebuild the fact sheet from")
+    script = Script.model_validate_json(Path(job.script_path).read_text())
+    claims = factcheck.check_claims(script, brief, ctx["creator"])
+    item = TopicQueue(store).get(ctx["item_id"]) if ctx.get("item_id") else None
+    cached = Path("reports/research") / f"{ctx['date']}.json"
+    report = json.loads(cached.read_text()) if cached.exists() else None
+    r = render_and_review(job, script, brief, claims, ctx, settings, store, send, workers, report, item)
+    if r[2] != "held" and send:
+        _notify(settings, f"▶️ GLIVARAO: held video {job.id} (\"{brief.topic}\") rendered with the Charon voice; "
+                          "the review is in Telegram.")
+    return r
+
+
+def _drop_broken_held(settings: Settings, store: JobStore, job_id: str, exc: Exception, send: bool) -> None:
+    """A held video that fails for any reason other than the voice: released from the hold, marked failed (so it
+    is never sent), one Telegram alert. Its files stay on disk."""
+    _release_held(store, job_id)
+    try:
+        job = store.get(job_id)
+        if JobStatus.FAILED in ALLOWED[job.status]:
+            store.transition(job, JobStatus.FAILED, f"held retry failed: {type(exc).__name__}: {str(exc)[:200]}")
+    except KeyError:
+        pass
+    key = f"held_error_alerted:{job_id}"
+    if send and not store.kv_get(key):
+        store.kv_set(key, "1")
+        _notify(settings, f"⚠️ GLIVARAO: held video {job_id} could not be made again ({type(exc).__name__}: "
+                          f"{str(exc)[:200]}). It was taken off hold and marked failed; nothing was sent. Today's "
+                          f"production continues. Remake it with: python -m glivarao remake {job_id}")
+
+
+def drop_held(store: JobStore, job_ids: list[str] | None = None, before: date | None = None) -> list[tuple]:
+    """Take videos off the voice hold for good (you decided): `job_ids`, and/or every held video made before
+    `before`. Each is marked failed ('dropped by you') so it is never rendered or sent. Files are kept.
+    Returns [(job_id, result)]."""
+    held = held_videos(store)
+    targets = list(dict.fromkeys(job_ids or []))
+    if before is not None:
+        for jid, info in held.items():
+            made = jid[:8] if jid[:8].isdigit() else ""
+            day = (f"{made[:4]}-{made[4:6]}-{made[6:]}" if made else info.get("since", ""))
+            if day and day < before.isoformat() and jid not in targets:
+                targets.append(jid)
+    out = []
+    for jid in targets:
+        if jid not in held:
+            out.append((jid, "not on hold (nothing changed)"))
+            continue
+        _release_held(store, jid)
+        try:
+            job = store.get(jid)
+            if JobStatus.FAILED in ALLOWED[job.status]:
+                store.transition(job, JobStatus.FAILED, "dropped by you (drop-held)")
+            out.append((jid, "dropped: marked failed, never sent (files kept)"))
+        except KeyError:
+            out.append((jid, "dropped (job record was already gone)"))
+    return out
 
 
 def _budget_alert(settings: Settings, store: JobStore, send: bool) -> None:
