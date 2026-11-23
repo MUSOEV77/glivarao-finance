@@ -7,6 +7,7 @@ NEVER uploads, publishes or schedules anything on YouTube. Paid APIs are used on
 from __future__ import annotations
 
 import json
+import re
 import logging
 from dataclasses import dataclass, field
 from datetime import date
@@ -373,7 +374,7 @@ def _produce_drafts(drafts, brief, creator, writer, paid, card, item, report, to
             if fixed is not None:
                 result.note = (result.note + "; " if result.note else "") + f"{r[0]} fixed by Claude, checked again"
                 r2 = _produce_one(fixed, sim, brief, creator, writer, paid, card, item, report, today, settings, store,
-                                  send, workers)
+                                  send, workers, final=True)
                 result.jobs.append(r2)
                 _done(r2, t0)
                 chain = json.loads(store.kv_get("fixed_from", "{}"))
@@ -412,8 +413,11 @@ def _fix_rejected(job_id: str, brief, settings: Settings, store: JobStore):
         return None
 
 
+VARIETY_ERR = re.compile(r"same (?:structure|hook type|opening line|ending line) as the previous video")
+
+
 def _produce_one(script, sim, brief, creator, writer, paid, card, item, report, today, settings, store, send,
-                 workers) -> tuple:
+                 workers, final: bool = False) -> tuple:
     from .studio import factcheck
 
     script, dropped = factcheck.sanitize_charts(script, brief)   # charts only from fact-sheet data
@@ -425,11 +429,11 @@ def _produce_one(script, sim, brief, creator, writer, paid, card, item, report, 
     costs.link(script.cost_tag, job.id, cost_dir(settings))   # the draft's writing cost belongs to this video
     with costs.tag(job.id):
         return _produce_job(job, script, sim, brief, creator, writer, paid, card, item, report, today, settings,
-                            store, send, workers)
+                            store, send, workers, final)
 
 
 def _produce_job(job, script, sim, brief, creator, writer, paid, card, item, report, today, settings, store, send,
-                 workers) -> tuple:
+                 workers, final: bool = False) -> tuple:
     from .studio import factcheck
 
     out = settings.output_dir / job.id
@@ -485,6 +489,11 @@ def _produce_job(job, script, sim, brief, creator, writer, paid, card, item, rep
     if missing:
         report_c.errors.append(f"{len(missing)} claim(s) without a source URL: "
                                + " | ".join(c.text[:80] for c in missing[:3]))
+    if final and report_c.errors and all(VARIETY_ERR.search(e) for e in report_c.errors):
+        # after 2 rewrites only the variety check still fails: send it, with a warning in the review
+        report_c.warnings += [f"⚠ VARIETY (sent anyway after 2 rewrites): {e}" for e in report_c.errors]
+        report_c.errors = []
+        log.warning("%s: only the variety check failed after 2 rewrites; sent with a warning", job.id)
     (out / "compliance.txt").write_text(report_c.summary() + "\n\n" + sim.summary())
     if not report_c.ok:
         store.transition(job, JobStatus.REJECTED_COMPLIANCE, report_c.summary()[:500])
@@ -726,7 +735,7 @@ def retry_rejected(settings: Settings, store: JobStore, day: date | None = None,
             sim = _Sim({"summary": f"Originality: checked when {job.id} was first written (same video, fixed)",
                         "phrase_overlap": 0.0, "structure_ratio": 0.0})
             r = _produce_one(fixed, sim, brief, "", "claude (fixed after a compliance rejection)", True, None, None,
-                             {"ranked": []}, day, settings, store, send, workers)
+                             {"ranked": []}, day, settings, store, send, workers, final=True)
             out_jobs.append(r)
             if r[2] in ("rendered", "pending_approval", "held"):
                 if r[1] == "short":

@@ -27,10 +27,11 @@ HOOK_HOW = {
     "warning": "open with a direct warning to 'you' ('Don't ...' / 'Stop ...') and the real cost from the fact sheet",
 }
 # (hook type, music variant, thumbnail layout, Max's opening pose). Adjacent slots (incl. 7 -> 1) differ in all four.
+# Assigned hook types: number, mistake, myth, story, comparison, warning (no question hooks: they were overused).
 ROTATION = [
     {"hook": "number", "music": 0, "layout": "max_right", "pose": "shocked"},
     {"hook": "mistake", "music": 1, "layout": "max_left", "pose": "worried"},
-    {"hook": "question", "music": 2, "layout": "panel_top", "pose": "thinking"},
+    {"hook": "warning", "music": 2, "layout": "panel_top", "pose": "thinking"},
     {"hook": "myth", "music": 3, "layout": "max_right", "pose": "pointing"},
     {"hook": "story", "music": 4, "layout": "max_left", "pose": "explaining"},
     {"hook": "comparison", "music": 5, "layout": "panel_top", "pose": "happy"},

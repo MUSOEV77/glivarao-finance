@@ -9,6 +9,7 @@ from glivarao.compliance import opening_issues, retention_issues
 from glivarao.models import ChartSpec, Scene, Script
 from glivarao.render import doodle as R
 from glivarao.studio import variety
+from tests.test_e2e_dryrun import world  # noqa: F401  (fixture)
 
 DISC = "This video is for education only and isn't financial advice."
 
@@ -118,7 +119,7 @@ def test_rotation_never_repeats_the_previous_video():
         assert all(a[k] != b[k] for k in ("hook", "music", "layout", "pose")), (a, b)
     music = variety.MUSIC + variety.MUSIC[:1]
     assert all(a[0] != b[0] and a[1] != b[1] for a, b in zip(music, music[1:]))
-    assert len({r["hook"] for r in variety.ROTATION}) == 7
+    assert {r["hook"] for r in variety.ROTATION} == {"number", "mistake", "myth", "story", "comparison", "warning"}
 
 
 def test_script_repeats_are_errors_claude_must_fix(store):
@@ -150,7 +151,7 @@ def test_seven_videos_in_a_row_never_repeat(store):
         assert variety.record(store, "long", fp) == [], n
         used_prev = set(places)
     hist = variety.history(store, "long")
-    assert [h["hook_type"] for h in hist[:7]] == list(variety.HOOK_TYPES)
+    assert [h["hook_type"] for h in hist[:7]] == [r["hook"] for r in variety.ROTATION]
 
 
 def test_place_for_avoids_the_previous_videos_places():
@@ -251,3 +252,71 @@ def test_held_video_without_a_topic_card_is_retried_from_its_saved_brief(setting
     monkeypatch.setattr(daily_v2, "_notify", lambda *a: None)
     got = daily_v2.retry_held_videos(settings, store, send=False)
     assert got and got[0][2] == "pending_approval" and seen == ["ACA deadline"]
+
+
+# ---------------------------------------------------------------- hook type: assigned before writing, per format
+def test_writer_gets_the_assigned_hook_type_first_and_no_question(monkeypatch):
+    from glivarao.content import writer
+    from glivarao.content.brief import Brief, Fact
+
+    seen = {}
+
+    def fake(topic, fmt, settings, angle=""):
+        seen["angle"] = angle
+        return _script("Your card charges you 22.36% a year.", "short")
+
+    monkeypatch.setattr("glivarao.scriptgen.claude.generate_with_claude", fake)
+    b = Brief("2026-11-23", "credit_card", "Card interest", "debt", "US", "cards", 1.0, "high", [], "", [], [],
+              facts=[Fact("DATA", "As of November 2026, the average card rate was 22.36%.", "Fed", "https://x")])
+    for n in range(7):
+        writer.write_with_claude(b, "short", None, variety_slot=n, previous={"hook_type": "question"})
+        hk = variety.slot(n)["hook"]
+        assert seen["angle"].startswith(f"ASSIGNED HOOK TYPE (rotation, checked by code): {hk.upper()}")
+        assert "must NOT be a question" in seen["angle"] and hk != "question"
+
+
+def test_hook_type_is_compared_only_with_the_same_format(store):
+    long_q = {"structure": "explainer", "hook_type": "question", "opening": "Is it?", "ending": "e",
+              "backgrounds": [], "opening_pose": "shocked", "thumb_layout": "max_right", "music": 0}
+    variety.record(store, "long", long_q)
+    assert variety.previous(store, "short") is None
+    short = _script("Is your card really charging you 22.36%?", "short", slot=0)
+    assert variety.script_issues(short, variety.previous(store, "short")) == []      # a long video doesn't count
+    variety.record(store, "short", {**long_q, "structure": "short_0"})
+    assert any("hook type" in i for i in variety.script_issues(short, variety.previous(store, "short")))
+
+
+def test_after_two_rewrites_a_variety_only_failure_is_sent_with_a_warning(world, monkeypatch):  # noqa: F811
+    """Claude keeps writing a question hook: the first draft is rejected for variety, the automatic fix still
+    repeats it -> the Short is sent for review with a VARIETY warning instead of being rejected."""
+    import json as _json
+
+    from glivarao import daily_v2
+    from glivarao.scriptgen import claude as C
+    from tests.test_e2e_dryrun import fake_claude
+
+    s, store, calls = world
+    variety.record(store, "short", {"structure": "short_0", "hook_type": "question", "opening": "x?",
+                                    "ending": "y", "backgrounds": [], "opening_pose": None, "thumb_layout": None,
+                                    "music": None})
+
+    def stubborn(settings_, prompt, fmt, client=None, ledger=None):
+        calls.append((fmt, prompt[:60]))
+        d = fake_claude(prompt, fmt, len(calls))
+        if fmt == "short":   # always a question hook, whatever it was told
+            d["scenes"][0]["narration"] = ("Is your card really charging you 22.36% a year? "
+                                           "Here's what that means for your budget.")
+        return d
+
+    monkeypatch.setattr(C, "_ask", stubborn)
+    r = daily_v2.make_now(s, store, 1, short=True, send=False)
+    assert [j[2] for j in r.jobs] == ["rejected_compliance", "rendered"], r.jobs
+    comp = (s.output_dir / r.jobs[-1][0] / "compliance.txt").read_text()
+    assert "VARIETY (sent anyway after 2 rewrites)" in comp and "hook type" in comp
+
+
+def test_other_failures_are_still_rejected_on_the_final_attempt():
+    from glivarao.daily_v2 import VARIETY_ERR
+
+    assert VARIETY_ERR.search("Won't hold viewers: same hook type as the previous video (question): ...")
+    assert not VARIETY_ERR.search("2 claim(s) without a source URL")

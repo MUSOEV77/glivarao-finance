@@ -285,8 +285,11 @@ def write_with_claude(b: Brief, fmt: str, settings: Settings, angle: str = "", s
         from ..studio.variety import HOOK_HOW, slot
 
         hk = slot(variety_slot)["hook"]
-        grounding += (f"\n\nHOOK TYPE for this video: {hk}: {HOOK_HOW[hk]}. Still a real number or costly mistake "
-                      "to 'you' in the first 5 seconds.")
+        rule = (f"ASSIGNED HOOK TYPE (rotation, checked by code): {hk.upper()}: {HOOK_HOW[hk]}. The first sentence "
+                "MUST be this type" + ("" if hk == "question" else
+                                        " and must NOT be a question (no question mark in the first sentence)") +
+                ". Still a real number or costly mistake to 'you' in the first 5 seconds.")
+        grounding = rule + "\n\n" + grounding + "\n\n" + rule      # first thing it reads, and repeated last
         if previous:
             grounding += ("\nThe previous video opened with: \"" + previous.get("opening", "")[:160] + "\" and ended "
                           "with: \"" + previous.get("ending", "")[:160] + "\". Use a different opening line, ending "
