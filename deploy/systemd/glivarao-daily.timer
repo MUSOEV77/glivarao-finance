@@ -1,5 +1,5 @@
 [Unit]
-Description=Daily production check every 15 min (09:15-21:45 Tashkent); starts when the delivery plan says so, so the long video + 3 Shorts reach Telegram by 22:00
+Description=Daily production check every 15 min (09:15-21:45 Tashkent); starts when the delivery plan says so, so the long video + 3 Shorts reach Telegram by 20:00
 
 [Timer]
 OnCalendar=*-*-* 09..21:00/15:00 Asia/Tashkent

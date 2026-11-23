@@ -1,4 +1,4 @@
-"""Daily delivery by 22:00 Tashkent: planned start from measured durations, late alerts with a reason, automatic
+"""Daily delivery by 20:00 Tashkent: planned start from measured durations, late alerts with a reason, automatic
 earlier start after 2 late days, and the 15-minute scheduled gate. No network, nothing is uploaded."""
 import json
 from datetime import date, datetime
@@ -24,14 +24,14 @@ def _at(h, m, day=DAY):
 def test_plan_uses_usual_start_until_measured_work_needs_earlier(tmp_path):
     s, store = _s(tmp_path)
     p = delivery.plan(s, store, DAY)
-    assert p["start"] == _at(13, 17) and p["deadline"] == _at(22, 0)
+    assert p["start"] == _at(13, 17) and p["deadline"] == _at(20, 0)
     # defaults: 15 + 45 + 3x8 = 84 min x 1.3 + 20 = ~129 min
     assert p["needed_min"] == 129
     for _ in range(3):   # measured: a long video now takes 400 min
         delivery.record_duration(store, "long", 400 * 60)
     p = delivery.plan(s, store, DAY)
-    # (15 + 400 + 24) x 1.3 + 20 = 590.7 min before 22:00 -> 12:09
-    assert f"{p['start']:%H:%M}" == "12:09" and "measured" in p["why"]
+    # (15 + 400 + 24) x 1.3 + 20 = 590.7 min before 20:00 -> 10:09
+    assert f"{p['start']:%H:%M}" == "10:09" and "measured" in p["why"] and "20:00" in p["why"]
 
 
 def test_estimate_is_80th_percentile_of_last_10(tmp_path):
@@ -73,11 +73,11 @@ def test_late_delivery_alerts_once_with_the_reason(tmp_path, monkeypatch):
     monkeypatch.setattr(delivery, "now_local", lambda settings: _at(15, 0))
     delivery.start_run(s, store, DAY, p)                       # started 15:00, planned 13:17
     sent = []
-    monkeypatch.setattr(delivery, "now_local", lambda settings: _at(22, 25))
+    monkeypatch.setattr(delivery, "now_local", lambda settings: _at(20, 25))
     job = ("j-long", "long", "pending_approval", "v.mp4", "")
     assert delivery.delivered(s, store, DAY, job, 120 * 60, lambda st, t: sent.append(t)) == 25
     assert len(sent) == 1
-    assert "25 min after 22:00" in sent[0] and "started at 15:00, planned 13:17" in sent[0]
+    assert "25 min after 20:00" in sent[0] and "started at 15:00, planned 13:17" in sent[0]
     assert "took 120 min" in sent[0] and "sent anyway" in sent[0]
     delivery.delivered(s, store, DAY, job, 120 * 60, lambda st, t: sent.append(t))
     assert len(sent) == 1                                      # alerted once per video
@@ -104,6 +104,18 @@ def test_two_late_days_move_the_start_earlier_and_tell_me(tmp_path):
     assert "shortened" in sent[0]                               # 12:32 is inside the 'your take' window
     assert delivery.close_day(s, store, DAY, lambda st, t: sent.append(t)) is None  # once per day
     assert f"{delivery.plan(s, store, date(2026, 11, 24))['start']:%H:%M}" == "12:32"
+
+
+def test_deadline_is_20_00_by_default_and_configurable(tmp_path, monkeypatch):
+    s, store = _s(tmp_path)
+    assert s.delivery_deadline == "20:00"
+    monkeypatch.setattr(delivery, "now_local", lambda settings: _at(13, 17))
+    delivery.start_run(s, store, DAY, delivery.plan(s, store, DAY))
+    monkeypatch.setattr(delivery, "now_local", lambda settings: _at(20, 5))   # late at 20:05
+    sent = []
+    assert delivery.delivered(s, store, DAY, ("j", "short", "pending_approval", "v", ""), 300,
+                              lambda st, t: sent.append(t)) == 5
+    assert "5 min after 20:00" in sent[0]
 
 
 def test_one_late_day_does_not_shift(tmp_path):

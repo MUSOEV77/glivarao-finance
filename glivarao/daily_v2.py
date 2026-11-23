@@ -93,7 +93,12 @@ def _write_long(brief, style, creator, used, paid, settings, variant=0):
     from .content.format_writer import write_long_format
 
     if paid:
-        return write_with_claude(brief, "long", settings, style=style, creator_text=creator, avoid_lines=used)
+        from .studio import costs
+
+        t = costs.new_draft("long")
+        with costs.tag(t):
+            s = write_with_claude(brief, "long", settings, style=style, creator_text=creator, avoid_lines=used)
+        return s.model_copy(update={"cost_tag": t})
     return write_long_format(brief, style, creator, used, variant=variant)
 
 
@@ -105,9 +110,16 @@ def _write_shorts(brief, style, n, used, paid, settings):
     angles = ("ONE surprising number from the fact sheet, with its own hook in the first two seconds",
               "ONE common myth and the fact that corrects it, with its own hook",
               "ONE mistake people make and what to do instead, with its own hook")
-    return [write_with_claude(brief, "short", settings, angle=a + ". Not a cut-down of the long video.",
-                              avoid_lines=used).model_copy(update={"style": f"short_{i}"})
-            for i, a in enumerate(angles[:n])]
+    from .studio import costs
+
+    out = []
+    for i, a in enumerate(angles[:n]):
+        t = costs.new_draft("short")
+        with costs.tag(t):
+            s = write_with_claude(brief, "short", settings, angle=a + ". Not a cut-down of the long video.",
+                                  avoid_lines=used)
+        out.append(s.model_copy(update={"style": f"short_{i}", "cost_tag": t}))
+    return out
 
 
 def _originality_gate(script, brief, today, history, settings, paid, used, regen):
@@ -123,7 +135,12 @@ def _originality_gate(script, brief, today, history, settings, paid, used, regen
         if paid:
             from .scriptgen.claude import rewrite_for_originality
 
-            script = rewrite_for_originality(script, sim.reasons, sim.repeated_phrases, settings)
+            from .studio import costs
+
+            t = script.cost_tag
+            with costs.tag(t):
+                script = rewrite_for_originality(script, sim.reasons, sim.repeated_phrases, settings)
+            script = script.model_copy(update={"cost_tag": t})
         else:
             script = regen(attempt + 1)
         sim = originality.check(script, brief.topic_key, history, today, settings.similarity_max_phrase,
@@ -335,8 +352,12 @@ def _fix_rejected(job_id: str, brief, settings: Settings, store: JobStore):
     facts = [f"{f.text} [{f.source or f.kind}{' ' + f.url if f.url else ''}]" for f in brief.facts]
     log.warning("%s rejected (%s); asking Claude to fix it once", job_id, "; ".join(errs)[:200])
     try:
+        from .studio import costs
+
         old = _Script.model_validate_json(Path(store.get(job_id).script_path).read_text())
-        return rewrite_for_compliance(old, errs or ["failed the automatic checks"], facts, settings)
+        with costs.tag(job_id):   # the fix's cost belongs to the video that replaces this one
+            fixed = rewrite_for_compliance(old, errs or ["failed the automatic checks"], facts, settings)
+        return fixed.model_copy(update={"cost_tag": job_id})
     except ClaudeUnavailable as exc:
         log.warning("fix of %s skipped: Claude unavailable (%s)", job_id, exc)
         return None
@@ -350,6 +371,18 @@ def _produce_one(script, sim, brief, creator, writer, paid, card, item, report, 
     if dropped:
         log.warning("charts removed (values not on the fact sheet): %s", "; ".join(dropped))
     job = store.create(script.format, brief.topic)
+    from .studio import costs
+
+    costs.link(script.cost_tag, job.id, cost_dir(settings))   # the draft's writing cost belongs to this video
+    with costs.tag(job.id):
+        return _produce_job(job, script, sim, brief, creator, writer, paid, card, item, report, today, settings,
+                            store, send, workers)
+
+
+def _produce_job(job, script, sim, brief, creator, writer, paid, card, item, report, today, settings, store, send,
+                 workers) -> tuple:
+    from .studio import factcheck
+
     out = settings.output_dir / job.id
     out.mkdir(parents=True, exist_ok=True)
     (out / "brief.json").write_text(brief.to_json())
@@ -570,6 +603,15 @@ class _Sim:  # originality summary as saved for a held (voice-delayed) video
 
 def render_and_review(job, script, brief, claims, ctx: dict, settings: Settings, store: JobStore, send: bool,
                       workers: int | None, report: dict | None = None, item=None) -> tuple:
+    """Render + review package + Telegram; voice and image spend is logged against this video (cost-report)."""
+    from .studio import costs
+
+    with costs.tag(job.id):
+        return _render_and_review(job, script, brief, claims, ctx, settings, store, send, workers, report, item)
+
+
+def _render_and_review(job, script, brief, claims, ctx: dict, settings: Settings, store: JobStore, send: bool,
+                       workers: int | None, report: dict | None = None, item=None) -> tuple:
     """Render one scripted video and send it for review. If the locked voice is unavailable (Gemini error after
     retries, budget cap, paid voice off), the video is HELD: it stays scripted, is re-rendered later by
     retry_held_videos(), and you get a Telegram alert. Never falls back to another voice."""
@@ -815,6 +857,9 @@ def remake_video(settings: Settings, store: JobStore, job_id: str, send: bool = 
         lh.pop(old.id)
         store.kv_set("length_held", json.dumps(lh))
     new = store.create(script.format, old.topic)
+    from .studio import costs
+
+    costs.link(old.id, new.id, cost_dir(settings))   # what the first version cost counts toward the remake
     out = settings.output_dir / new.id
     out.mkdir(parents=True, exist_ok=True)
     for name in ("brief.json", "fact_sheet.md", "fact_check.md"):
@@ -1088,6 +1133,10 @@ def supervised_daily(settings: Settings, store: JobStore, today: date | None = N
     finally:
         fcntl.flock(fh, fcntl.LOCK_UN)
         fh.close()
+
+
+def cost_dir(settings: Settings) -> Path:
+    return Path(settings.claude_spend_ledger_path).parent
 
 
 def _notify(settings: Settings, text: str) -> None:

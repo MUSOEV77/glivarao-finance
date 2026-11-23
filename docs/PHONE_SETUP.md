@@ -196,7 +196,7 @@ cd /opt/glivarao/app && sudo -u glivarao .venv/bin/python -m glivarao plan-next
 **What runs by itself (Tashkent time):**
 - **09:00:** the next topic is announced. The first 16 come from your launch list, then automatic research picks.
 - **09:05:** health report.
-- **13:17 (or earlier when needed):** production, 2–3 days ahead of publishing. The start is planned from measured render times so the day's videos are in Telegram by **22:00**; a late video is still sent, with an alert and the reason, and after 2 late days in a row the start moves earlier automatically (you are told the new time):
+- **13:17 (or earlier when needed):** production, 2–3 days ahead of publishing. The start is planned from measured render times so the day's videos are in Telegram by **20:00**; a late video is still sent, with an alert and the reason, and after 2 late days in a row the start moves earlier automatically (you are told the new time):
   - 16 long videos a month and 3 Shorts a day;
   - extra Shorts (up to 6) or an early long video when the buffer of 2 approved long + 6 Shorts is low.
 - **Every 5 minutes:** approvals are checked, and messages held during quiet hours are delivered.

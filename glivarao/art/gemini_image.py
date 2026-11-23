@@ -56,6 +56,9 @@ class ImageLedger:
         row["by_size"][size] = row["by_size"].get(size, 0) + 1
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(json.dumps(data, indent=2))
+        from ..studio import costs
+
+        costs.record("images", usd, self.path.parent)   # per-video spend (cost-report)
 
 
 class GeminiImage:

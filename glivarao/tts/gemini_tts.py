@@ -78,6 +78,9 @@ class SpendLedger:
         row["audio_tokens"] += tokens
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(json.dumps(data, indent=2))
+        from ..studio import costs
+
+        costs.record("voice", usd, self.path.parent)   # per-video spend (cost-report)
 
 
 def apply_tempo(audio: np.ndarray, factor: float, sr: int = KOKORO_SR) -> np.ndarray:

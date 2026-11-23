@@ -63,6 +63,7 @@ class Script(BaseModel):
     hook: str = ""
     scenes: list[Scene]
     style: Optional[str] = None  # video format: explainer, myth_vs_fact, case_study, viewer_question, comparison, ...
+    cost_tag: str = Field(default="", exclude=True)  # which draft's writing cost this is (studio/costs.py)
 
     @property
     def full_narration(self) -> str:

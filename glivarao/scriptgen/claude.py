@@ -63,6 +63,9 @@ class ClaudeSpendLedger:
         row["requests"] += 1
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(json.dumps(data, indent=2))
+        from ..studio import costs
+
+        costs.record("claude", usd, self.path.parent)   # per-video spend (cost-report)
 
 
 def usage_cost(usage, price_in: float, price_out: float) -> tuple[float, int, int]:

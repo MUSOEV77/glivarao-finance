@@ -531,12 +531,24 @@ def cmd_retry_rejected(args, s):
         print(f"  {j[0]} {j[1]}: {j[2]} {j[4] or ''}")
 
 
+def cmd_cost_report(args, s):
+    """Real spend per long video and per Short (Claude, voice, images), from the billed amounts."""
+    import json as _json
+
+    from .studio import cost_report
+
+    r = cost_report.build(s, _store(s), days=args.days)
+    print(_json.dumps(r, indent=2) if args.json else cost_report.text(r))
+
+
 def cmd_voice_test(args, s):
     """Voice 3 real scenes with the real Gemini API, pace-correct them like production, print before/after wpm, send
     the audio to Telegram. Exit 1 if any scene is outside 150-166 spoken words/min after correction."""
+    from .studio import costs
     from .tts import voice_test
 
-    results = voice_test.run(s)
+    with costs.tag("voice-test"):
+        results = voice_test.run(s)
     for r in results:
         print(f"{'OK  ' if r['ok'] else 'FAIL'} {r['scene']:10s} {r['wpm_before']:4d} -> {r['wpm']:4d} spoken wpm "
               f"(atempo x{r['factor']}; {r['words']} words, {r['seconds']} s of speech)  prompt: {r['prompt']}")
@@ -837,7 +849,7 @@ def main(argv=None):
     d2.add_argument("--force", action="store_true", help="produce again even if today already completed")
     d2.add_argument("--retries", type=int, default=1, help="whole-run retries before alerting (default 1)")
     d2.add_argument("--scheduled", action="store_true",
-                    help="timer mode: start only once the delivery plan's start time (for 22:00) has come")
+                    help="timer mode: start only once the delivery plan's start time (for 20:00) has come")
     d2.set_defaults(fn=cmd_daily_v2)
     pp = sub.add_parser("propose-topics", help="send this week's 5-7 topic ideas to Telegram for you to pick")
     pp.add_argument("--date", help="YYYY-MM-DD (default today)")
@@ -906,6 +918,10 @@ def main(argv=None):
     rr.add_argument("--no-telegram", action="store_true")
     rr.add_argument("--workers", type=int)
     rr.set_defaults(fn=cmd_retry_rejected)
+    cr = sub.add_parser("cost-report", help="real spend per long video and per Short (Claude, voice, images)")
+    cr.add_argument("--days", type=int, default=30, help="period in days (default 30)")
+    cr.add_argument("--json", action="store_true")
+    cr.set_defaults(fn=cmd_cost_report)
     vt = sub.add_parser("voice-test", help="voice 3 real scenes (real API), print wpm, send audio to Telegram")
     vt.add_argument("--no-telegram", action="store_true")
     vt.set_defaults(fn=cmd_voice_test)

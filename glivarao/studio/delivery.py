@@ -1,4 +1,4 @@
-"""Daily delivery by 22:00 Tashkent: the day's long video + 3 Shorts in Telegram before DELIVERY_DEADLINE.
+"""Daily delivery by 20:00 Tashkent: the day's long video + 3 Shorts in Telegram before DELIVERY_DEADLINE.
 
 * Planned start = the usual DAILY_START (13:17), or earlier when the MEASURED durations say it would not finish in
   time: deadline - (script + long + 3 Shorts) x DELIVERY_MARGIN - DELIVERY_BUFFER_MIN, minus any automatic shift.
@@ -63,7 +63,7 @@ def plan(settings, store, day: date, n_long: int = 1, n_short: int = 3) -> dict:
     why = (f"needs ~{work / 60:.0f} min of work (measured) x {settings.delivery_margin:g} + "
            f"{settings.delivery_buffer_min:g} min margin before {settings.delivery_deadline}"
            + (f"; started {shift_minutes(store)} min earlier after late days" if shift_minutes(store) else "")
-           + ("; can't start before 09:15, so 22:00 may be at risk" if clamped else ""))
+           + ("; can't start before 09:15, so the deadline may be at risk" if clamped else ""))
     return {"start": start, "deadline": deadline, "needed_min": round(needed.total_seconds() / 60), "why": why,
             "usual": usual}
 
