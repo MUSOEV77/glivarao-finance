@@ -132,7 +132,8 @@ def _originality_gate(script, brief, today, history, settings, paid, used, regen
 
 
 def run_daily_v2(settings: Settings, store: JobStore, today: date | None = None, research_dir: Path | None = None,
-                 send: bool = True, workers: int | None = None, shorts: int | None = None) -> DailyResult:
+                 send: bool = True, workers: int | None = None, shorts: int | None = None,
+                 ignore_input_wait: bool = False, deliver_day: date | None = None) -> DailyResult:
     from .research.run import run_research
     from .studio import originality
     from .studio.bot import format_history, push_format
@@ -142,6 +143,9 @@ def run_daily_v2(settings: Settings, store: JobStore, today: date | None = None,
     from .studio.pause import guard
 
     guard(settings, "daily production")
+    import time as _time
+
+    _t0 = _time.monotonic()
     today = today or date.today()
     if held_videos(store):  # videos held for the voice go first (they are already scripted and approved by checks)
         retry_held_videos(settings, store, send=send, workers=workers)
@@ -175,7 +179,7 @@ def run_daily_v2(settings: Settings, store: JobStore, today: date | None = None,
             item = plan_next(settings, store, today, research_dir, send)
             if item is None:
                 ok, why = False, "no long-video topic passed today's checks (no repeats, rotation)"
-            elif item.status == "awaiting_input" and not input_window_over(item, settings):
+            elif item.status == "awaiting_input" and not input_window_over(item, settings) and not ignore_input_wait:
                 ok, why = False, (f"waiting up to {settings.creator_input_wait_hours:g} h for your take on "
                                   f"\"{item.topic}\" (announced in Telegram)")
         if not ok:  # no long video today: today's Shorts get their own topic
@@ -254,6 +258,9 @@ def run_daily_v2(settings: Settings, store: JobStore, today: date | None = None,
     except ClaudeUnavailable as exc:  # Claude only: hold today's production, alert once, retry hourly
         return _hold_for_writer(settings, store, today, brief.topic, str(exc), send)
     _release_writer_hold(settings, store, send)
+    from .studio.delivery import record_duration
+
+    record_duration(store, "script", _time.monotonic() - _t0)
     result = DailyResult(brief.topic, writer, style=("Shorts only" if shorts_only else
                                                      FORMATS.get(lead_style or "", FORMATS["explainer"]).label),
                          note=pace_note)
@@ -268,7 +275,7 @@ def run_daily_v2(settings: Settings, store: JobStore, today: date | None = None,
         _mark_used(store, today, brief.topic_key, brief.category, brief.family, angle_text(card), news=is_news(card))
 
     _produce_drafts(drafts, brief, creator, writer, paid, card, item, report, today, settings, store, send, workers,
-                    result)
+                    result, deliver_day=deliver_day)
 
     produced = [j for j in result.jobs if j[2] in ("rendered", "pending_approval", "held")]  # held = made later
     made_shorts = sum(j[1] == "short" for j in produced)
@@ -284,14 +291,27 @@ def run_daily_v2(settings: Settings, store: JobStore, today: date | None = None,
 
 
 def _produce_drafts(drafts, brief, creator, writer, paid, card, item, report, today, settings, store, send, workers,
-                    result, retry: bool = True) -> None:
+                    result, retry: bool = True, deliver_day: date | None = None) -> None:
     """Fact-check, sponsor/evergreen rewrite, compliance, then render + Telegram review for every draft (shared by the
     daily run, make-now and retry-rejected). Charts that aren't built from fact-sheet data are removed. A draft
     rejected by compliance is fixed ONCE by Claude with the exact reasons and the fact sheet, and checked again."""
+    import time as _time
+
+    from .studio import delivery
+
+    def _done(r, t0):
+        if r[2] in ("rendered", "pending_approval"):
+            spent = _time.monotonic() - t0
+            delivery.record_duration(store, r[1], spent)
+            if deliver_day is not None and send:
+                delivery.delivered(settings, store, deliver_day, r, spent, _notify)
+
     for script, sim in drafts:
+        t0 = _time.monotonic()
         r = _produce_one(script, sim, brief, creator, writer, paid, card, item, report, today, settings, store, send,
                          workers)
         result.jobs.append(r)
+        _done(r, t0)
         if r[2] == "rejected_compliance" and retry and paid:
             fixed = _fix_rejected(r[0], brief, settings, store)
             if fixed is not None:
@@ -299,6 +319,7 @@ def _produce_drafts(drafts, brief, creator, writer, paid, card, item, report, to
                 r2 = _produce_one(fixed, sim, brief, creator, writer, paid, card, item, report, today, settings, store,
                                   send, workers)
                 result.jobs.append(r2)
+                _done(r2, t0)
                 chain = json.loads(store.kv_get("fixed_from", "{}"))
                 chain[r2[0]] = r[0]
                 store.kv_set("fixed_from", json.dumps(chain))
@@ -987,7 +1008,8 @@ class AlreadyRunning(RuntimeError):
 
 def supervised_daily(settings: Settings, store: JobStore, today: date | None = None, send: bool = True,
                      workers: int | None = None, shorts: int | None = None, force: bool = False, retries: int = 1,
-                     retry_delay: float = 120.0, lock_path: Path | None = None, notifier=None) -> DailyResult | None:
+                     retry_delay: float = 120.0, lock_path: Path | None = None, notifier=None,
+                     scheduled: bool = False) -> DailyResult | None:
     """Production entry point used by the systemd timer.
 
     - single instance (file lock), so a slow run and the next timer tick never overlap;
@@ -1019,11 +1041,22 @@ def supervised_daily(settings: Settings, store: JobStore, today: date | None = N
         if store.kv_get(done_key) and not force:
             log.info("daily set for %s already produced; skipping (use --force to redo)", today)
             return None
+        from .studio import delivery
+
+        plan_ = None
+        if scheduled and not force:   # the timer checks every 15 min; start when the delivery plan says so
+            ok, plan_ = delivery.due(settings, store)
+            if not ok:
+                log.info("not yet: planned start %s (%s)", f"{plan_['start']:%H:%M}", plan_["why"])
+                return None
+            delivery.start_run(settings, store, today, plan_)
         check_disk(Path(settings.output_dir))
         last = None
         for attempt in range(retries + 1):
             try:
-                res = run_daily_v2(settings, store, today=today, send=send, workers=workers, shorts=shorts)
+                res = run_daily_v2(settings, store, today=today, send=send, workers=workers, shorts=shorts,
+                                   ignore_input_wait=bool(plan_) and delivery.input_wait_overridden(settings, plan_),
+                                   deliver_day=today if plan_ else None)
                 break
             except Exception as exc:  # research outage, disk, etc.
                 last = exc
@@ -1036,6 +1069,10 @@ def supervised_daily(settings: Settings, store: JobStore, today: date | None = N
             raise last
         if res.jobs:  # nothing produced (pace / waiting for your input) -> a later run today may still produce
             store.kv_set(done_key, json.dumps([j[0] for j in res.jobs]))
+        elif scheduled:   # nothing produced: the 15-minute timer tries again in 2 hours, not every tick
+            store.kv_set(f"daily_retry_after:{today.isoformat()}", str(delivery.now_local(settings).timestamp() + 2 * 3600))
+        if plan_:
+            delivery.close_day(settings, store, today, notifier)
         bad = [j for j in res.jobs if j[2] in ("failed", "rejected_compliance")]
         if bad:
             notifier(settings, f"GLIVARAO {today}: {len(bad)} of {len(res.jobs)} videos need attention:\n" +

@@ -87,6 +87,12 @@ class Settings:
     topic_mode: str = field(default_factory=lambda: _env("TOPIC_MODE", "auto"))
     # Auto mode: after a topic is announced, wait this long for your take before producing without it
     creator_input_wait_hours: float = field(default_factory=lambda: float(_env("CREATOR_INPUT_WAIT_HOURS", "4")))
+    # Daily delivery: the day's videos are in Telegram by DELIVERY_DEADLINE (Tashkent). The run normally starts at
+    # DAILY_START and earlier when measured durations x DELIVERY_MARGIN + DELIVERY_BUFFER_MIN say so.
+    delivery_deadline: str = field(default_factory=lambda: _env("DELIVERY_DEADLINE", "22:00"))
+    daily_start: str = field(default_factory=lambda: _env("DAILY_START", "13:17"))
+    delivery_margin: float = field(default_factory=lambda: float(_env("DELIVERY_MARGIN", "1.3")))
+    delivery_buffer_min: float = field(default_factory=lambda: float(_env("DELIVERY_BUFFER_MIN", "20")))
     require_creator_input: bool = field(default_factory=lambda: _bool("REQUIRE_CREATOR_INPUT", True))
     long_videos_per_month: int = field(default_factory=lambda: int(_env("LONG_VIDEOS_PER_MONTH", "16")))
     shorts_per_day: int = field(default_factory=lambda: int(_env("SHORTS_PER_DAY", "3")))  # 3 x 30 = 90 a month

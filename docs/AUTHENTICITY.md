@@ -9,7 +9,7 @@ checked facts. These are not tricks: they are the human input and editorial stan
 | When | What happens | What you do |
 |---|---|---|
 | **09:00 Tashkent** (when the pace allows a video) | Fresh research picks the next topic and format, then Telegram announces it with **why it was picked and the source links** | Nothing. *Optionally* reply with your take (text or voice note) |
-| 13:17 Tashkent | The long video + 3 Shorts are written, fact-checked and rendered. Your take is included if it arrived within 4 hours (`CREATOR_INPUT_WAIT_HOURS`) | — |
+| 13:17 Tashkent (earlier when measured render times need it, for delivery by 22:00) | The long video + 3 Shorts are written, fact-checked and rendered. Your take is included if it arrived within 4 hours (`CREATOR_INPUT_WAIT_HOURS`) | — |
 | After rendering | The review arrives. It **starts with the topic and why it was picked**, then the fact check (every claim with its source URL), the originality report and the AI disclosure | Approve, or **reject the whole video** if you don't like the topic |
 | After you approve | The **upload pack** arrives: full-quality video file, 3 titles, description (sources, AI note, affiliate disclosure), tags, thumbnail, suggested publish time (New York + Tashkent) | Save the file, upload in the YouTube Studio app and use **Schedule** |
 

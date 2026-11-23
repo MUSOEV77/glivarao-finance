@@ -147,12 +147,14 @@ def cmd_daily_v2(args, s):
     day = date.fromisoformat(args.date) if args.date else None
     try:
         res = supervised_daily(s, _store(s), today=day, send=not args.no_telegram, workers=args.workers,
-                               shorts=args.shorts, force=args.force, retries=args.retries)
+                               shorts=args.shorts, force=args.force, retries=args.retries,
+                               scheduled=args.scheduled)
     except AlreadyRunning as exc:
         print(f"skipped: {exc}")
         return
     if res is None:
-        print("skipped: today's daily set was already produced (use --force to produce again)")
+        print("skipped: today's daily set was already produced or its planned start hasn't come yet "
+              "(see logs/daily.log; use --force to produce now)")
         return
     if not res.jobs:
         print(f"nothing produced today: {res.note}")
@@ -834,6 +836,8 @@ def main(argv=None):
     d2.add_argument("--shorts", type=int, default=None, help="default: 3 a day (up to 6 when the buffer is low)")
     d2.add_argument("--force", action="store_true", help="produce again even if today already completed")
     d2.add_argument("--retries", type=int, default=1, help="whole-run retries before alerting (default 1)")
+    d2.add_argument("--scheduled", action="store_true",
+                    help="timer mode: start only once the delivery plan's start time (for 22:00) has come")
     d2.set_defaults(fn=cmd_daily_v2)
     pp = sub.add_parser("propose-topics", help="send this week's 5-7 topic ideas to Telegram for you to pick")
     pp.add_argument("--date", help="YYYY-MM-DD (default today)")
