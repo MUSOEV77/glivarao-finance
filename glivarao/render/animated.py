@@ -300,7 +300,10 @@ def render_animated(script: Script, workdir: Path, settings: Settings, voice: st
     texts = [s.narration for s in script.scenes]
     choice = get_narrator(settings, "\n\n".join(texts), kokoro_voice=voice)
     if tempo_boost != 1.0 and hasattr(choice.narrator, "speed"):  # Shorts only: atempo on top of the locked speed
-        choice.narrator.speed = choice.narrator.speed * tempo_boost
+        if hasattr(choice.narrator, "boost"):   # Gemini: on top of the per-scene pace correction
+            choice.narrator.boost = choice.narrator.boost * tempo_boost
+        else:
+            choice.narrator.speed = choice.narrator.speed * tempo_boost
     narrations, choice = narrate_all(choice, texts, settings, kokoro_voice=voice)
     log.info("narrator: %s", choice.label)
     unknown = sorted({w for n in narrations for w in n.unknown_words})

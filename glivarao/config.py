@@ -150,6 +150,9 @@ class Settings:
     gemini_tts_direction: str = field(default_factory=lambda: _env("GEMINI_TTS_DIRECTION",
                                                                    "Say in a warm, confident, upbeat voice"))
     tts_target_wpm: int = field(default_factory=lambda: int(_env("TTS_TARGET_WPM", "170")))
+    # Same pace for every scene: each scene is measured and atempo-corrected to this many spoken words/min
+    # (acceptable 152-164; correction factor 0.85-1.20, pitch preserved).
+    tts_pace_wpm: float = field(default_factory=lambda: float(_env("TTS_PACE_WPM", "158")))
     # Shorts length: script capped before voicing; real audio measured after; never sent over SHORT_MAX_SECONDS
     # Shorts must be 30-55 s: <=120 words; voiced and measured BEFORE rendering; over 55 s -> trim + re-voice (2x);
     # over 58 s -> atempo up to 1.15x; over 59 s -> held (never rendered or sent). The final file is checked again.

@@ -43,7 +43,9 @@ BRAND_RESPELL = {"GLIVARAO": "Gli-VAR-oh"}     # prompt-based models take respel
 # Google's documented short form: a few words of direction, a colon, then the text. A long style paragraph in the
 # prompt gets READ ALOUD by the model (measured: 22-word scene -> 29 s of speech), so it is never sent.
 DIRECTION = "Say in a warm, confident, upbeat voice"
-PROMPT_VERSION = "say-v2"          # part of the cache key: clips made with the old long prompt are never reused
+PROMPT_VERSION = "say-v2"
+PACE_MIN, PACE_MAX = 0.85, 1.20   # atempo range for the per-scene pace correction (pitch preserved)
+PACE_MIN_WORDS = 6                # shorter scenes use the median correction of the video so far          # part of the cache key: clips made with the old long prompt are never reused
 
 
 def tts_prompt(text: str, direction: str = DIRECTION) -> str:
@@ -194,7 +196,7 @@ class GeminiTTSNarrator:
                  price_per_m_audio: float = 18.0, tokens_per_sec: float = 32.0, monthly_budget_usd: float = 20.0,
                  cache_dir: Path = Path("data/tts_cache"), ledger: SpendLedger | None = None, session=None,
                  retries: int = 5, backoff_sec: float = 5.0, sleep=time.sleep, speed: float = 1.0,
-                 direction: str = DIRECTION):
+                 direction: str = DIRECTION, target_wpm: float = 158.0):
         if not api_key:
             raise VoiceUnavailable("GEMINI_API_KEY is not set")
         check_model(model)
@@ -202,6 +204,9 @@ class GeminiTTSNarrator:
         self._key, self.model, self.voice, self.style = api_key, model, voice, style
         tts_prompt("x", direction)               # validates: at most 10 words
         self.direction = direction
+        self.target_wpm = target_wpm         # every scene is brought to this spoken pace
+        self.boost = 1.0                     # extra speed-up for Shorts that run long (set by the length fit)
+        self.pace_log: list[dict] = []
         self.retries, self.backoff, self._sleep = retries, backoff_sec, sleep
         self.speed = speed
         self.price, self.tps, self.budget = price_per_m_audio, tokens_per_sec, monthly_budget_usd
@@ -292,6 +297,25 @@ class GeminiTTSNarrator:
         np.save(p, audio)
         return audio
 
+    def pace(self, text: str, raw: np.ndarray) -> tuple[np.ndarray, dict]:
+        """Same pace for every scene: measure the scene's spoken words/min and apply a pitch-preserving atempo so it
+        lands at `target_wpm` (factor clamped to PACE_MIN..PACE_MAX), times `boost` (the Shorts length fit).
+        Very short scenes (under PACE_MIN_WORDS) use the median factor of the scenes so far (their own measure is
+        unreliable). Logs before/after."""
+        before = spoken_wpm(text, raw)
+        if len(text.split()) >= PACE_MIN_WORDS and before > 0:
+            factor = min(PACE_MAX, max(PACE_MIN, self.target_wpm / before))
+        else:
+            done = sorted(x["factor"] for x in self.pace_log) or [self.speed]
+            factor = done[len(done) // 2]
+        audio = apply_tempo(raw, factor * self.boost)
+        after = spoken_wpm(text, audio)
+        info = {"words": len(text.split()), "wpm_before": round(before), "factor": round(factor, 3),
+                "boost": round(self.boost, 3), "wpm_after": round(after)}
+        log.info("pace: %d -> %d spoken wpm (atempo x%.3f%s) for %r", before, after, factor,
+                 f", Shorts boost x{self.boost:.2f}" if self.boost != 1.0 else "", text[:60])
+        return audio, info
+
     def _save_debug(self, prepped: str, audio: np.ndarray, tag: str) -> None:
         """Keep the rejected clip and its text for inspection (data/voice_debug/)."""
         try:
@@ -308,23 +332,25 @@ class GeminiTTSNarrator:
     def narrate(self, text: str, lead_in: float = 0.15, tail: float = 0.45) -> Narration:
         display = [s.replace("*", "") for s in split_sentences(" ".join(text.split()))]
         prepped = self._prep(text)
-        audio = apply_tempo(self._scene_audio(prepped), self.speed)  # raw audio cached; tempo after
+        raw = self._scene_audio(prepped)                     # raw audio cached; pace correction after
         n_words = len(text.split())
-        if n_words >= 8 and spoken_wpm(text, audio) < MIN_SANE_WPM:
-            # far too much audio for the words (read-aloud instructions or repeated speech): ask once more with the
-            # same short prompt; if it is still slow the video is HELD (never published with bad audio)
+        if n_words >= 8 and spoken_wpm(text, raw) < MIN_SANE_WPM:
+            # guard BEFORE any correction: far too much audio for the words (read-aloud instructions or repeated
+            # speech). Ask once more with the same short prompt; still slow -> the video is HELD.
             log.warning("scene audio abnormally slow (%.0f spoken wpm) for: %r; requesting it again",
-                        spoken_wpm(text, audio), text[:120])
-            self._save_debug(prepped, audio, "first")
+                        spoken_wpm(text, raw), text[:120])
+            self._save_debug(prepped, raw, "first")
             self._key_for(prepped).unlink(missing_ok=True)
-            audio = apply_tempo(self._scene_audio(prepped), self.speed)
-            if spoken_wpm(text, audio) < MIN_SANE_WPM:
-                self._save_debug(prepped, audio, "second")
+            raw = self._scene_audio(prepped)
+            if spoken_wpm(text, raw) < MIN_SANE_WPM:
+                self._save_debug(prepped, raw, "second")
                 self._key_for(prepped).unlink(missing_ok=True)
                 raise VoiceUnavailable(
-                    f"speech came back abnormally slow twice ({spoken_wpm(text, audio):.0f} spoken words/min, "
-                    f"{active_speech_seconds(audio):.1f} s for {n_words} words) in the scene: \"{text[:160]}\"; "
+                    f"speech came back abnormally slow twice ({spoken_wpm(text, raw):.0f} spoken words/min, "
+                    f"{active_speech_seconds(raw):.1f} s for {n_words} words) in the scene: \"{text[:160]}\"; "
                     "the video is held instead of using it")
+        audio, info = self.pace(text, raw)
+        self.pace_log.append(info)
         idx = np.where(np.abs(audio) > 0.004)[0]  # trim leading/trailing silence, keep GLIVARAO lead-in/tail
         if len(idx):
             audio = audio[max(0, idx[0] - 480): idx[-1] + 720]

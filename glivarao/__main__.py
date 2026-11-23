@@ -530,14 +530,14 @@ def cmd_retry_rejected(args, s):
 
 
 def cmd_voice_test(args, s):
-    """Voice 3 real scenes with the real Gemini API; print spoken wpm; send audio to Telegram. Exit 1 if any scene
-    is outside 130-190 spoken words/min."""
+    """Voice 3 real scenes with the real Gemini API, pace-correct them like production, print before/after wpm, send
+    the audio to Telegram. Exit 1 if any scene is outside 150-166 spoken words/min after correction."""
     from .tts import voice_test
 
     results = voice_test.run(s)
     for r in results:
-        print(f"{'OK  ' if r['ok'] else 'FAIL'} {r['scene']:10s} {r['wpm']:4d} spoken wpm  ({r['words']} words, "
-              f"{r['seconds']} s of speech, {r['total_seconds']} s total)  prompt: {r['prompt']}")
+        print(f"{'OK  ' if r['ok'] else 'FAIL'} {r['scene']:10s} {r['wpm_before']:4d} -> {r['wpm']:4d} spoken wpm "
+              f"(atempo x{r['factor']}; {r['words']} words, {r['seconds']} s of speech)  prompt: {r['prompt']}")
     if not args.no_telegram:
         voice_test.send(s, results)
         print("audio sent to Telegram")

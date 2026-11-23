@@ -881,6 +881,7 @@ def _tts_record(settings: Settings) -> dict:
     return {"provider": "gemini_tts", "model": settings.gemini_tts_model, "voice": settings.gemini_tts_voice,
             "pace": settings.gemini_tts_pace, "style": settings.gemini_tts_style, "style_sent": style_prompt(settings),
             "direction_sent": settings.gemini_tts_direction, "prompt": PROMPT_VERSION,
+            "pace_wpm": settings.tts_pace_wpm,
             "speed": settings.gemini_tts_speed}
 
 
@@ -901,7 +902,10 @@ def _voice_seconds(script, settings: Settings, out: Path, tempo: float = 1.0) ->
     texts = [s.narration for s in script.scenes]
     choice = get_narrator(settings, "\n\n".join(texts))
     if tempo != 1.0 and hasattr(choice.narrator, "speed"):
-        choice.narrator.speed = choice.narrator.speed * tempo
+        if hasattr(choice.narrator, "boost"):
+            choice.narrator.boost = choice.narrator.boost * tempo
+        else:
+            choice.narrator.speed = choice.narrator.speed * tempo
     narrations, _ = narrate_all(choice, texts, settings)
     audio = np.concatenate([n.audio for n in narrations])
     out.mkdir(parents=True, exist_ok=True)

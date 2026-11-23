@@ -85,10 +85,11 @@ def test_telegram_button_locks_voice(vs, store, tmp_path, monkeypatch):
     assert any("Voice locked: Achird" in t and "1 video(s) on hold" in t for t in c.texts())
 
 
-def test_narrator_applies_locked_speed(tmp_path):
+def test_pace_correction_sets_the_speed_and_reuses_the_cached_take(tmp_path):
     g = FakeGemini()
     kw = dict(cache_dir=tmp_path / "c", ledger=SpendLedger(tmp_path / "s.json"), session=g, sleep=lambda s: None)
-    slow = GeminiTTSNarrator("K", **kw).narrate("One sentence here. And another. And a third.")
-    fast = GeminiTTSNarrator("K", speed=1.2, **kw).narrate("One sentence here. And another. And a third.")
+    text = "One sentence here, and another one right after it, and a third one to finish."
+    slow = GeminiTTSNarrator("K", target_wpm=220, **kw).narrate(text)   # the fake speaks at ~243 wpm
+    fast = GeminiTTSNarrator("K", target_wpm=265, **kw).narrate(text)
     assert len(g.calls) == 1                                    # same raw audio from the cache: no second charge
-    assert fast.duration < slow.duration * 0.9
+    assert fast.duration < slow.duration * 0.95                 # the pace follows the target, scene by scene
