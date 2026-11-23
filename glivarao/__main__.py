@@ -282,6 +282,16 @@ def cmd_batch_plan(args, s):
         print("sent to Telegram")
 
 
+def cmd_batch_mark_done(args, s):
+    """Count a video you made by hand (make-now) in the batch: a long part (1-3) or a Short."""
+    from .studio import batch
+
+    try:
+        print(batch.mark_done(_store(s), args.topic, args.part, args.job_id, s.output_dir))
+    except ValueError as exc:
+        raise SystemExit(f"not counted: {exc}")
+
+
 def cmd_batch_report(args, s):
     """Rank the batch's 5 topics (YouTube Analytics), name the winner, propose the next 5 (Telegram approval)."""
     from .studio import batch
@@ -992,6 +1002,11 @@ def main(argv=None):
     bp = sub.add_parser("batch-plan", help="the batch test's 4-week plan (--send: to Telegram)")
     bp.add_argument("--send", action="store_true")
     bp.set_defaults(fn=cmd_batch_plan)
+    bm = sub.add_parser("batch-mark-done", help="count a video you made by hand in the batch (part 1-3 or short)")
+    bm.add_argument("topic", help="batch topic, e.g. how-credit-scores-work")
+    bm.add_argument("part", choices=["1", "2", "3", "short"])
+    bm.add_argument("job_id")
+    bm.set_defaults(fn=cmd_batch_mark_done)
     br = sub.add_parser("batch-report", help="rank the batch's topics, name the winner, propose the next 5")
     br.add_argument("--no-telegram", action="store_true")
     br.set_defaults(fn=cmd_batch_report)

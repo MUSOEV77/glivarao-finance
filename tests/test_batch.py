@@ -189,3 +189,38 @@ def test_batch_day_makes_the_part_and_its_single_idea_shorts(world, monkeypatch)
     meta = json.loads((s.output_dir / made[0][0] / "metadata.json").read_text())
     assert meta["series"] == "ACA 2027 Checklist"
     assert "no Shorts topic" in r.note                                    # the research fill-in ran
+
+
+def test_manual_videos_count_and_free_their_slot(bstore, settings, capsys, monkeypatch):
+    """Nov 23 by hand (make-now): credit scores Part 1 + Shorts for the Fed and houses. Part 1 is never made
+    again, the next part takes its slot, the Shorts count for their topics; snowball isn't in batch 1."""
+    from glivarao import __main__ as cli
+
+    long_ = bstore.create("long", "How credit scores really work")
+    fed, houses, snow = (bstore.create("short", t) for t in ("How the Fed affects your money",
+                                                            "Why houses got so expensive", "Debt snowball"))
+    before = batch.plan(batch.topics(bstore))
+    assert any(e["id"] == "how-credit-scores-work:p1" for e in before)
+    monkeypatch.setattr(cli, "get_settings", lambda: settings)
+    cli.main(["batch-mark-done", "how-credit-scores-work", "1", long_.id])
+    cli.main(["batch-mark-done", "how-the-fed-affects-you", "short", fed.id])
+    cli.main(["batch-mark-done", "why-houses-expensive", "short", houses.id])
+    out = capsys.readouterr().out
+    assert "won't be made again" in out and out.count("counted as") == 3
+    with pytest.raises(SystemExit, match="not in the current batch"):
+        cli.main(["batch-mark-done", "snowball-vs-avalanche", "short", snow.id])
+    with pytest.raises(SystemExit, match="is a short video"):
+        cli.main(["batch-mark-done", "how-credit-scores-work", "2", fed.id])
+
+    after = batch.plan(batch.topics(bstore))
+    assert not any(e["id"] == "how-credit-scores-work:p1" for e in after)
+    assert len(after) == len(before) - 1 and batch.plan_issues(batch.topics(bstore), after) == []
+    assert after[1]["publish"] == "2026-11-27"                         # the freed slot is used, nothing left empty
+    assert batch.next_long(bstore)["id"] != "how-credit-scores-work:p1"
+    jobs = {j["job"] for j in batch.topic_jobs(bstore, "how-the-fed-affects-you")}
+    assert fed.id in jobs
+    scores = [j for j in batch.topic_jobs(bstore, "how-credit-scores-work") if j["job"] == long_.id]
+    assert scores and scores[0]["part"] == 1
+    text = batch.plan_text(bstore)
+    assert f"Part 1 (already made, {long_.id})" in text and f"Short {fed.id} (made by you)" in text
+    assert "Checks: all rules OK" in text

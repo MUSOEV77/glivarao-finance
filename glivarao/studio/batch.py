@@ -95,8 +95,20 @@ LONG_EVERY_DAYS = 2              # 14 long videos over 4 weeks ~ the 16-a-month 
 
 
 def topics(store) -> list[BatchTopic]:
+    """The active batch, with the parts you made by hand (batch-mark-done) counted as done: they leave the plan,
+    so the next part takes their slot. A topic's planned Shorts shrink so manual + planned stays at most 5."""
+    from dataclasses import replace as _replace
+
     nxt = json.loads(store.kv_get("batch_custom", "null") or "null")
-    return [_topic_from(d) for d in nxt["topics"]] if nxt else BATCH1
+    base = [_topic_from(d) for d in nxt["topics"]] if nxt else BATCH1
+    manual = _state(store).get("manual", {})
+    out = []
+    for t in base:
+        m = manual.get(t.slug, {})
+        parts = tuple(sorted(set(t.done_parts) | {int(p) for p in m.get("parts", {})}))
+        keep = max(0, 5 - len(m.get("shorts", [])))
+        out.append(_replace(t, done_parts=parts, shorts=t.shorts[:keep]))
+    return out
 
 
 def version(store) -> str:
@@ -190,7 +202,11 @@ def plan_text(store, start: date = START) -> str:
         lines.append(f"            lead fact: {e['lead'][:95]}")
         for s in e["shorts"]:
             lines.append(f"            SHORT {s}")
-    done = [f"{t.title}: Part {p} (already made)" for t in batch for p in t.done_parts]
+    manual = _state(store).get("manual", {})
+    done = [f"{t.title}: Part {p} (already made" +
+            (f", {manual[t.slug]['parts'][str(p)]})" if str(p) in manual.get(t.slug, {}).get("parts", {}) else ")")
+            for t in batch for p in t.done_parts]
+    done += [f"{t.title}: Short {j} (made by you)" for t in batch for j in manual.get(t.slug, {}).get("shorts", [])]
     if done:
         lines.append("\nAlready made: " + "; ".join(done))
     issues = plan_issues(batch, entries)
@@ -291,6 +307,47 @@ def record_jobs(store, card: dict, jobs: list[tuple], out_dir=None) -> None:
                 except (OSError, ValueError, KeyError):
                     pass
     _save(store, st)
+
+
+def mark_done(store, slug: str, part: str, job_id: str, out_dir=None) -> str:
+    """A video you made by hand (make-now) counts in the batch. part: 1, 2, 3 (long) or 'short'.
+    Returns what changed; raises ValueError for a topic outside the batch, a wrong part or a wrong format."""
+    if slug not in [t.slug for t in topics(store)]:
+        raise ValueError(f"{slug} is not in the current batch ({', '.join(t.slug for t in topics(store))})")
+    try:
+        job = store.get(job_id)
+    except KeyError:
+        raise ValueError(f"no video {job_id}") from None
+    fmt = getattr(job.format, "value", str(job.format))
+    st = _state(store)
+    st.setdefault("version", version(store))
+    m = st.setdefault("manual", {}).setdefault(slug, {"parts": {}, "shorts": []})
+    lst = st.setdefault("jobs", {}).setdefault(slug, [])
+    if part == "short":
+        if fmt != "short":
+            raise ValueError(f"{job_id} is a {fmt} video, not a Short")
+        if job_id not in m["shorts"]:
+            m["shorts"].append(job_id)
+        if job_id not in [x["job"] for x in lst]:
+            lst.append({"job": job_id, "format": "short", "part": None})
+        _save(store, st)
+        return f"{job_id} counted as a {slug} Short"
+    if part not in ("1", "2", "3"):
+        raise ValueError("part must be 1, 2, 3 or short")
+    if fmt != "long":
+        raise ValueError(f"{job_id} is a {fmt} video; parts are long videos")
+    m["parts"][part] = job_id
+    st.setdefault("planned", {})[f"{slug}:p{part}"] = date.today().isoformat()
+    if job_id not in [x["job"] for x in lst]:
+        lst.append({"job": job_id, "format": "long", "part": int(part)})
+    if out_dir is not None:          # its opening line, so the other parts open differently
+        try:
+            fp = json.loads((out_dir / job_id / "variety.json").read_text())["fingerprint"]
+            st.setdefault("openings", {}).setdefault(slug, []).append(fp.get("opening", ""))
+        except (OSError, ValueError, KeyError):
+            pass
+    _save(store, st)
+    return f"{job_id} counted as {slug} Part {part}: it won't be made again; the next part takes its slot"
 
 
 def topic_jobs(store, slug: str) -> list[dict]:
@@ -509,4 +566,4 @@ def approve_next(store, pv: str) -> list[str] | None:
 
 __all__ = ["BATCH1", "PARTS", "plan", "plan_issues", "plan_text", "active", "next_long", "card_for", "short_angles",
            "mark_planned", "record_jobs", "topic_jobs", "topics", "version", "fetch_metrics", "rank", "propose_next",
-           "send_report", "due_for_report", "approve_next", "video_id"]
+           "send_report", "due_for_report", "approve_next", "video_id", "mark_done"]
