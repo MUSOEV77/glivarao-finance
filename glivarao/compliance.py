@@ -44,7 +44,7 @@ WHAT_TO_DO = re.compile(r"^what to do", re.I)
 INTRO_RE = re.compile(r"\b(?:welcome|hey (?:guys|everyone|there|folks)|hi (?:guys|everyone|there|folks)|in this video|"
                       r"today (?:we|we're|we are|i|i'm)|let'?s talk about|before we (?:start|begin)|"
                       r"don'?t forget to (?:like|subscribe)|glivarao)\b", re.I)
-LOOP_RE = re.compile(r"\b(?:but here'?s|here'?s the (?:part|thing|catch|twist|kicker)|most people miss|stick with me|"
+LOOP_RE = re.compile(r"\b(?:but here'?s|here'?s the (?:part|thing|catch|twist|kicker)|easy to miss|stick with me|"
                      r"wait\b|but wait|the catch|the twist|plot twist|in a (?:minute|second|moment)|we'?ll get to|"
                      r"keep that in mind|remember that number|here'?s why|which brings us|now here'?s|"
                      r"but (?:that'?s not|there'?s more)|surprising|the real (?:problem|cost|reason)|you might think)\b",
@@ -114,6 +114,48 @@ def opening_issues(script: Script) -> list[str]:
     if thumb_k and not (thumb_k & (first_k | _content_stems(span(0, 5)))):
         out.append(f"first line doesn't match the thumbnail text \"{thumb[:40]}\"")
     return out
+
+
+ABSOLUTE = [   # (pattern, kind): claims that must be literally true for the viewer, or come from the fact sheet
+    (r"\bmost (?:people|americans|borrowers|households|families|cardholders|consumers|folks|of us|of you|workers|"
+     r"renters|homeowners|buyers|savers|enrollees|drivers)\b", "most people"),
+    (r"\b(?:everyone|everybody|nobody|no one|all americans|every american)\b", "everyone"),
+    (r"\byou will\b(?! (?:learn|know|see|find|get to|hear|understand))|\byou'?ll (?:lose|pay|owe|end up|start|go|"
+     r"never|always|miss|get (?:denied|charged|hit|nothing)|be (?!able)\w+)", "you will"),
+    (r"\byou(?:'re| are)? (?:always|never)\b", "always/never"),
+    (r"\b(?:guaranteed|definitely|certainly|for sure|without exception|no matter what)\b", "guaranteed"),
+    (r"\band you(?:'ll| will)? (?:start|lose|pay|owe|go|end up|are|get|won'?t|can'?t|have no|lose)\b", "consequence"),
+]
+HEDGE = re.compile(r"\b(?:could|might|may|can|usually|often|typically|in many cases|for many|for some|some of you|"
+                   r"if you'?re|unless|in most states|chances are|likely)\b", re.I)
+SUPPORT_WORDS = {"most people": r"\bmost\b", "everyone": r"\b(?:everyone|all|every)\b",
+                 "you will": r"\bwill\b", "always/never": r"\b(?:always|never)\b",
+                 "guaranteed": r"\bguarante", "consequence": r"\b(?:will|won'?t|must|required|deadline)\b"}
+
+
+def absolute_claim_issues(script: Script, facts: list[str] | None = None) -> list[str]:
+    """Hooks may be dramatic but must be literally true for the viewer they address. Absolute claims ('you will',
+    'everyone', 'most people', 'always', 'guaranteed', 'miss X and you ...') are flagged unless a fact on the fact
+    sheet states the same thing. Consequence-style claims are fine once hedged ('could', 'may', 'if you're ...')."""
+    facts = facts or []
+    texts = [script.title.replace("#Shorts", ""), script.thumbnail_text or ""] + \
+        [s for sc in script.scenes for s in _sentences_of(sc.narration)]
+    out = []
+    for sent in texts:
+        for pat, kind in ABSOLUTE:
+            m = re.search(pat, sent, re.I)
+            if not m:
+                continue
+            if kind != "most people" and kind != "everyone" and HEDGE.search(sent):
+                continue
+            stems = _content_stems(sent)
+            if any(re.search(SUPPORT_WORDS[kind], f, re.I) and len(stems & _content_stems(f)) >= 2 for f in facts):
+                continue
+            out.append(f"absolute claim not supported by the fact sheet ({kind}): \"{sent[:90]}\": make it "
+                       "literally true for the viewer it addresses (e.g. 'could', 'many', 'if you're ...') or use a "
+                       "fact-sheet number")
+            break
+    return list(dict.fromkeys(out))
 
 
 def retention_issues(script: Script, previous: dict | None = None) -> list[str]:

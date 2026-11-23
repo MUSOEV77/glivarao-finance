@@ -28,14 +28,14 @@ def paid(settings, monkeypatch):
         for i, sc in enumerate(d["scenes"]):                       # unique wording in every scene, like a real script
             n = len(sc["narration"].split())
             words = [("you" if k % 12 == 0 else r.choice(vocab)) + ("." if k % 12 == 11 else "") for k in range(n)]
-            sc["narration"] = (f"But here's the part most people miss about your card, part {i}. "
+            sc["narration"] = (f"But here's the part that's easy to miss about your card, part {i}. "
                                + " ".join(words[13:]))
         rest = d["scenes"][0]["narration"].split()[13:]               # the hook replaces the opening words
         opening = "Your card could cost you 22% a year. "
         if fmt == "long":   # like Claude under the rules: 0-5 s hook, 5-15 s the cost, 15-30 s promise + open loop
-            opening += ("That costs you real money in interest, every single month, for years. Most people never "
-                        "check the one statement line that shows it, so it keeps growing quietly. By the end, "
-                        "you'll know the one move that stops it, and here's the part most people miss. ")
+            opening += ("That costs you real money in interest, every single month, for years. It's easy to "
+                        "miss the one statement line that shows it, so it keeps growing quietly. By the end, "
+                        "you'll know the one move that stops it, and here's the part that's easy to miss. ")
             rest = rest[45:]
         d["scenes"][0]["narration"] = opening + " ".join(rest)
         d["thumbnail_text"] = "Your Card Rate"                        # matches the first line

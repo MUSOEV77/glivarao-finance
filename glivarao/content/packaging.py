@@ -52,16 +52,16 @@ def titles_for(b: Brief, variant: str = "") -> tuple[str, str]:
     if b.family == "scam":
         if variant == "the mistake":
             return "The Mistake Scammers Count On", "Hang Up."
-        return f"{t}: The Red Flags Most People Miss", "Don't Pay That."
+        return f"{t}: The Red Flags That Are Easy to Miss", "Don't Pay That."
     if b.family == "credit_file":
         if variant == "the mistake":
-            return "The Credit Report Mistake Most People Make", "Check It."
+            return "The Credit Report Mistake to Check For", "Check It."
         return f"{t}: Errors Are More Common Than You Think", "Check This Now."
     if b.family == "bank":
         if variant == "the mistake":
             return "The Banking Mistake That's Hard to Undo", "Double-Check."
-        return f"{t}: The Fees and Risks Most People Miss", "Stop Paying This."
-    return f"{t}: What Most People Get Wrong", "Read This First."
+        return f"{t}: The Fees and Risks That Are Easy to Miss", "Stop Paying This."
+    return f"{t}: What's Easy to Get Wrong", "Read This First."
 
 
 def make_metadata(b: Brief, script: Script, variant: str = "") -> dict:

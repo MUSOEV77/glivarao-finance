@@ -18,9 +18,9 @@ BEFORE_LONG = ("Welcome back to the channel. Today we're going to talk about cre
                "cards became the norm, and then chips were added for safety. There are many types, such as rewards "
                "cards, travel cards and store cards, and each one works a little differently from the others.")
 AFTER_LONG = ("As of November 2026, your card balance probably costs you 22.36% a year. That costs you real money "
-              "in interest, every single month, for years. Most people never check the one statement line that "
+              "in interest, every single month, for years. It's easy to miss the one statement line that "
               "shows it, so it keeps growing quietly. By the end, you'll know the one move that stops it, and "
-              "here's the part most people miss.")
+              "here's the part that's easy to miss.")
 
 
 def _script(first: str, fmt="long", title="Credit Card Interest: What 22.36% Costs You", thumb="Your Card Rate",
@@ -128,9 +128,9 @@ def test_script_repeats_are_errors_claude_must_fix(store):
     assert any("structure" in i for i in got) and any("opening line" in i for i in got)
     assert any("ending line" in i for i in got) and any("hook type" in i for i in got)
     other = _script("Is your card balance really costing you 22.36% a year? That costs you real money in interest, "
-                    "every single month, for years. Most people never check the one statement line that shows it, so "
-                    "it keeps growing. By the end, you'll know the one move that stops it, and here's the part most "
-                    "people miss.", ending="Tonight, write down every balance and its rate.", style="myth_vs_fact",
+                    "every single month, for years. It's easy to miss the one statement line that shows it, so "
+                    "it keeps growing. By the end, you'll know the one move that stops it, and here's the part that's "
+                    "easy to miss.", ending="Tonight, write down every balance and its rate.", style="myth_vs_fact",
                     slot=2)
     assert variety.script_issues(other, prev) == []
     assert any("Won't" not in i for i in retention_issues(same, prev))
@@ -174,3 +174,80 @@ def test_thumbnail_layouts_stay_readable():
 def test_rotation_table_lists_seven_slots():
     t = variety.rotation_table()
     assert len(t.splitlines()) == 8 and "number" in t and "warning" in t
+
+
+# ---------------------------------------------------------------- literally true for the viewer it addresses
+from glivarao.compliance import absolute_claim_issues  # noqa: E402
+
+ACA_FACTS = ["Enroll by December 15 for Marketplace coverage that starts January 1; Open Enrollment for 2027 runs "
+             "November 1, 2026 to January 15, 2027."]
+
+
+@pytest.mark.parametrize("line", [
+    "Miss December 15 and you start January uninsured.",          # the reported overstatement
+    "Most people never check their card rate.",
+    "Everyone pays this fee.",
+    "You will lose your coverage.",
+    "You'll pay $1,800 in interest.",
+    "This plan is guaranteed to save you money.",
+    "You never get that money back.",
+])
+def test_absolute_claims_are_flagged(line):
+    s = _script(line, "short", thumb="")
+    assert absolute_claim_issues(s, ACA_FACTS), line
+
+
+@pytest.mark.parametrize("line", [
+    "If you're new to the Marketplace, miss December 15 and your plan may not start January 1.",
+    "Miss December 15 and you could start January without a new plan.",
+    "Many people never check their card rate.",
+    "By the end, you'll know the one move that stops it.",
+    "Your card could be charging you 22.36% a year.",
+])
+def test_true_or_hedged_claims_pass(line):
+    s = _script(line, "short", thumb="")
+    assert absolute_claim_issues(s, ACA_FACTS) == [], line
+
+
+def test_a_claim_the_fact_sheet_states_is_allowed():
+    s = _script("Most cardholders pay interest every month.", "short", thumb="")
+    assert absolute_claim_issues(s, [])
+    assert absolute_claim_issues(s, ["Most cardholders carry a balance and pay interest every month (survey)."]) == []
+
+
+def test_writer_rule_is_in_the_prompt():
+    from glivarao.scriptgen.prompts import SYSTEM_PROMPT
+
+    assert "literally true" in SYSTEM_PROMPT and "most people" in SYSTEM_PROMPT
+
+
+def test_held_video_without_a_topic_card_is_retried_from_its_saved_brief(settings, store, monkeypatch):
+    """Bug: videos from make-now / retry-rejected are saved with card=None; the hourly held-video retry called
+    build_brief(None) -> TypeError. It now uses the saved brief.json (the exact fact sheet it was checked with)."""
+    import json as _json
+
+    from glivarao import daily_v2
+    from glivarao.content.brief import Brief, Fact
+    from glivarao.models import JobStatus
+
+    job = store.create("short", "ACA deadline")
+    out = settings.output_dir / job.id
+    out.mkdir(parents=True)
+    script = _script("Your card could be charging you 22.36% a year.", "short")
+    job.script_path = str(out / "script.json")
+    (out / "script.json").write_text(script.model_dump_json())
+    b = Brief("2026-11-23", "aca_marketplace", "ACA deadline", "insurance", "US", "aca", 1.0, "high", [], "", [], [],
+              facts=[Fact("DATA", ACA_FACTS[0], "HealthCare.gov", "https://www.healthcare.gov/")])
+    (out / "brief.json").write_text(b.to_json())
+    (out / "held_render.json").write_text(_json.dumps({"writer": "claude", "creator": "", "item_id": None,
+                                                      "card": None, "date": "2026-11-23", "compliance": "ok",
+                                                      "sim": {"summary": "", "phrase_overlap": 0.0,
+                                                              "structure_ratio": 0.0}}))
+    store.transition(job, JobStatus.SCRIPTED, "held")
+    daily_v2._hold(store, job.id, "voice down")
+    seen = []
+    monkeypatch.setattr(daily_v2, "render_and_review",
+                        lambda j, sc, br, *a, **k: seen.append(br.topic) or (j.id, "short", "pending_approval", "v", ""))
+    monkeypatch.setattr(daily_v2, "_notify", lambda *a: None)
+    got = daily_v2.retry_held_videos(settings, store, send=False)
+    assert got and got[0][2] == "pending_approval" and seen == ["ACA deadline"]

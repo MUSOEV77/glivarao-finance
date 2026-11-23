@@ -22,7 +22,7 @@ def _long_body(loop_every_words):
         sents.append(f"You check the statement number {k} and keep the plan simple.")      # 11 words
         since += 11
         if loop_every_words and since >= loop_every_words:
-            sents.append("But here's the part most people miss.")
+            sents.append("But here's the part that's easy to miss.")
             since = 0
     return sents
 

@@ -77,7 +77,7 @@ FORMATS: dict[str, Format] = {
         intros=("Two ways to handle {topic}. Same starting point, very different results. Let's compare.",
                 "Option A or option B? When it comes to {topic}, the difference is bigger than it looks.",
                 "Let's put two approaches to {topic} side by side, and let the numbers decide."),
-        outros=("Neither option is right for everyone. But now you can compare them with real numbers.",
+        outros=("Neither option fits every household. But now you can compare them with real numbers.",
                 "The best choice depends on your situation. The comparison just made it clearer.")),
     "news_breakdown": Format(
         "news_breakdown", "What changed (data / rules)", "WHAT CHANGED", "crimson",

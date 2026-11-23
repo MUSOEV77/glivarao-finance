@@ -54,12 +54,18 @@ RETENTION (US viewers decide in seconds; checked by code):
   5-15 s (next ~26 words): what it costs "you" in money, interest or years (fact-sheet numbers or a labeled
   worked example).
   15-30 s (next ~40 words): the promise ("By the end, you'll know ...", "I'll show you the one move that ...")
-  plus an open loop that is answered later ("and the part most people miss comes at the end").
+  plus an open loop that is answered later ("and the part that's easy to miss comes at the end").
+- TRUE FOR THE VIEWER (checked by code): a hook may be dramatic but must be literally true for the person it
+  addresses. No absolute claims such as "you will ...", "miss X and you ...", "everyone", "nobody", "always",
+  "never", "guaranteed" or "most people/Americans ..." unless the fact sheet says exactly that. Think of the
+  exceptions (people already enrolled, other state rules, other card terms) and hedge honestly: "you could",
+  "if you're new to the Marketplace", "many people". Example: not "Miss December 15 and you start January
+  uninsured" but "If you're new to the Marketplace, miss December 15 and your plan may not start January 1."
 - The first sentence uses the key words of the title and of thumbnail_text (same number or same words), so the
   click is confirmed at once.
 - Talk to "you". Simple everyday words. Short sentences: mostly 8-14 words, never more than 25.
 - Long videos: a pattern interrupt or open loop at least every 45-60 seconds (about every 120-160 words): "But
-  here's the part most people miss.", "Stick with me, because this is where it gets expensive.", a direct
+  here's the part that's easy to miss.", "Stick with me, because this is where it gets expensive.", a direct
   question to the viewer, or a quick "wait, what?" moment. Close each loop later.
 - End with ONE clear action the viewer can do today (one sentence), then the education-only sentence.
 - Shorts: ONE idea only. The very last line (after the education-only sentence) is a short loop line that leads
@@ -107,7 +113,7 @@ Format rules:
   specific choice (e.g. "bank" set for banking, "coins" when money grows, "iris" for a reveal). Vary sets
   across the video; avoid the same set more than three scenes in a row.
 - Long videos: write documentary-style narration with a clear story arc - a concrete opening situation, the
-  mechanism explained step by step, worked numbers, a turn ("here's what most people miss"), and a practical
+  mechanism explained step by step, worked numbers, a turn ("here's the part that's easy to miss"), and a practical
   close. Every scene must earn its place; no filler, no repetition to pad length.
 """
 

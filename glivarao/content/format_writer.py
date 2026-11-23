@@ -16,7 +16,7 @@ from .writer import DISCLAIMER, _data_hook, _fit_short, _lc, _math_scenes, _s, _
 
 SHORT_KINDS = ("number", "myth", "mistake", "question", "tip")
 SHORT_HOOKS = {
-    "number": ("One number about {topic} that most people never see:", "Here's the math on {topic} in under a minute.",
+    "number": ("One number about {topic} that's easy to miss:", "Here's the math on {topic} in under a minute.",
                "Watch what happens to the numbers on {topic}."),
     "myth": ("Here's a {topic} myth that costs people money.", "You've probably heard this about {topic}. It's wrong.",
              "Myth or fact? Let's settle it fast."),
@@ -131,7 +131,7 @@ def write_long_format(b: Brief, style: str, creator_text: str = "", used_lines: 
             sc.append(_s(h, n, illo, st))
         if take:
             sc.append(take)
-        sc.append(_b(_s("The verdict", f"So which is better? For most people, {_lc(acts[0])}. But your own "
+        sc.append(_b(_s("The verdict", f"So which is better? In many cases, {_lc(acts[0])}. But your own "
                         "numbers and goals decide. Run the comparison with your real figures.", "scale", "studio"),
                      "verdict"))
     elif style == "news_breakdown" and (hook or b.news):

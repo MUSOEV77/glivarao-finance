@@ -20,8 +20,8 @@ def _long_scenes(topic: str, target_words: int) -> list[Scene]:
               key_points=["How it works", "Costly mistakes", "What to do next"]),
         Scene(heading="Meet Penny", character="duo", pose="cheer", illustration="coin_stack",
               narration=("I'm Max, and this is Penny, our resident coin with a lot of questions. Penny, what "
-                         "do most people get wrong here? She says they wait too long. And she's right. Time "
-                         "is the ingredient almost everyone underestimates."),
+                         "do people often get wrong here? She says they wait too long. And she's right. Time "
+                         "is the ingredient many people underestimate."),
               key_points=[]),
         Scene(heading="The core idea", character="max", pose="point", illustration="growth_arrow",
               narration=("Let's start with a simple example. Say you put away one thousand dollars and add "

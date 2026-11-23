@@ -22,7 +22,7 @@ from glivarao.tts.gemini_tts import spoken_words
 REAL_VOICE_SECONDS = daily_v2._voice_seconds          # conftest replaces it with an estimate; we want the real one
 pytestmark = pytest.mark.skipif(not shutil.which("ffprobe"), reason="needs ffmpeg/ffprobe")
 
-A = ["You", "Maybe you", "Most likely you", "If you're busy, you", "Like most people, you", "Some months you",
+A = ["You", "Maybe you", "Most likely you", "If you're busy, you", "Like many of us, you", "Some months you",
      "On a tight month you", "Without a plan you", "Once in a while you", "When money's tight you", "Sometimes you",
      "Honestly, you", "Right after payday you", "Like a lot of us, you", "Late at night you", "On autopilot you",
      "Without noticing, you", "In a rush you", "When you're tired, you", "Every so often you"]
@@ -30,7 +30,7 @@ B = ["look at the monthly number first", "skip the fine print on the statement",
      "treat the balance as a fixed bill", "pay whatever feels comfortable that month", "forget how fees stack up",
      "compare offers only by the headline", "put off the hard decision", "follow what friends do",
      "trust the default option", "focus on the next paycheck", "ignore the yearly total",
-     "react after a surprise bill arrives", "never read the renewal notice", "underestimate small recurring costs",
+     "react after a surprise bill arrives", "skip the renewal notice", "underestimate small recurring costs",
      "keep the oldest account open", "split payments across several apps", "set one reminder and hope",
      "avoid opening the mail", "try to fix everything at once"]
 C = ["and that habit quietly costs you over time", "which is exactly how the gap keeps growing",
@@ -43,7 +43,7 @@ C = ["and that habit quietly costs you over time", "which is exactly how the gap
      "and the habit is easy to build", "which is the whole point of a plan", "so let's make it concrete"]
 
 
-LOOPS = ["But here's the part most people miss.", "Stick with me, because this is where it gets expensive.",
+LOOPS = ["But here's the part that's easy to miss.", "Stick with me, because this is where it gets expensive.",
          "So what does that cost you?", "Wait, it gets worse.", "Here's the catch.", "You might think that's fine.",
          "Now here's the twist.", "Keep that in mind for a minute."]
 
@@ -88,13 +88,13 @@ def fake_claude(prompt, fmt, seed):
         return ok[seed % len(ok)]
     special, charts = [], {}
     if aca:
-        special = [{"question": "Miss December 15 and you start January without coverage?",
-                    "warning": "Don't miss December 15, or you start January without coverage.",
-                    "story": "You miss December 15 and you start January without coverage.",
-                    "myth": "You think January is fine, but miss December 15 and you lose coverage.",
-                    "comparison": "December 15 versus January 1: miss it and you go without coverage.",
-                    "mistake": "Miss December 15 and you start January without coverage, a costly mistake.",
-                    }.get(hk, "Miss December 15 and you start January without coverage.") if fmt == "short" else
+        special = [{"question": "Miss December 15, and could your new plan start late?",
+                    "warning": "Don't miss December 15 if you're new: your plan may not start January 1.",
+                    "story": "You miss December 15, and your new plan may not start January 1.",
+                    "myth": "You think January is fine, but if you're new, December 15 may be your real deadline.",
+                    "comparison": "December 15 versus January 1: if you're new, the earlier date may decide when you're covered.",
+                    "mistake": "If you're new, missing December 15 could be a costly mistake.",
+                    }.get(hk, "If you're new to the Marketplace, miss December 15 and your plan may not start January 1.") if fmt == "short" else
                    {"question": "Miss December 15, and will your Marketplace plan start on January 1?",
                     "warning": "Don't miss December 15, or your Marketplace plan won't start on January 1.",
                     "mistake": "Missing December 15 is a costly mistake: your plan won't start on January 1.",
@@ -145,8 +145,8 @@ def fake_claude(prompt, fmt, seed):
         if i == 0 and fmt == "long":   # 0-5 s hook, 5-15 s what it costs you, 15-30 s promise + open loop
             narr = ((special[0] if special else "You're making a costly money mistake every single month.") +
                     " That costs you real money in interest, every single month, for years." +
-                    " Most people never check the one statement line that shows it, so it keeps growing quietly." +
-                    " By the end, you'll know the one move that stops it, and here's the part most people miss. " +
+                    " It's easy to miss the one statement line that shows it, so it keeps growing quietly." +
+                    " By the end, you'll know the one move that stops it, and here's the part that's easy to miss. " +
                     _filler(rng, per - 60, used))
         if i == n_sc - 1:
             narr = (pick(["Today, set one automatic payment above the minimum.",

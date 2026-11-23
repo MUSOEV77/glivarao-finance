@@ -102,7 +102,7 @@ def _math_scenes(b: Brief) -> list[Scene]:
                                         source="Calculated example"))
         else:
             second = _s("The cost of waiting", f"Start ten years later with the same habit, and you'd have about "
-                        f"{_money(late['final'])}. *Waiting costs more than most people think.*", "hourglass", "board",
+                        f"{_money(late['final'])}. *Waiting can cost more than you'd think.*", "hourglass", "board",
                         chart=ChartSpec(kind="bar_compare", title="$150/month at a hypothetical 7%", unit="$",
                                         labels=["Start now (30 yrs)", "Start later (20 yrs)"],
                                         values=[g["final"], late["final"]], source="Calculated example"))

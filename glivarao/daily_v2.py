@@ -419,14 +419,15 @@ def _produce_job(job, script, sim, brief, creator, writer, paid, card, item, rep
             missing = factcheck.needs_source(claims)
         except ClaudeUnavailable as exc:  # keep the draft; it is rejected below for the unsourced claims
             log.warning("source rewrite skipped for %s: Claude unavailable (%s)", job.id, exc)
-    from .compliance import evergreen_issues, has_what_to_do, retention_issues, sponsor_issues
+    from .compliance import absolute_claim_issues, evergreen_issues, has_what_to_do, retention_issues, sponsor_issues
 
     issues = sponsor_issues(script)
     ever = [] if brief.timely else evergreen_issues(script)
     from .studio import variety
 
     prev_video = variety.previous(store, script.format)
-    hold = retention_issues(script, prev_video)
+    sheet = [f.text for f in brief.facts]
+    hold = retention_issues(script, prev_video) + absolute_claim_issues(script, sheet)
     if (issues or ever or hold or not has_what_to_do(script)) and paid:  # sponsor, evergreen, retention, "What to do"
         from .scriptgen.claude import ClaudeUnavailable, rewrite_for_sponsor
 
@@ -446,6 +447,8 @@ def _produce_job(job, script, sim, brief, creator, writer, paid, card, item, rep
     ok, why = finance_only_check(script)
     report_c = check_script(script, enforce_length=paid, evergreen=not brief.timely, retention=True,
                             previous_video=prev_video)
+    for issue in absolute_claim_issues(script, sheet):     # literally true for the viewer, or on the fact sheet
+        (report_c.errors if paid else report_c.warnings).append(f"Overstated: {issue}")
     if not ok:
         report_c.errors.append(f"Finance-only gate failed: {why}")
     if not sim.ok:
@@ -887,7 +890,7 @@ def retry_held_videos(settings: Settings, store: JobStore, send: bool = True, wo
     from .studio.pause import guard
 
     guard(settings, "retry of held videos")
-    from .content.brief import build_brief
+    from .content.brief import build_brief, load_brief
     from .models import Script
     from .studio import factcheck
     from .studio.queue import TopicQueue
@@ -904,7 +907,13 @@ def retry_held_videos(settings: Settings, store: JobStore, send: bool = True, wo
             continue
         out = settings.output_dir / job.id
         ctx = json.loads((out / "held_render.json").read_text())
-        brief = build_brief(ctx["card"], date.fromisoformat(ctx["date"]))  # same inputs -> the same brief
+        if (out / "brief.json").exists():   # the exact fact sheet the video was checked against
+            brief = load_brief(out / "brief.json")
+        elif ctx.get("card"):
+            brief = build_brief(ctx["card"], date.fromisoformat(ctx["date"]))
+        else:   # nothing to rebuild the facts from: keep it held and say why (never a TypeError loop)
+            log.warning("held video %s has no saved brief and no topic card; skipped", job.id)
+            continue
         script = Script.model_validate_json(Path(job.script_path).read_text())
         claims = factcheck.check_claims(script, brief, ctx["creator"])
         item = TopicQueue(store).get(ctx["item_id"]) if ctx.get("item_id") else None
