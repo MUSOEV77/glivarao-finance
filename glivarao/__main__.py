@@ -531,6 +531,17 @@ def cmd_retry_rejected(args, s):
         print(f"  {j[0]} {j[1]}: {j[2]} {j[4] or ''}")
 
 
+def cmd_thumb_remake(args, s):
+    """Make a video's thumbnail(s) again with the current rules and send them to Telegram (video untouched)."""
+    from .daily_v2 import thumb_remake
+
+    r = thumb_remake(s, _store(s), args.job_id, send=not args.no_telegram)
+    print(f"{r['job']}: thumbnail made again ({r['theme']}): {r['thumbnail']}")
+    for h in r["how"]:
+        print(f"  {h}")
+    print("not sent (--no-telegram)" if args.no_telegram else "sent to Telegram")
+
+
 def cmd_cost_report(args, s):
     """Real spend per long video and per Short (Claude, voice, images), from the billed amounts."""
     import json as _json
@@ -918,6 +929,10 @@ def main(argv=None):
     rr.add_argument("--no-telegram", action="store_true")
     rr.add_argument("--workers", type=int)
     rr.set_defaults(fn=cmd_retry_rejected)
+    tr = sub.add_parser("thumb-remake", help="make a video's thumbnail(s) again and send them to Telegram")
+    tr.add_argument("job_id")
+    tr.add_argument("--no-telegram", action="store_true")
+    tr.set_defaults(fn=cmd_thumb_remake)
     cr = sub.add_parser("cost-report", help="real spend per long video and per Short (Claude, voice, images)")
     cr.add_argument("--days", type=int, default=30, help="period in days (default 30)")
     cr.add_argument("--json", action="store_true")

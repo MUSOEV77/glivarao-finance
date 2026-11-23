@@ -258,14 +258,14 @@ def test_repair_recuts_cached_poses_for_free_and_keeps_the_master(ds, tmp_path):
                                               ("Homes Got Expensive", "7.28%", "2025", "2026"),
                                               ("$40 Trillion Owed", "$40.7T", "2019", "2026"),
                                               ("Minimum Payment Trap", "$1,368.5B", "2021", "2026")])
-def test_thumbnail_number_years_panel_and_phone_readability(ds, tmp_path, words, value, y0, y1):
+def test_thumbnail_number_badge_panel_and_phone_readability(ds, tmp_path, words, value, y0, y1):
     max_assets.design(ds, FakeNanoBanana())
     info = {}
     img = D.thumbnail(words, "worried", tmp_path / "t.jpg", value=value, start_year=y0, end_year=y1,
                       max_img=max_assets.load_pose(ds, "worried"), info=info)
     assert D.phone_readability(info) == [], D.phone_readability(info)
-    assert info["value"] and len(info["years"]) == 2
-    for b in info["statement"] + [info["value"]] + info["years"]:
+    assert info["value"] and info["years"] == []     # one number: badge only, no years (not a trend)
+    for b in info["statement"] + [info["value"]]:
         assert 0 <= b[0] and 0 <= b[1] and b[2] <= 1280 and b[3] <= 720             # inside the thumbnail
     arr = np.asarray(img, dtype=np.int16)
     vb = info["value"]

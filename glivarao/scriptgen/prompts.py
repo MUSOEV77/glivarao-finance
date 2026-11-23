@@ -90,7 +90,9 @@ Format rules:
 - Allowed illustration ids: {", ".join(ILLUSTRATIONS)}.
 - Allowed character ids: {", ".join(CHARACTERS)}.
 - Each scene's narration is what is spoken while that scene is on screen (roughly 40-120 words for long
-  videos, 15-35 words for Shorts). Headings are on-screen titles of at most 6 words.
+  videos, 15-35 words for Shorts). Headings are on-screen titles of at most 6 words. thumbnail_text is a COMPLETE
+  2-4 word phrase that makes sense on its own, never ending on a small word such as 'the', 'a', 'on', 'of', 'to' or
+  'your' (good: 'Stuck On The Minimum'; bad: 'Stuck On The').
 - Titles must be honest and specific (no ALL CAPS, no misleading clickbait), at most 90 characters.
 - Direction fields (set, entrance, transition, money_fx): use "auto" unless a scene clearly benefits from a
   specific choice (e.g. "bank" set for banking, "coins" when money grows, "iris" for a reveal). Vary sets

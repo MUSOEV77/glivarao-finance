@@ -616,7 +616,6 @@ def _render_and_review(job, script, brief, claims, ctx: dict, settings: Settings
     retries, budget cap, paid voice off), the video is HELD: it stays scripted, is re-rendered later by
     retry_held_videos(), and you get a Telegram alert. Never falls back to another voice."""
     from .render.animated import render_animated
-    from .render.thumbnail_editorial import make_thumbnail
     from .studio import disclosure, factcheck, originality
     from .tts.voice_lock import VoiceUnavailable
 
@@ -673,34 +672,7 @@ def _render_and_review(job, script, brief, claims, ctx: dict, settings: Settings
             desc, [s.heading for s in script.scenes], res.scene_starts or [], script.format == "long")})
         Path(job.script_path).write_text(script.model_dump_json(indent=2))
         theme = getattr(rs, "theme", "editorial")
-        thumb_how: list[str] = []
-        if theme == "doodle":  # code-drawn doodle thumbnails: statement + simple chart + Max (3 emotions)
-            from .art.doodle import thumbnail as doodle_thumb
-            from .art.ai_visuals import bold_words
-
-            opts_paths = []
-            from .art.doodle import key_number
-            from .art.max_assets import load_pose
-
-            value, y0, y1 = key_number([f.text for f in brief.facts if f.kind == "DATA" and f.url], today.year)
-            for k, (words, emo) in enumerate(zip(bold_words(script, 3), ("shocked", "worried", "pointing"))):
-                dst = out / (f"thumbnail_{k + 1}.jpg" if script.format == "long" else "thumbnail.jpg")
-                doodle_thumb(words, emo, dst, seed=k + 1, max_img=load_pose(settings, emo), value=value,
-                             start_year=y0, end_year=y1)
-                opts_paths.append(dst)
-                if script.format != "long":
-                    break
-            thumb = opts_paths[0]
-            thumb_how = [f"doodle (code-drawn) \"{w}\"" for w in bold_words(script, len(opts_paths))]
-        elif script.format == "long":  # 3 options (AI + our own bold words); you pick one in Telegram
-            from .art.ai_visuals import thumbnail_options
-
-            opts_paths, thumb_how = thumbnail_options(
-                script, out, settings, store,
-                fallback=lambda sc, dst: make_thumbnail(sc, dst, portrait=False, theme=theme))
-            thumb = opts_paths[0] if opts_paths else make_thumbnail(script, out / "thumbnail.jpg", theme=theme)
-        else:
-            thumb = make_thumbnail(script, out / "thumbnail.jpg", portrait=True, theme=theme)
+        thumb, thumb_how = make_thumbnails(script, brief, out, rs, store, today, theme)
         from .research.competitors import load_latest, too_similar
 
         comp = load_latest()
@@ -935,6 +907,81 @@ def _hold_for_writer(settings: Settings, store: JobStore, today: date, topic: st
                           f"(\"{topic}\"); no other writer is used. I retry every hour and tell you when it works. "
                           "Check: python -m glivarao doctor --live")
     return DailyResult(topic, "claude (held)", note=f"held: waiting for Claude ({why[:120]})")
+
+
+def make_thumbnails(script, brief, out: Path, settings: Settings, store: JobStore, today: date,
+                    theme: str) -> tuple[Path, list[str]]:
+    """The video's thumbnail(s): long = 3 options (you pick in Telegram), Short = 1. Returns (first, how).
+    Doodle theme: a complete 2-4 word headline + ONE number badge, or a line chart only with >= 3 real data
+    points from the fact sheet (art.doodle.thumb_data)."""
+    from .render.thumbnail_editorial import make_thumbnail
+
+    if theme == "doodle":
+        from .art.ai_visuals import bold_words
+        from .art.doodle import thumb_data
+        from .art.doodle import thumbnail as doodle_thumb
+        from .art.max_assets import load_pose
+
+        data = thumb_data([(f.text, f.url) for f in brief.facts if f.kind == "DATA" and f.url], today.year)
+        words_list = bold_words(script, 3 if script.format == "long" else 1)
+        paths = []
+        for k, (words, emo) in enumerate(zip(words_list, ("shocked", "worried", "pointing"))):
+            dst = out / (f"thumbnail_{k + 1}.jpg" if script.format == "long" else "thumbnail.jpg")
+            doodle_thumb(words, emo, dst, seed=k + 1, max_img=load_pose(settings, emo), value=data["value"],
+                         points=data["points"])
+            paths.append(dst)
+        panel = (f"line chart of {len(data['points'])} real data points" if data["points"] else
+                 f"number badge {data['value']}" if data["value"] else "no number")
+        return paths[0], [f"doodle (code-drawn) \"{w}\", {panel}" for w in words_list[:len(paths)]]
+    if script.format == "long":  # 3 options (AI + our own bold words); you pick one in Telegram
+        from .art.ai_visuals import thumbnail_options
+
+        opts_paths, how = thumbnail_options(
+            script, out, settings, store,
+            fallback=lambda sc, dst: make_thumbnail(sc, dst, portrait=False, theme=theme))
+        thumb = opts_paths[0] if opts_paths else make_thumbnail(script, out / "thumbnail.jpg", theme=theme)
+        return thumb, how
+    return make_thumbnail(script, out / "thumbnail.jpg", portrait=True, theme=theme), []
+
+
+def thumb_remake(settings: Settings, store: JobStore, job_id: str, send: bool = True, client=None) -> dict:
+    """Make the video's thumbnail(s) again with the current rules (complete headline; number badge unless the
+    fact sheet has >= 3 real data points) and send them to Telegram. The video itself is not touched."""
+    from .content.brief import load_brief
+    from .models import Script
+    from .studio import costs
+
+    job = store.get(job_id)
+    out = settings.output_dir / job.id
+    script = Script.model_validate_json((out / "script.json").read_text())
+    brief = load_brief(out / "brief.json")
+    meta_file = out / "metadata.json"
+    meta = json.loads(meta_file.read_text()) if meta_file.exists() else {}
+    was_doodle = any(str(h).startswith("doodle") for h in meta.get("thumbnail_options", []))
+    theme = "doodle" if was_doodle else getattr(settings, "theme", "editorial")
+    day = date.fromisoformat(brief.date) if getattr(brief, "date", "") else date.today()
+    with costs.tag(job.id):
+        thumb, how = make_thumbnails(script, brief, out, settings, store, day, theme)
+    old = Path(job.thumbnail_path).name if job.thumbnail_path else ""
+    keep = out / old if old and (out / old).exists() and script.format == "long" else thumb
+    job.thumbnail_path = str(keep)        # a long video keeps the option you picked (same number, new image)
+    store.save(job)
+    if meta:
+        meta["thumbnail_options"] = how
+        meta_file.write_text(json.dumps(meta, indent=2))
+    if send:
+        from .publish.telegram import _client, send_thumbnail_picker
+
+        c = _client(settings, client)
+        chat = settings.telegram_approver_chat_id
+        c.call("sendMessage", chat_id=chat, text=f"🖼 New thumbnail for {job.id} (\"{job.topic}\"): "
+                                                 + "; ".join(how)[:600])
+        if script.format == "long":
+            send_thumbnail_picker(job, settings, c)
+        else:
+            with open(thumb, "rb") as fh:
+                c.call("sendPhoto", files={"photo": fh}, chat_id=chat, caption=f"{job.id}: new thumbnail")
+    return {"job": job.id, "thumbnail": str(job.thumbnail_path), "how": how, "theme": theme}
 
 
 def _tts_record(settings: Settings) -> dict:

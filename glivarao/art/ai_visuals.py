@@ -86,25 +86,51 @@ FIN = re.compile(r"\b(minimum|interest|debt|credit|card|score|loans?|student|bnp
                  r"payments?|holiday|deadline|cliff|myths?)\b", re.I)
 
 
+# a headline may never END on one of these (it reads as cut off: "STUCK ON THE.")
+HEAD_STOP = STOP | set("an into onto than over under about after before up down off out if so but not no my our "
+                       "their his her them they we i me us than then when where which who will can could would should "
+                       "has have had do does did get got just very more less too per".split())
+
+
+def _clean_headline(text: str) -> str:
+    t = re.sub(r"#\w+", " ", text or "")
+    t = re.sub(r"[\"“”\u2018\u2019]", "", t)
+    return " ".join(w.strip(",.;:!") for w in t.split() if w.strip(",.;:!"))
+
+
+def headline_problem(text: str) -> str:
+    """'' if `text` is a complete 2-4 word thumbnail headline, else why it is not."""
+    ws = _clean_headline(text).split()
+    if not 2 <= len(ws) <= 4:
+        return f"{len(ws)} words (needs 2-4)"
+    last = ws[-1].strip("?").lower()
+    if last in HEAD_STOP:
+        return f"ends on '{ws[-1]}' (reads as cut off)"
+    return ""
+
+
 def bold_words(script, n: int) -> list[str]:
-    """Three different 2-3 word headlines for the 3 options (exact text, drawn by our code)."""
-    base = (script.thumbnail_text or "").replace("#Shorts", "").strip(" .")
+    """n different complete 2-4 word headlines for the thumbnail options (exact text, drawn by our code).
+    Never cut: the writer's thumbnail text is used whole when it is a complete 2-4 word phrase; otherwise it is
+    rejected and the headline is regenerated from the topic words (no extra spend)."""
+    base = _clean_headline((script.thumbnail_text or "").replace("#Shorts", ""))
     fins = list(dict.fromkeys(re.sub(r"(?<=[A-Z]{3})(ES|S)$", "", m.group(1).upper())
                               for m in FIN.finditer(f"{script.title} {script.topic}")))
     f1 = fins[0] if fins else "MONEY"
-    opts = [" ".join(base.split()[:3]) if base else f"{f1} TRUTH",
-            f"THE {f1} TRAP" if "TRAP" not in base.upper() else f"STOP THE {f1}",
-            f"YOUR {' '.join(fins[1:3])}" if len(fins) >= 3 else f"{f1} MISTAKES?"]
+    cands = []
+    why = headline_problem(base) if base else "empty"
+    if why:
+        log.info("thumbnail text %r rejected: %s; regenerating", base, why)
+    else:
+        cands.append(base)
+    cands += [f"THE {f1} TRAP" if "TRAP" not in base.upper() else f"STOP THE {f1} TRAP",
+              f"YOUR {' '.join(fins[1:3])}" if len(fins) >= 3 else f"{f1} MISTAKES?",
+              f"{f1} TRUTH", f"{f1} MISTAKE?", f"FIX YOUR {f1}", f"{f1} 101", f"BEAT THE {f1}", "MONEY TRUTH"]
     out = []
-    for o in opts:
-        o = " ".join(o.split()[:3]).upper().strip(" ,.")
-        if o and o not in out:
+    for o in cands:
+        o = _clean_headline(o).upper()
+        if o and not headline_problem(o) and o not in out:
             out.append(o)
-    for extra in (f"{f1} MISTAKE?", f"FIX YOUR {f1}", f"{f1} 101"):
-        if len(out) >= n:
-            break
-        if extra not in out:
-            out.append(extra)
     return out[:n]
 
 

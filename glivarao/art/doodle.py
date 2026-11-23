@@ -361,6 +361,32 @@ def spike_chart(img: Image.Image, box, history=None, spike=None, seed: int = 11,
     return {"end": pts[-1], "start_x": xs[0], "base_y": y1, "dot_r": lw * 1.9}
 
 
+def series_chart(img: Image.Image, box, values: list[float], seed: int = 11, weight: float = 1.0) -> dict:
+    """Real data only: one point per value, evenly spaced across the full width, y axis from ZERO (no exaggerated
+    trend), grey line for the earlier points, green for the last step, gold dot on the latest value."""
+    x0, y0, x1, y1 = box
+    w, h = x1 - x0, y1 - y0
+    lw = max(5, w * 0.008) * weight
+    p = Pen(img, seed=seed, width=lw, wobble=w * 0.0015)
+    p.arrow(x0, y1, x0, y0, lw, head=w * 0.03)
+    p.arrow(x0, y1, x1, y1, lw, head=w * 0.03)
+    top = max(values) or 1.0
+    n = len(values) - 1
+    xs = [x0 + w * 0.08 + w * 0.8 * k / n for k in range(n + 1)]
+    ys = [y1 - h * 0.85 * v / top for v in values]
+    pts = list(zip(xs, ys))
+    tint = (lambda c: c + (255,)) if img.mode == "RGBA" else (lambda c: c)
+    p.d.polygon(pts + [(xs[-1], y1 - lw), (xs[0], y1 - lw)], fill=tint((214, 214, 208)))
+    p.line(pts[:-1], lw * 1.2, GREY)
+    p.line(pts[-2:], lw * 1.5, GREEN)
+    for x, y in pts[:-1]:
+        p.dot(x, y, lw * 1.1, GREY)
+    p.dot(pts[-1][0], pts[-1][1], lw * 1.9, GOLD)
+    p.circle(pts[-1][0], pts[-1][1], lw * 1.9, width=lw * 0.5)
+    return {"end": pts[-1], "start_x": xs[0], "base_y": y1, "dot_r": lw * 1.9, "line_top": min(ys),
+            "line_bottom": max(ys)}
+
+
 def bar_chart(img: Image.Image, box, values: list[float], labels: list[str], seed: int = 13) -> None:
     x0, y0, x1, y1 = box
     w, h = x1 - x0, y1 - y0
@@ -414,8 +440,9 @@ ACRONYMS = {"IRS", "FDIC", "BNPL", "ACA", "IRA", "APR", "FICO", "401K", "401(K)"
 
 
 def statement(words: str) -> str:
-    """2-3 word bold statement ending with a period: 'debt wins' -> 'Debt Wins.'"""
-    ws = [w.strip(",!?;:") for w in words.replace(".", " ").split() if w.strip(",!?;:")][:3] or ["Money", "Matters"]
+    """2-4 word bold statement ending with a period: 'debt wins' -> 'Debt Wins.' Never cut: the caller passes a
+    complete headline (ai_visuals.bold_words checks it)."""
+    ws = [w.strip(",!?;:") for w in words.replace(".", " ").split() if w.strip(",!?;:")] or ["Money", "Matters"]
     return " ".join(w.upper() if w.upper().strip("()") in ACRONYMS else
                     (w if any(c.isdigit() for c in w) else w.capitalize()) for w in ws) + "."
 
@@ -437,18 +464,24 @@ def _contrast(c1, c2) -> float:
 def thumbnail(text: str, emotion: str = "shocked", out: Path | None = None, seed: int = 1,
               size: tuple[int, int] = (1280, 720), history=None, spike=None,
               max_img: Image.Image | None = None, value: str = "", start_year: str = "", end_year: str = "",
-              info: dict | None = None) -> Image.Image:
-    """Warm paper, a 2-3 word statement ending with a period (huge), ONE simple chart on a soft green panel (grey
-    history line + green spike), the real key number in gold on a dark pill at the spike point, the start and end
-    year under the axis, and Max with an emotion. Drawn at 2x, saved at 1280x720. `info` receives the text boxes
-    (in output pixels) for the readability test."""
+              info: dict | None = None, points: list | None = None) -> Image.Image:
+    """Warm paper, a complete 2-4 word statement ending with a period (huge), a soft green panel and Max with an
+    emotion. Drawn at 2x, saved at 1280x720. `info` receives the text boxes (in output pixels) for the readability
+    test.
+
+    The panel never implies a trend we don't have:
+    * `points` = 3 or more real (year, value) data points from the fact sheet -> a line chart of exactly those
+      values (axis from zero), first and last year under it, the latest value in gold at the end;
+    * otherwise -> ONE big number badge (e.g. '22.36% APR'), no line, no years. (`start_year`/`end_year` are
+      ignored: two years around one number would suggest a trend.)
+    * no number at all -> no panel."""
     W2, H2 = size[0] * 2, size[1] * 2
     img = Image.blend(paper(W2, H2, seed=3 + seed).copy(), Image.new("RGB", (W2, H2), THUMB_PAPER), 0.6)
     p = Pen(img, seed=seed, width=12)
     boxes = {"statement": [], "value": None, "years": []}
     st = statement(text)
     words = st.split()
-    lines = [" ".join(words[:2]), " ".join(words[2:])] if len(words) == 3 else (
+    lines = [" ".join(words[:2]), " ".join(words[2:])] if len(words) in (3, 4) else (
         [st] if hand(300).getlength(st) <= W2 * 0.58 else [words[0], " ".join(words[1:])])
     lines = [ln for ln in lines if ln]
     size_ = 420
@@ -463,37 +496,57 @@ def thumbnail(text: str, emotion: str = "shocked", out: Path | None = None, seed
         y += size_ * 0.92
     last_w = hand(size_).getlength(lines[-1])
     underline(p, W2 * 0.05, W2 * 0.05 + last_w * 0.97, y - size_ * 0.27, GREEN, 26)
-    # soft coloured panel behind the chart (with a shadow), so the chart stands out on YouTube
-    px0, py0, px1, py1 = W2 * 0.035, max(y - size_ * 0.27 + H2 * 0.03, H2 * 0.44), W2 * 0.6, H2 * 0.965
-    sh = Image.new("L", (W2, H2), 0)
-    ImageDraw.Draw(sh).rounded_rectangle((px0 + 16, py0 + 20, px1 + 16, py1 + 20), 40, fill=90)
-    from PIL import ImageFilter
+    pts = [(str(yr), float(v)) for yr, v in (points or [])]
+    chart_ok = len(pts) >= 3
+    if chart_ok or value:
+        # soft coloured panel (with a shadow), so the chart / number stands out on YouTube
+        px0, py0, px1, py1 = W2 * 0.035, max(y - size_ * 0.27 + H2 * 0.03, H2 * 0.44), W2 * 0.6, H2 * 0.965
+        sh = Image.new("L", (W2, H2), 0)
+        ImageDraw.Draw(sh).rounded_rectangle((px0 + 16, py0 + 20, px1 + 16, py1 + 20), 40, fill=90)
+        from PIL import ImageFilter
 
-    img.paste((60, 40, 20), (0, 0), sh.filter(ImageFilter.GaussianBlur(18)))
-    p.d.rounded_rectangle((px0, py0, px1, py1), 40, fill=THUMB_PANEL, outline=INK, width=10)
-    ys = int(H2 * 0.092)                        # year labels
-    chart = spike_chart(img, (px0 + W2 * 0.035, py0 + H2 * 0.045, px1 - W2 * 0.03, py1 - ys * 1.3),
-                        history=history or [0.12, 0.15, 0.13, 0.16, 0.15, 0.18, 0.17, 0.19, 0.18, 0.2],
-                        spike=spike or [0.2, 0.42, 0.68, 0.95], seed=seed + 5, weight=2.0)
-    ex, ey = chart["end"]
-    for yr, x in ((start_year, chart["start_x"]), (end_year, ex)):
-        if yr:
+        img.paste((60, 40, 20), (0, 0), sh.filter(ImageFilter.GaussianBlur(18)))
+        p.d.rounded_rectangle((px0, py0, px1, py1), 40, fill=THUMB_PANEL, outline=INK, width=10)
+    if chart_ok:          # a line chart ONLY with >= 3 real data points (axis from zero: no exaggeration)
+        ys = int(H2 * 0.092)                    # year labels
+        cbox = (px0 + W2 * 0.035, py0 + H2 * 0.045, px1 - W2 * 0.03, py1 - ys * 1.3)
+        chart = series_chart(img, cbox, [v for _, v in pts], seed=seed + 5, weight=2.0)
+        ex, ey = chart["end"]
+        for yr, x in ((pts[0][0], chart["start_x"]), (pts[-1][0], ex)):
             yy = chart["base_y"] + ys * 0.15
-            p.d.text((x, yy), str(yr), font=hand(ys), fill=INK, anchor="mt", stroke_width=2, stroke_fill=INK)
-            boxes["years"].append(p.d.textbbox((x, yy), str(yr), font=hand(ys), anchor="mt", stroke_width=2))
-    if value:                                   # the real key number: gold on a dark pill at the spike point
-        vs = int(H2 * 0.13)
+            p.d.text((x, yy), yr, font=hand(ys), fill=INK, anchor="mt", stroke_width=2, stroke_fill=INK)
+            boxes["years"].append(p.d.textbbox((x, yy), yr, font=hand(ys), anchor="mt", stroke_width=2))
+        if value:                               # the latest real value in gold, in free space (never on the line)
+            vs = int(H2 * 0.11)
+            f = hand(vs)
+            tw = f.getlength(value)
+            padx, pady = vs * 0.35, vs * 0.18
+            bw_, bh_ = tw + 2 * padx, vs * 1.05 + 2 * pady
+            cx = (cbox[0] + cbox[2]) / 2
+            below = chart["base_y"] - chart["line_bottom"] - lw_gap(W2)   # room under the line (axis from zero)
+            above = chart["line_top"] - cbox[1]
+            if below >= bh_ + H2 * 0.02:
+                by0 = chart["line_bottom"] + (below - bh_) / 2 + lw_gap(W2) * 0.5
+            else:
+                by0 = max(cbox[1], cbox[1] + (above - bh_) / 2)
+            bx0 = cx - bw_ / 2
+            p.d.rounded_rectangle((bx0, by0, bx0 + bw_, by0 + bh_), int(bh_ * 0.3), fill=INK)
+            p.d.text((bx0 + bw_ / 2, by0 + bh_ / 2), value, font=f, fill=GOLD, anchor="mm", stroke_width=3,
+                     stroke_fill=GOLD)
+            boxes["value"] = p.d.textbbox((bx0 + bw_ / 2, by0 + bh_ / 2), value, font=f, anchor="mm",
+                                          stroke_width=3)
+    elif value:           # ONE number: a big badge only (no line, no years: one number is not a trend)
+        vs = int(H2 * 0.2)
+        while vs > H2 * 0.08 and hand(vs).getlength(value) + vs * 0.9 > (px1 - px0) * 0.9:
+            vs -= 4
         f = hand(vs)
         tw = f.getlength(value)
-        padx, pady = vs * 0.35, vs * 0.18
+        padx, pady = vs * 0.45, vs * 0.22
         bw_, bh_ = tw + 2 * padx, vs * 1.05 + 2 * pady
-        bx1 = min(ex - chart["dot_r"] * 2.2, px1 - W2 * 0.02)
-        bx0 = max(px0 + W2 * 0.02, bx1 - bw_)
-        by0 = min(max(py0 + H2 * 0.02, ey - bh_ * 0.35), py1 - bh_ - ys * 1.4)
-        p.d.rounded_rectangle((bx0, by0, bx0 + bw_, by0 + bh_), int(bh_ * 0.3), fill=INK)
-        p.d.text((bx0 + bw_ / 2, by0 + bh_ / 2), value, font=f, fill=GOLD, anchor="mm", stroke_width=3,
-                 stroke_fill=GOLD)
-        boxes["value"] = p.d.textbbox((bx0 + bw_ / 2, by0 + bh_ / 2), value, font=f, anchor="mm", stroke_width=3)
+        cx, cy = (px0 + px1) / 2, (py0 + py1) / 2
+        p.d.rounded_rectangle((cx - bw_ / 2, cy - bh_ / 2, cx + bw_ / 2, cy + bh_ / 2), int(bh_ * 0.3), fill=INK)
+        p.d.text((cx, cy), value, font=f, fill=GOLD, anchor="mm", stroke_width=3, stroke_fill=GOLD)
+        boxes["value"] = p.d.textbbox((cx, cy), value, font=f, anchor="mm", stroke_width=3)
     if max_img is not None:   # the Nano Banana Max cutout (same file in every video)
         h = int(H2 * 0.96)
         s = h / max_img.height
@@ -558,6 +611,72 @@ def key_number(texts: list[str], today_year: int) -> tuple[str, str, str]:
                                                            else None)
         return compact_number(m.group(0)), str(start) if start else "", str(end)
     return "", "", ""
+
+
+def lw_gap(width: float) -> float:
+    return width * 0.012
+
+
+def badge_text(fact: str, value: str) -> str:
+    """'22.36%' from a credit card interest fact -> '22.36% APR' (only when the fact says it is a card rate)."""
+    import re as _re
+
+    if value.endswith("%") and _re.search(r"credit card", fact, _re.I) and \
+            _re.search(r"\b(?:interest|APR|annual percentage rate|rate)\b", fact, _re.I):
+        return f"{value} APR"
+    return value
+
+
+_PAIR = [r"(?P<v>{num})\s+(?:in|for|during|at the end of)\s+(?P<y>(?:19|20)\d{{2}})",
+         r"(?P<y>(?:19|20)\d{{2}})\s*[:=(]\s*(?P<v>{num})",
+         r"\bin\s+(?P<y>(?:19|20)\d{{2}}),?\s+(?:\w+\s+){{0,6}}?(?P<v>{num})"]
+
+
+def _amount(s: str) -> float:
+    import re as _re
+
+    m = _re.search(r"([\d,]+(?:\.\d+)?)\s*(trillion|billion|million|thousand)?", s, _re.I)
+    return float(m.group(1).replace(",", "")) * {"trillion": 1e12, "billion": 1e9, "million": 1e6,
+                                                 "thousand": 1e3}.get((m.group(2) or "").lower(), 1)
+
+
+def series_points(facts: list, unit_out: list | None = None) -> list[tuple[str, float]]:
+    """Real (year, value) data points stated in the fact sheet for ONE measure (same source, same unit).
+    `facts`: (text, url) pairs. Returns the longest such series, sorted by year (may be shorter than 3)."""
+    import re as _re
+
+    from ..render.doodle import NUM
+
+    groups: dict = {}
+    for text, url in facts:
+        for pat in _PAIR:
+            for m in _re.finditer(pat.format(num=NUM.pattern), text, _re.I):
+                v = m.group("v")
+                unit = "%" if ("%" in v or "percent" in v.lower()) else "$"
+                groups.setdefault((url, unit), {}).setdefault(m.group("y"), _amount(v))
+    if not groups:
+        return []
+    key = max(groups, key=lambda k: len(groups[k]))
+    if unit_out is not None:
+        unit_out.append(key[1])
+    return sorted(groups[key].items())
+
+
+def thumb_data(facts: list, today_year: int) -> dict:
+    """What the thumbnail panel may show, from the verified facts ((text, url) pairs): 'value' (the key number,
+    as a badge) and 'points' (a line chart only with >= 3 real data points)."""
+    value, _, _ = key_number([t for t, _ in facts], today_year)
+    unit: list = []
+    pts = series_points(facts, unit)
+    if len(pts) >= 3:     # the chart's own latest value goes in the gold pill
+        v = pts[-1][1]
+        return {"value": f"{v:g}%" if unit[0] == "%" else compact_number(f"${v:,.2f}"), "points": pts}
+    src = next((t for t, _ in facts if value and value.rstrip("%") in t.replace(",", "")), "") if value else ""
+    if not src and value:
+        from ..render.doodle import NUM
+
+        src = next((t for t, _ in facts if NUM.search(t)), "")
+    return {"value": badge_text(src, value) if value else "", "points": pts if len(pts) >= 3 else []}
 
 
 def phone_readability(info: dict, size: tuple[int, int] = (1280, 720), phone=(160, 90)) -> list[str]:
