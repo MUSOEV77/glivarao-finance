@@ -267,6 +267,40 @@ def cmd_voice_lock(args, s):
     print(f"held videos: {len(held)}" + "".join(f"\n  {k}: since {v['since']}: {v['reason']}" for k, v in held.items()))
 
 
+def cmd_batch_plan(args, s):
+    """The current batch test's 4-week plan (long parts, Shorts, lead facts, rule checks)."""
+    from .studio import batch
+
+    text = batch.plan_text(_store(s))
+    print(text)
+    if args.send:
+        from .publish.telegram import _client
+
+        c = _client(s, None)
+        for k in range(0, len(text), 3900):
+            c.call("sendMessage", chat_id=s.telegram_approver_chat_id, text=text[k:k + 3900])
+        print("sent to Telegram")
+
+
+def cmd_batch_report(args, s):
+    """Rank the batch's 5 topics (YouTube Analytics), name the winner, propose the next 5 (Telegram approval)."""
+    from .studio import batch
+
+    if args.no_telegram:
+        st = _store(s)
+        try:
+            metrics = batch.fetch_metrics(s, st)
+        except Exception as exc:  # noqa: BLE001
+            print(f"YouTube Analytics not available: {exc}")
+            metrics = {}
+        ranking = batch.rank(st, metrics)
+        print(batch.report_text(st, ranking, batch.propose_next(st, ranking[0]["topic"]) if ranking else []))
+        return
+    r = batch.send_report(s, _store(s))
+    print(r["text"])
+    print("sent to Telegram")
+
+
 def cmd_drop_held(args, s):
     """Take held videos off the voice hold for good (marked failed, never sent; files kept)."""
     from datetime import date as _d
@@ -955,6 +989,12 @@ def main(argv=None):
     cr.add_argument("--days", type=int, default=30, help="period in days (default 30)")
     cr.add_argument("--json", action="store_true")
     cr.set_defaults(fn=cmd_cost_report)
+    bp = sub.add_parser("batch-plan", help="the batch test's 4-week plan (--send: to Telegram)")
+    bp.add_argument("--send", action="store_true")
+    bp.set_defaults(fn=cmd_batch_plan)
+    br = sub.add_parser("batch-report", help="rank the batch's topics, name the winner, propose the next 5")
+    br.add_argument("--no-telegram", action="store_true")
+    br.set_defaults(fn=cmd_batch_report)
     dh = sub.add_parser("drop-held", help="take held videos off hold for good (marked failed, never sent)")
     dh.add_argument("job_ids", nargs="*", help="job ids to drop (none: list the held videos)")
     dh.add_argument("--all-before", metavar="YYYY-MM-DD", help="drop every held video made before this date")

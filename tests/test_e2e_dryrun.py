@@ -168,10 +168,8 @@ def fake_claude(prompt, fmt, seed):
         scenes[0]["narration"] = (special[0] if special else "You're making a costly money mistake.") + \
             " Here's what that means for your budget."
         scenes[1]["narration"] = (special[-1] if len(special) > 1 else _filler(rng, 14, used))
-        scenes[2]["narration"] = ("That gap adds up fast, so it pays to check the numbers once a year and keep a "
-                                  "short note of what you pay.")
-        scenes[3]["narration"] = ("Check your plan, set one reminder, and compare two options side by side before you "
-                                  "decide anything.")
+        scenes[2]["narration"] = _filler(rng, 16, used)          # each Short its own words, like Claude
+        scenes[3]["narration"] = _filler(rng, 14, used)
         scenes[4]["narration"] = (pick(["Do one thing today: check your number.", "Check that rate tonight.",
                                               "Write your number down today.", "Look at your statement today.",
                                               "Set one reminder today.", "Ask about your rate this week.",

@@ -270,6 +270,26 @@ def poll_decisions(store: JobStore, settings: Settings, client: TelegramClient |
                     "New samples will be sent here. The current style stays until you approve."))
                 decisions.append(("style", "changes_requested"))
             continue
+        if action in ("batchnext", "batchedit"):  # batch test: approve the next 5 topics
+            from ..studio import batch as _batch
+
+            if action == "batchnext":
+                got = _batch.approve_next(store, job_id)
+                if got:
+                    client.call("answerCallbackQuery", callback_query_id=cq["id"], text="Next batch approved")
+                    client.call("sendMessage", chat_id=chat_id, text=(
+                        "✅ Next batch approved: " + ", ".join(got) + ". The 4-week plan: python -m glivarao "
+                        "batch-plan --send"))
+                    decisions.append(("batch", "approved"))
+                else:
+                    client.call("answerCallbackQuery", callback_query_id=cq["id"], text="That proposal is out of date")
+            else:
+                client.call("answerCallbackQuery", callback_query_id=cq["id"], text="OK")
+                client.call("sendMessage", chat_id=chat_id, text=(
+                    "✏️ Tell Claude (in your Claude Code session) which topics to swap; a new proposal will be sent "
+                    "here. The current batch keeps running."))
+                decisions.append(("batch", "changes_requested"))
+            continue
         if action in ("launch", "launchedit"):  # the US-only launch list
             from ..studio import launch_plan
 

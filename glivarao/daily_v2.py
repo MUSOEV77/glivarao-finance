@@ -105,7 +105,7 @@ def _write_long(brief, style, creator, used, paid, settings, variant=0, store=No
     return write_long_format(brief, style, creator, used, variant=variant).model_copy(update={"variety_slot": vs})
 
 
-def _write_shorts(brief, style, n, used, paid, settings, store=None):
+def _write_shorts(brief, style, n, used, paid, settings, store=None, angles=None):
     from .content.format_writer import write_shorts_format
     from .studio import variety
 
@@ -115,9 +115,9 @@ def _write_shorts(brief, style, n, used, paid, settings, store=None):
     if not paid:
         return [x.model_copy(update={"variety_slot": vs(i)})
                 for i, x in enumerate(write_shorts_format(brief, style, n=n, used_lines=used))]
-    angles = ("ONE surprising number from the fact sheet, with its own hook in the first two seconds",
-              "ONE common myth and the fact that corrects it, with its own hook",
-              "ONE mistake people make and what to do instead, with its own hook")
+    angles = angles or ("ONE surprising number from the fact sheet, with its own hook in the first two seconds",
+                        "ONE common myth and the fact that corrects it, with its own hook",
+                        "ONE mistake people make and what to do instead, with its own hook")
     from .studio import costs
 
     out = []
@@ -126,7 +126,8 @@ def _write_shorts(brief, style, n, used, paid, settings, store=None):
         prev = (variety.previous(store, "short") if i == 0 else
                 variety.script_fingerprint(out[-1])) if store is not None else None
         with costs.tag(t):
-            s = write_with_claude(brief, "short", settings, angle=a + ". Not a cut-down of the long video.",
+            s = write_with_claude(brief, "short", settings,
+                                  angle=a if "Not a cut-down" in a else a + ". Not a cut-down of the long video.",
                                   avoid_lines=used, variety_slot=vs(i), previous=prev)
         out.append(s.model_copy(update={"style": f"short_{i}", "cost_tag": t, "variety_slot": vs(i)}))
     return out
@@ -160,7 +161,8 @@ def _originality_gate(script, brief, today, history, settings, paid, used, regen
 
 def run_daily_v2(settings: Settings, store: JobStore, today: date | None = None, research_dir: Path | None = None,
                  send: bool = True, workers: int | None = None, shorts: int | None = None,
-                 ignore_input_wait: bool = False, deliver_day: date | None = None) -> DailyResult:
+                 ignore_input_wait: bool = False, deliver_day: date | None = None,
+                 only_shorts: bool = False) -> DailyResult:
     from .research.run import run_research
     from .studio import originality
     from .studio.bot import format_history, push_format
@@ -204,7 +206,8 @@ def run_daily_v2(settings: Settings, store: JobStore, today: date | None = None,
     else:  # automatic (default): research picks the topic; your take is optional within a time window
         from .studio.planner import input_window_over, plan_next
 
-        ok, why = pace_check(store, today, settings)
+        ok, why = (False, "the batch topic's Shorts are done; filling the other Short slots") if only_shorts else \
+            pace_check(store, today, settings)
         if ok:
             item = plan_next(settings, store, today, research_dir, send)
             if item is None:
@@ -218,9 +221,15 @@ def run_daily_v2(settings: Settings, store: JobStore, today: date | None = None,
                 return DailyResult("", "skipped", note=why)
             shorts_only = True
             pace_note = why
+    batch_angles: list[str] = []
     if not shorts_only:
         card, creator, style = item.card, item.creator_input, item.format
         report = json.loads(cached.read_text()) if cached.exists() else {"ranked": []}
+        if card.get("batch"):        # batch test: this part's Shorts = the topic's single ideas for it
+            from .studio import batch as _batch
+
+            batch_angles = _batch.short_angles(store, card)
+            quota, shorts = shorts, min(shorts, len(batch_angles))
     else:
         from .studio.autopick import pick_topic
 
@@ -269,7 +278,8 @@ def run_daily_v2(settings: Settings, store: JobStore, today: date | None = None,
         # Shorts are checked against past videos and each other. Sharing a line with their own companion long video
         # is normal (they point to it); their own hook and point are enforced below and by the writer.
         session = list(history)
-        for sh in _write_shorts(brief, lead_style, shorts, used + [lead_hook], paid, settings, store=store):
+        for sh in _write_shorts(brief, lead_style, shorts, used + [lead_hook], paid, settings, store=store,
+                                angles=batch_angles or None):
             alternates: list = []
 
             def regen(k, sh=sh, alternates=alternates):  # free writer only (paid drafts are rewritten by Claude)
@@ -317,6 +327,17 @@ def run_daily_v2(settings: Settings, store: JobStore, today: date | None = None,
     if item is not None and produced:
         TopicQueue(store).update(item.id, status="produced", produced_on=today.isoformat(),
                                  jobs=[j[0] for j in result.jobs])
+    if card.get("batch"):
+        from .studio import batch as _batch
+
+        _batch.record_jobs(store, card, result.jobs, settings.output_dir)
+        rest = quota - made_shorts
+        if rest > 0 and not only_shorts:   # keep 3 Shorts a day: the other slots are research-picked (not batch)
+            more = run_daily_v2(settings, store, today=today, research_dir=research_dir, send=send, workers=workers,
+                                shorts=rest, deliver_day=deliver_day, only_shorts=True)
+            result.jobs += more.jobs
+            if more.note:
+                result.note = (result.note + "; " if result.note else "") + more.note
     return result
 
 
@@ -701,7 +722,7 @@ def _render_and_review(job, script, brief, claims, ctx: dict, settings: Settings
         desc = factcheck.add_sources_to_description(script.description, claims)
         desc = disclosure.add_note(desc, disc)
         from .content.packaging import add_affiliate_disclosure, title_options
-        from .studio.pillars import pillar_of, series_for
+        from .studio.pillars import pillar_of
 
         from .studio.affiliates import add_placeholder, category_for
 
@@ -724,7 +745,7 @@ def _render_and_review(job, script, brief, claims, ctx: dict, settings: Settings
              "description": script.description, "tags": script.tags,
              "topic_key": brief.topic_key, "category": brief.category, "market": brief.market,
              "pillar": getattr(pillar_of(brief.topic_key), "key", None),
-             "series": series_for(brief.topic_key, today),
+             "series": _series_name(store, ctx, brief, today),
              "format": script.style, "creator_input": creator, "affiliate_category": aff_cat, "picked_by_you": item is not None,
              "research_score": brief.score, "confidence": brief.confidence, "writer": writer,
              "voice": res.voice, "render_seconds": round(res.render_seconds, 1),
@@ -1298,6 +1319,13 @@ def supervised_daily(settings: Settings, store: JobStore, today: date | None = N
         if bad:
             notifier(settings, f"GLIVARAO {today}: {len(bad)} of {len(res.jobs)} videos need attention:\n" +
                      "\n".join(f"- {j[0]} ({j[1]}): {j[2]}: {j[4]}" for j in bad))
+        try:  # batch test finished (every part made, last one published 7+ days ago): the ranking, once
+            from .studio import batch as _batch
+
+            if _batch.due_for_report(store, today) and send:
+                _batch.send_report(settings, store)
+        except Exception:  # noqa: BLE001
+            log.exception("batch report failed")
         try:  # buffer low / disk / spend alerts after every run
             from .studio.health import alerts
 
@@ -1329,6 +1357,18 @@ def _back_off(settings: Settings, store: JobStore, today: date, delivery) -> str
     wait = 30 * 2 ** (n - 1)
     store.kv_set(f"daily_retry_after:{today.isoformat()}", str(now.timestamp() + wait * 60))
     return f"Failed run {n} of {DAILY_MAX_FAILED_RUNS} today: next automatic attempt in {wait} min."
+
+
+def _series_name(store, ctx: dict, brief, today: date) -> str | None:
+    """Batch test: a topic's 3 parts are one series ("Card Debt Escape", Part 1-3). While a batch runs, other
+    videos get no series (batch testing replaces series mode)."""
+    from .studio import batch
+    from .studio.pillars import series_for
+
+    b = (ctx.get("card") or {}).get("batch")
+    if b:
+        return b["series"]
+    return None if batch.active(store) else series_for(brief.topic_key, today)
 
 
 def cost_dir(settings: Settings) -> Path:

@@ -30,6 +30,7 @@ def store(settings):
 
     st = JobStore(settings.db_path)
     st.kv_set("launch_done", json.dumps(list(range(1, 17))))  # research-driven by default; launch tests reset this
+    st.kv_set("batch_mode", "off")      # research-driven by default; batch tests switch it on
     return st
 
 

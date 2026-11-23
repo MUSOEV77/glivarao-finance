@@ -77,18 +77,32 @@ def plan_next(settings, store, today: date | None = None, research_dir: Path | N
     today = today or date.today()
     research_dir = research_dir or Path("reports/research")
     cached = research_dir / f"{today.isoformat()}.json"
-    from . import launch_plan
+    from . import batch, launch_plan
     from .pillars import is_news
 
-    if launch_plan.awaiting_approval(store):  # the US-only launch list waits for your ✅ in Telegram
+    bentry = batch.next_long(store) if batch.active(store) else None
+    if bentry is not None and launch_plan.awaiting_approval(store):
+        pass                         # batch testing replaces the launch-list order (batch 1 approved by you)
+    elif launch_plan.awaiting_approval(store):  # the US-only launch list waits for your ✅ in Telegram
         key = f"launch_wait_alert:{today.isoformat()}"
         if send and not store.kv_get(key):
             store.kv_set(key, "1")
             _notify(settings, "🇺🇸 GLIVARAO: the launch list is waiting for your approval, so no topic is planned. "
                               "Tap ✅ under the list (resend it: python -m glivarao launch-list --send).")
         return None
-    launch = launch_plan.next_video(store)
-    if launch is not None:  # your launch list comes first (16 long videos), facts re-checked on official pages
+    launch = None if bentry is not None else launch_plan.next_video(store)
+    if bentry is not None:   # BATCH TEST: the next part (never the same topic twice in a row), facts re-checked
+        card = batch.card_for(store, bentry)
+        from .launch_plan import LaunchFact, verify_fact_list
+
+        kept, notes = verify_fact_list([LaunchFact(**f) for f in card["launch_facts"]])
+        from dataclasses import asdict as _asdict
+
+        card["launch_facts"] = [_asdict(f) for f in kept]
+        why = list(card["why"]) + [f"Official facts: {len(kept)} checked on the source pages"]
+        why += [f"⚠ {f.text[:90]}… — {note}" for f, note in notes]
+        skipped = {}
+    elif launch is not None:  # your launch list comes first (16 long videos), facts re-checked on official pages
         from dataclasses import replace as _replace
 
         kept, notes = launch_plan.verify_facts(launch)
@@ -108,8 +122,10 @@ def plan_next(settings, store, today: date | None = None, research_dir: Path | N
     brief = build_brief(card, today)
     from .formats import eligible
 
-    style = (launch.format if launch is not None and launch.format in eligible(brief)
-             else choose_format(brief, format_history(store)))
+    hist = format_history(store)
+    want = (card["batch"]["format"] if bentry is not None else launch.format if launch is not None else "")
+    style = (want if want in eligible(brief) and (not hist or hist[-1] != want)   # never the last video's structure
+             else choose_format(brief, hist))
     push_format(store, style)
     q = TopicQueue(store)
     item = q.add_proposals([card], today)[0]
@@ -120,6 +136,8 @@ def plan_next(settings, store, today: date | None = None, research_dir: Path | N
                news=is_news(card))
     if launch is not None:
         launch_plan.mark_done(store, launch.n)
+    if bentry is not None:
+        batch.mark_planned(store, bentry["id"])
     if send:
         try:
             msg = announce(item, settings, client)
