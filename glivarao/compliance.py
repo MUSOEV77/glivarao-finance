@@ -41,6 +41,60 @@ POLITICAL_SIDES = (r"\b(?:democrats?|republicans?|gop|maga|liberals?|conservativ
 WHAT_TO_DO = re.compile(r"^what to do", re.I)
 
 
+INTRO_RE = re.compile(r"\b(?:welcome|hey (?:guys|everyone|there|folks)|hi (?:guys|everyone|there|folks)|in this video|"
+                      r"today (?:we|we're|we are|i|i'm)|let'?s talk about|before we (?:start|begin)|"
+                      r"don'?t forget to (?:like|subscribe)|glivarao)\b", re.I)
+LOOP_RE = re.compile(r"\b(?:but here'?s|here'?s the (?:part|thing|catch|twist|kicker)|most people miss|stick with me|"
+                     r"wait\b|but wait|the catch|the twist|plot twist|in a (?:minute|second|moment)|we'?ll get to|"
+                     r"keep that in mind|remember that number|here'?s why|which brings us|now here'?s|"
+                     r"but (?:that'?s not|there'?s more)|surprising|the real (?:problem|cost|reason)|you might think)\b",
+                     re.I)
+SENT_SPLIT = re.compile(r"(?<=[.!?])\s+")
+WPM_SPOKEN = 158
+
+
+def _sentences_of(text: str) -> list[str]:
+    return [s for s in SENT_SPLIT.split(" ".join(text.replace("*", "").split())) if s.strip()]
+
+
+def retention_issues(script: Script) -> list[str]:
+    """Hook in the first seconds, no intro, short sentences to 'you', open loops every 45-60 s (long videos)."""
+    out = []
+    first_scene = script.scenes[0].narration if script.scenes else ""
+    sents = _sentences_of(first_scene)
+    hook = sents[0] if sents else ""
+    limit = 10 if script.format == "short" else 20
+    if INTRO_RE.search(hook) or INTRO_RE.search(" ".join(sents[:2])):
+        out.append(f"opens with an intro instead of the hook: \"{hook[:80]}\"")
+    if len(hook.split()) > limit:
+        out.append(f"first sentence has {len(hook.split())} words (hook must land in "
+                   f"{'2' if script.format == 'short' else '5'} seconds: max {limit})")
+    if not (re.search(r"\d|percent|dollar|million|billion|trillion", hook, re.I) or
+            re.search(r"\byou(?:r|'re|'ll|'d)?\b", hook, re.I)):
+        out.append(f"first sentence is not a concrete hook (no real number, not a mistake 'you' make): \"{hook[:80]}\"")
+    body = [s for sc in script.scenes for s in _sentences_of(sc.narration)]
+    words = [len(s.split()) for s in body]
+    if words and sum(words) / len(words) > 16:
+        out.append(f"sentences too long for the ear (average {sum(words) / len(words):.0f} words; aim for 8-14)")
+    long_ones = [s for s in body if len(s.split()) > 30]
+    if long_ones:
+        out.append(f"{len(long_ones)} sentence(s) over 30 words, e.g. \"{long_ones[0][:70]}...\"")
+    total = sum(words)
+    yous = len(re.findall(r"\byou(?:r|rs|'re|'ll|'d|'ve)?\b", script.full_narration, re.I))
+    if total and yous < total / 80:
+        out.append(f"talks to 'you' only {yous} times in {total} words")
+    if script.format == "long":
+        gap, max_gap, pos, last = int(WPM_SPOKEN * 1.1), 0, 0, 0   # about 66 s of narration at most between interrupts
+        for s in body:
+            pos += len(s.split())
+            if LOOP_RE.search(s) or s.rstrip().endswith("?"):
+                max_gap, last = max(max_gap, pos - last), pos
+        max_gap = max(max_gap, pos - last)
+        if max_gap > gap:
+            out.append(f"{max_gap / WPM_SPOKEN * 60:.0f} s without a pattern interrupt or open loop (max ~60 s)")
+    return out
+
+
 def sponsor_issues(script: Script) -> list[str]:
     """Profanity, panic clickbait and political-side language in the narration, title, description or thumbnail."""
     text = " ".join([script.title, script.description, script.thumbnail_text or "", script.full_narration])
@@ -119,8 +173,12 @@ def overlap_ratio(a: str, b: str, n: int = 8) -> float:
 
 
 def check_script(script: Script, enforce_length: bool = True,
-                 previous_scripts: list[str] | None = None, evergreen: bool = False) -> ComplianceReport:
+                 previous_scripts: list[str] | None = None, evergreen: bool = False,
+                 retention: bool = False) -> ComplianceReport:
     r = ComplianceReport()
+    if retention:
+        for issue in retention_issues(script):
+            (r.errors if enforce_length else r.warnings).append(f"Won't hold viewers: {issue}")
     if evergreen:
         for issue in evergreen_issues(script):
             (r.errors if enforce_length else r.warnings).append(f"Not evergreen: {issue}")

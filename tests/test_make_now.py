@@ -27,8 +27,11 @@ def paid(settings, monkeypatch):
                  "habit income expense goal fund cash debt score report fee").split()
         for i, sc in enumerate(d["scenes"]):                       # unique wording in every scene, like a real script
             n = len(sc["narration"].split())
-            words = [r.choice(vocab) + ("." if k % 12 == 11 else "") for k in range(n)]
-            sc["narration"] = f"Part {i} about your credit card. " + " ".join(words[7:])
+            words = [("you" if k % 12 == 0 else r.choice(vocab)) + ("." if k % 12 == 11 else "") for k in range(n)]
+            sc["narration"] = (f"But here's the part most people miss about your card, part {i}. "
+                               + " ".join(words[13:]))
+        rest = d["scenes"][0]["narration"].split()[13:]               # the hook replaces the opening words
+        d["scenes"][0]["narration"] = "Your card could cost you 22% a year. " + " ".join(rest)
         d["scenes"][-1]["narration"] += " This video is for education only and isn't financial advice."
         d["scenes"][-2]["heading"] = "What to do this weekend"   # like Claude: the closing action section
         return d

@@ -344,16 +344,17 @@ def _produce_one(script, sim, brief, creator, writer, paid, card, item, report, 
             missing = factcheck.needs_source(claims)
         except ClaudeUnavailable as exc:  # keep the draft; it is rejected below for the unsourced claims
             log.warning("source rewrite skipped for %s: Claude unavailable (%s)", job.id, exc)
-    from .compliance import evergreen_issues, has_what_to_do, sponsor_issues
+    from .compliance import evergreen_issues, has_what_to_do, retention_issues, sponsor_issues
 
     issues = sponsor_issues(script)
     ever = [] if brief.timely else evergreen_issues(script)
-    if (issues or ever or not has_what_to_do(script)) and paid:  # sponsor-safe, evergreen, "What to do"
+    hold = retention_issues(script)
+    if (issues or ever or hold or not has_what_to_do(script)) and paid:  # sponsor, evergreen, retention, "What to do"
         from .scriptgen.claude import ClaudeUnavailable, rewrite_for_sponsor
 
         try:
             script = rewrite_for_sponsor(script, issues, not has_what_to_do(script), settings,
-                                         evergreen_issues=ever)
+                                         evergreen_issues=ever, retention_issues=hold)
             claims = factcheck.check_claims(script, brief, creator)
             missing = factcheck.needs_source(claims)
         except ClaudeUnavailable as exc:  # keep the draft; the compliance check below rejects it
@@ -364,7 +365,7 @@ def _produce_one(script, sim, brief, creator, writer, paid, card, item, report, 
     store.transition(job, JobStatus.SCRIPTED, f"{writer}; {script.style}; {script.word_count} words")
 
     ok, why = finance_only_check(script)
-    report_c = check_script(script, enforce_length=paid, evergreen=not brief.timely)
+    report_c = check_script(script, enforce_length=paid, evergreen=not brief.timely, retention=True)
     if not ok:
         report_c.errors.append(f"Finance-only gate failed: {why}")
     if not sim.ok:

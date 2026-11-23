@@ -43,6 +43,19 @@ money and spend most of the video on concrete, doable steps. Every topic must en
 Voice: one American English male narrator, warm, confident, curious, lightly humorous. Write for the ear:
 short sentences, contractions, concrete dollar examples, no jargon without an immediate plain explanation.
 
+RETENTION (US viewers decide in seconds; checked by code):
+- The FIRST sentence is the hook: a surprising real number from the fact sheet, or a costly mistake the viewer is
+  probably making, said to "you". No intro, no greeting, no channel name, no "welcome", "hey guys", "in this video",
+  "today we're going to", "let's talk about". Long video: the hook lands in the first 5 seconds (first sentence
+  at most 20 words). Short: within 2 seconds (first sentence at most 10 words).
+- Talk to "you". Simple everyday words. Short sentences: mostly 8-14 words, never more than 25.
+- Long videos: a pattern interrupt or open loop at least every 45-60 seconds (about every 120-160 words): "But
+  here's the part most people miss.", "Stick with me, because this is where it gets expensive.", a direct
+  question to the viewer, or a quick "wait, what?" moment. Close each loop later.
+- End with ONE clear action the viewer can do today (one sentence), then the education-only sentence.
+- Shorts: ONE idea only. The very last line (after the education-only sentence) is a short loop line that leads
+  straight back into the first sentence, so the Short replays naturally.
+
 Cast (original characters, drawn in a hand-drawn cartoon style):
 - "max": the narrator, a friendly guy with round glasses and a green sweater.
 - "penny": a cheerful talking copper coin who asks the questions viewers are thinking.
@@ -92,13 +105,15 @@ def user_prompt(topic: str, fmt: str, minutes: float, angle: str = "") -> str:
     words = int(minutes * WORDS_PER_MINUTE)
     if fmt == "long":
         shape = (f"a long-form explainer of about {minutes:.0f} minutes (~{words} spoken words total, "
-                 f"aim for {max(8, words // 95)}-{max(10, words // 80)} scenes). Open with a 20-second hook, "
-                 "then build understanding step by step, include at least two worked dollar examples, "
-                 "common mistakes, a practical action checklist, and a recap.")
+                 f"aim for {max(8, words // 95)}-{max(10, words // 80)} scenes). The first sentence is the hook (a "
+                 "surprising fact-sheet number or a costly mistake, to 'you', no intro); then build understanding "
+                 "step by step with an open loop or pattern interrupt every 45-60 seconds, at least two worked "
+                 "dollar examples, common mistakes, a 'What to do' section, and ONE clear final action.")
     else:
         shape = (f"a YouTube Short (vertical) of about {minutes * 60:.0f} seconds (~{words} spoken words, "
-                 "4-6 scenes). First sentence must hook within 2 seconds. One single idea, one chart at most, "
-                 "end with a one-line takeaway and the education-only sentence.")
+                 "4-6 scenes). The first sentence (max 10 words) hooks within 2 seconds. One single idea, one chart "
+                 "at most, one takeaway, then the education-only sentence, then a short loop line that leads back "
+                 "into the first sentence.")
     extra = f"\nAngle for this piece: {angle}" if angle else ""
     return f"Write {shape}\nTopic: {topic}{extra}\nReturn only the JSON object."
 
@@ -158,7 +173,7 @@ def compliance_prompt(draft_json: str, errors: list[str], facts: list[str]) -> s
 
 
 def sponsor_prompt(draft_json: str, issues: list[str], needs_what_to_do: bool,
-                   evergreen_issues: list[str] | None = None) -> str:
+                   evergreen_issues: list[str] | None = None, retention_issues: list[str] | None = None) -> str:
     """Rewrite request when a draft breaks the sponsor-friendly rules or lacks the closing "What to do" section."""
     asks = []
     if issues:
@@ -168,6 +183,11 @@ def sponsor_prompt(draft_json: str, issues: list[str], needs_what_to_do: bool,
         asks.append("This is an EVERGREEN video that must stay correct for years. Fix these: no dates, months or "
                     "'this week'-style words in the title; no time-bound wording in the script; every current number "
                     "as 'as of <Month Year>':\n" + "\n".join(f"- {i}" for i in evergreen_issues[:15]))
+    if retention_issues:
+        asks.append("Make it hold US viewers (RETENTION rules). Fix these: first sentence = a surprising fact-sheet "
+                    "number or a costly mistake, to 'you', no intro; short sentences; talk to 'you'; an open loop or "
+                    "pattern interrupt every 45-60 seconds; one clear final action (Shorts: one idea, loop line "
+                    "last):\n" + "\n".join(f"- {i}" for i in retention_issues[:15]))
     if needs_what_to_do:
         asks.append("Add a closing section before the disclaimer whose heading starts with \"What to do\": 3-5 "
                     "concrete steps for a US household, free options first; where it fits naturally one step names "

@@ -234,11 +234,13 @@ def rewrite_for_compliance(script: Script, errors: list[str], facts: list[str], 
 
 def rewrite_for_sponsor(script: Script, issues: list[str], needs_what_to_do: bool, settings: Settings,
                         client=None, ledger: ClaudeSpendLedger | None = None,
-                        evergreen_issues: list[str] | None = None) -> Script:
+                        evergreen_issues: list[str] | None = None,
+                        retention_issues: list[str] | None = None) -> Script:
     """One paid rewrite that removes profanity/panic/political-side wording and adds the "What to do" section."""
     from .prompts import sponsor_prompt
 
-    data = _ask(settings, sponsor_prompt(script.model_dump_json(), issues, needs_what_to_do, evergreen_issues),
+    data = _ask(settings, sponsor_prompt(script.model_dump_json(), issues, needs_what_to_do, evergreen_issues,
+                                         retention_issues),
                 script.format, client, ledger)
     return _to_script(data, script.format, script.topic).model_copy(update={"style": script.style})
 

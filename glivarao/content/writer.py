@@ -7,6 +7,8 @@
 """
 from __future__ import annotations
 
+import re
+
 import random
 
 from ..config import Settings
@@ -264,6 +266,10 @@ def write_with_claude(b: Brief, fmt: str, settings: Settings, angle: str = "", s
                   "announced' or 'breaking'. Teach how it works. Every current number is stated as 'as of <Month "
                   "Year>' (for example 'as of November 2026, the average card rate was 22.36%') so it is easy to "
                   "update.")
+    hooks = [f.text for f in b.facts if f.kind == "DATA" and f.url and re.search(r"\d", f.text)][:4]
+    if hooks:
+        grounding += ("\n\nHOOK IDEAS (open with ONE of these numbers, said to 'you', in the first sentence; no intro):\n"
+                      + "\n".join(f"- {h}" for h in hooks))
     if style and style in FORMATS:
         grounding += f"\n\nFORMAT: {FORMATS[style].label}. {FORMATS[style].claude_structure}"
     if creator_text.strip():

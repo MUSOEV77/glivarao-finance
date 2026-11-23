@@ -22,9 +22,10 @@ from glivarao.tts.gemini_tts import spoken_words
 REAL_VOICE_SECONDS = daily_v2._voice_seconds          # conftest replaces it with an estimate; we want the real one
 pytestmark = pytest.mark.skipif(not shutil.which("ffprobe"), reason="needs ffmpeg/ffprobe")
 
-A = ["Most households", "A lot of families", "Plenty of people", "Many borrowers", "Busy parents", "New graduates",
-     "Renters", "Homeowners", "Couples", "Single earners", "First-time buyers", "Shift workers", "Freelancers",
-     "Retirees on a budget", "Young workers", "Savers", "Shoppers", "Commuters", "Teachers", "Nurses"]
+A = ["You", "Maybe you", "Most likely you", "If you're busy, you", "Like most people, you", "Some months you",
+     "On a tight month you", "Without a plan you", "Once in a while you", "When money's tight you", "Sometimes you",
+     "Honestly, you", "Right after payday you", "Like a lot of us, you", "Late at night you", "On autopilot you",
+     "Without noticing, you", "In a rush you", "When you're tired, you", "Every so often you"]
 B = ["look at the monthly number first", "skip the fine print on the statement", "assume the bank will warn them",
      "treat the balance as a fixed bill", "pay whatever feels comfortable that month", "forget how fees stack up",
      "compare offers only by the headline", "put off the hard decision", "follow what friends do",
@@ -32,7 +33,7 @@ B = ["look at the monthly number first", "skip the fine print on the statement",
      "react after a surprise bill arrives", "never read the renewal notice", "underestimate small recurring costs",
      "keep the oldest account open", "split payments across several apps", "set one reminder and hope",
      "avoid opening the mail", "try to fix everything at once"]
-C = ["and that habit quietly costs them over time", "which is exactly how the gap keeps growing",
+C = ["and that habit quietly costs you over time", "which is exactly how the gap keeps growing",
      "so the real cost stays hidden", "and the plan falls apart by spring", "which makes the next step harder",
      "so a simple checklist helps", "and that is the part we can change", "which is why a written plan matters",
      "so it pays to slow down for ten minutes", "and a calm routine beats a burst of effort",
@@ -42,13 +43,23 @@ C = ["and that habit quietly costs them over time", "which is exactly how the ga
      "and the habit is easy to build", "which is the whole point of a plan", "so let's make it concrete"]
 
 
-def _filler(rng, n_words, used):
-    out = []
+LOOPS = ["But here's the part most people miss.", "Stick with me, because this is where it gets expensive.",
+         "So what does that cost you?", "Wait, it gets worse.", "Here's the catch.", "You might think that's fine.",
+         "Now here's the twist.", "Keep that in mind for a minute."]
+
+
+def _filler(rng, n_words, used, loop_every=60):
+    """Short spoken sentences to 'you', with an open loop / pattern interrupt about every 40 seconds."""
+    out, since = [], 0
     while sum(len(s.split()) for s in out) < n_words:
         s = f"{rng.choice(A)} {rng.choice(B)}, {rng.choice(C)}."
         if s not in used:
             used.add(s)
             out.append(s)
+            since += len(s.split())
+            if since >= loop_every:
+                out.append(rng.choice(LOOPS))
+                since = 0
     return " ".join(out)
 
 
@@ -65,7 +76,8 @@ def fake_claude(prompt, fmt, seed):
     card = "22.36%" in prompt
     special, charts = [], {}
     if aca:
-        special = ["Enroll by December 15 for Marketplace coverage that starts January 1.",
+        special = ["Miss December 15 and you start January without coverage." if fmt == "short" else
+                   "Miss December 15, and your Marketplace plan won't start on January 1.",
                    "With income between 100% and 400% of the federal poverty level you qualify for the premium tax "
                    "credit.",
                    "The 2026 poverty guideline is $15,960 for one person and $33,000 for a family of four.",
@@ -77,7 +89,8 @@ def fake_claude(prompt, fmt, seed):
                       "source": "HealthCare.gov"}}
     elif card:
         calc = [float(x.replace(",", "")) for x in re.findall(r"total interest \$([\d,]+(?:\.\d+)?)", prompt)]
-        special = ["As of November 2026, the average rate on cards charged interest was 22.36% a year."]
+        special = ["Your card could be charging you 22.36% a year." if fmt == "short" else
+                   "As of November 2026, your card balance probably costs you 22.36% a year."]
         if len(calc) >= 2:
             special.append(f"For example, if you owe $5,000 at 22.36% and pay only the minimum, you'd pay about "
                            f"${round(calc[0]):,} in interest.")
@@ -94,7 +107,8 @@ def fake_claude(prompt, fmt, seed):
         body = _filler(rng, per, used) if fmt == "long" or i not in (0,) else ""
         narr = (text + body).strip() or _filler(rng, per, used)
         if i == n_sc - 1:
-            narr = "Pick one step and do it today. This video is for education only and isn't financial advice."
+            narr = ("Today, set one automatic payment above the minimum. This video is for education only and isn't "
+                    "financial advice.")
         ch = charts.get(i, {"kind": "none", "title": "", "labels": [], "values": [], "unit": "",
                             "source": "Illustrative example"})
         scenes.append({"heading": head, "narration": narr, "character": "max", "pose": "talk",
@@ -103,13 +117,15 @@ def fake_claude(prompt, fmt, seed):
                        "key_points": [], "set": "auto", "entrance": "auto", "transition": "auto", "money_fx": "auto",
                        "beat": "none"})
     if fmt == "short":   # Shorts: hook with a fact, the labeled example, chart, what to do, sign-off
-        scenes[0]["narration"] = (special[0] if special else "Here is a money move most people skip.") + \
+        scenes[0]["narration"] = (special[0] if special else "You're skipping a money move that matters.") + \
             " Here's what that means for your budget."
         scenes[1]["narration"] = (special[-1] if len(special) > 1 else _filler(rng, 14, used))
         scenes[2]["narration"] = ("That gap adds up fast, so it pays to check the numbers once a year and keep a "
                                   "short note of what you pay.")
         scenes[3]["narration"] = ("Check your plan, set one reminder, and compare two options side by side before you "
                                   "decide anything.")
+        scenes[4]["narration"] = ("Do one thing today: check your number. This video is for education only and isn't "
+                                  "financial advice. Now look at that first number again.")      # loop line last
     return {"title": "Your money: the plain truth", "description": "A clear guide.", "tags": ["money"],
             "thumbnail_text": "Debt Wins", "hook": scenes[0]["narration"][:80], "scenes": scenes}
 
