@@ -29,6 +29,45 @@ ACA = [F("The 2026 federal poverty guideline (48 states and DC) is $15,960 for 1
        F("Enroll by December 15 for Marketplace coverage that starts January 1; Open Enrollment for 2027 runs "
          "November 1, 2026 to January 15, 2027.", "HealthCare.gov", HC_DATES, "December 15")]
 
+# Emergency fund (Federal Reserve SHED 2025, published May 2026; CFPB). Checked 2026-11-23.
+SHED = "https://www.federalreserve.gov/publications/2026-economic-well-being-of-us-households-in-2025-savings-investments.htm"
+SHED_SUM = ("https://www.federalreserve.gov/publications/2026-economic-well-being-of-us-households-in-2025-executive-"
+            "summary.htm")
+SHED_SRC = "Federal Reserve, Economic Well-Being of U.S. Households in 2025 (May 2026)"
+CFPB_EF = "https://www.consumerfinance.gov/an-essential-guide-to-building-an-emergency-fund/"
+EF_3MONTHS = F("In 2025, 55 percent of US adults said they had set aside money for three months of expenses in an "
+               "emergency savings or rainy day fund.", SHED_SRC, SHED, "55 percent of adults said they had set aside "
+               "money for three months of expenses")
+EF_400 = F("In 2025, 63 percent of US adults said they would cover a hypothetical $400 emergency expense using cash, "
+           "savings, or a credit card paid off at the next statement.", SHED_SRC, SHED, "63 percent of all adults "
+           "said they would have covered it exclusively using cash")
+EF_CANT = F("In 2025, 12 percent of US adults said they would not be able to pay an unexpected $400 expense right now.",
+            SHED_SRC, SHED, "Would not be able to pay for the expense right now 12")
+EF_SURPRISE = F("In 2025, 59 percent of US adults had at least one major, unexpected expense in the prior 12 months; the "
+                "most common was a major vehicle repair or replacement (30 percent of adults).", SHED_SRC, SHED_SUM,
+                "Fifty-nine percent of adults had at least one type of major, unexpected expense")
+EF_WHAT = F("An emergency fund is a cash reserve that is specifically set aside for unplanned expenses or financial "
+            "emergencies (CFPB).", "CFPB", CFPB_EF, "specifically set aside for unplanned expenses or financial "
+            "emergencies")
+EMERGENCY = [EF_3MONTHS, EF_400, EF_CANT, EF_SURPRISE, EF_WHAT]
+
+# Roth IRA vs 401(k) (IRS IR-2026 2027 limits; IRS Roth IRAs page; Federal Reserve SHED 2025). Checked 2026-11-23.
+IRS_2027 = "https://www.irs.gov/newsroom/401k-limit-increases-to-25500-for-2027-ira-limit-remains-7500"
+IRS_ROTH = "https://www.irs.gov/retirement-plans/roth-iras"
+R_401K = F("For 2027, you can contribute up to $25,500 to a 401(k) plan, up from $24,500 for 2026.", "IRS", IRS_2027,
+           "has increased to $25,500, up from $24,500 for 2026")
+R_IRA = F("For 2027, the IRA contribution limit remains $7,500.", "IRS", IRS_2027, "IRA limit remains $7,500")
+R_PHASE = F("For 2027, the income phase-out range for contributing to a Roth IRA is $158,000 to $173,000 for singles "
+            "and heads of household, and $250,000 to $260,000 for married couples filing jointly.", "IRS", IRS_2027,
+            "between $158,000 and $173,000 for singles and heads of household")
+R_TAX = F("You cannot deduct contributions to a Roth IRA; if you satisfy the requirements, qualified distributions are "
+          "tax-free (IRS).", "IRS", IRS_ROTH, "qualified distributions are tax-free")
+R_CATCHUP = F("For 2027, workers 50 and older can generally put up to $34,000 a year into most 401(k) plans ($25,500 plus "
+              "an $8,500 catch-up).", "IRS", IRS_2027, "can contribute up to $34,000 each year")
+R_HAVE = F("In 2025, 61 percent of US adults had a tax-preferred retirement account such as a 401(k), an IRA or a "
+           "Roth IRA.", SHED_SRC, SHED, "61 percent of adults who had a tax-preferred retirement account")
+ROTH = [R_401K, R_IRA, R_PHASE, R_TAX, R_CATCHUP, R_HAVE]
+
 LIBRARY: dict[str, list[LaunchFact]] = {
     "aca_marketplace": ACA,
     "insurance": ACA[:3],
@@ -50,7 +89,9 @@ LIBRARY: dict[str, list[LaunchFact]] = {
     "us_banks": [FDIC_LIMIT, CRISIS_BANKS],
     "deposit_insurance": [FDIC_LIMIT],
     "hysa": [FDIC_LIMIT, FED_RANGE],
-    "emergency_fund": [FDIC_LIMIT],
+    "emergency_fund": EMERGENCY,
+    "ira_roth": ROTH,
+    "retirement_401k": [R_401K, R_CATCHUP, R_HAVE],
     "financial_crisis": [CRISIS_BANKS],
 }
 

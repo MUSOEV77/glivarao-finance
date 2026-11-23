@@ -19,9 +19,9 @@ import math
 from dataclasses import asdict, dataclass, field
 from datetime import date, timedelta
 
-from .launch_plan import (CARD_RATE, FED_GOALS, FED_RANGE, HH_DELINQ, HH_TOTAL, LAUNCH, MORT_BAL, MORTGAGE, NEW_HOME,
+from .launch_plan import (CARD_RATE, HH_DELINQ, HH_TOTAL, LAUNCH, MORT_BAL, MORTGAGE, NEW_HOME,
                           REVOLVING, LaunchFact)
-from .fact_library import ACA
+from .fact_library import ACA, EMERGENCY, ROTH
 
 PARTS = {1: ("How it works", "explainer",
              "PART 1 of 3, HOW IT WORKS: explain the mechanism from zero with real numbers, so the viewer finally "
@@ -70,17 +70,19 @@ BATCH1 = [
                 ShortIdea("The 100%-400% income range for the premium tax credit", ACA[2]),
                 ShortIdea("$15,960: the 2026 poverty guideline for one person", ACA[0])],
                publish_by="2026-12-13", affiliate="insurance"),
-    BatchTopic("how-credit-scores-work", "How credit scores really work", "credit_score", "Credit Score Basics",
-               SCORES, {1: 0, 2: 1, 3: 2},
-               [ShortIdea("Checking your own score does not hurt it", SCORES[1]),
-                ShortIdea("Your free credit reports from all three bureaus", SCORES[2]),
-                ShortIdea("4.9% of US consumers have a collection on their report", SCORES[0])],
-               affiliate="credit monitoring"),
-    BatchTopic("how-the-fed-affects-you", "How the Fed affects your money", "fed_rates", "The Fed and You",
-               [FED_GOALS, FED_RANGE, CARD_RATE, MORTGAGE], {1: 0, 2: 2, 3: 1},
-               [ShortIdea("The Fed's two jobs, set by Congress", FED_GOALS),
-                ShortIdea("The Fed's rate today: 3-3/4 to 4 percent", FED_RANGE),
-                ShortIdea("From the Fed's rate to your 22.36% card rate", CARD_RATE)],
+    BatchTopic("emergency-fund", "How to build an emergency fund", "emergency_fund", "Emergency Fund Basics",
+               list(EMERGENCY), {1: 0, 2: 3, 3: 1},
+               [ShortIdea("55%: how many adults have three months of expenses saved", EMERGENCY[0]),
+                ShortIdea("The $400 test: 63% would cover it with cash or its equivalent", EMERGENCY[1]),
+                ShortIdea("12% couldn't pay a surprise $400 bill right now", EMERGENCY[2]),
+                ShortIdea("The most common surprise bill: a major car repair (30% of adults)", EMERGENCY[3])],
+               affiliate="high-yield savings"),
+    BatchTopic("roth-ira-vs-401k", "Roth IRA vs 401(k): which comes first", "ira_roth", "Roth IRA vs 401(k)",
+               list(ROTH), {1: 1, 2: 2, 3: 0},
+               [ShortIdea("$25,500: the 2027 401(k) limit", ROTH[0]),
+                ShortIdea("$7,500: the 2027 IRA limit", ROTH[1]),
+                ShortIdea("Roth IRA: no deduction now, tax-free qualified withdrawals later", ROTH[3]),
+                ShortIdea("The 2027 Roth IRA income limits", ROTH[2])],
                affiliate="high-yield savings"),
     BatchTopic("why-houses-expensive", "Why houses got so expensive", "us_housing", "Housing Explained",
                [NEW_HOME, MORT_BAL, MORTGAGE], {1: 0, 2: 1, 3: 2},
@@ -89,6 +91,8 @@ BATCH1 = [
                 ShortIdea("$13.4 trillion in mortgage balances", MORT_BAL)],
                affiliate="high-yield savings"),
 ]
+# moved out of batch 1 by you: first in line for batch 2 (still needs your approval of the next-5 proposal)
+RESERVED_NEXT = ["how-credit-scores-work", "how-the-fed-affects-you"]
 VERSION = "batch1-2026-11-23"
 START = date(2026, 11, 25)       # first planned publish date (production runs 2-3 days ahead)
 LONG_EVERY_DAYS = 2              # 14 long videos over 4 weeks ~ the 16-a-month pace
@@ -129,21 +133,28 @@ def _topic_from(d: dict) -> BatchTopic:
 
 # ----------------------------------------------------------------------------------------------------- the plan
 def plan(batch: list[BatchTopic], start: date = START) -> list[dict]:
-    """Long-video order + planned publish dates, and each topic's Shorts on its long days.
-    Rules: deadline topics first; never two parts of one topic back-to-back; parts in order 1 -> 2 -> 3."""
+    """Long-video order + planned dates, and each topic's Shorts on its long days.
+    Rules: rounds (Part 1 of every topic first, then Part 2s, then Part 3s); deadline topics first in each round;
+    never two parts of one topic back-to-back."""
     queue = {t.slug: [p for p in (1, 2, 3) if p not in t.done_parts] for t in batch}
     order: list[tuple[str, int]] = []
     last = None
-    total = sum(len(v) for v in queue.values())
-    while len(order) < total:
-        def urgency(t):
-            return (0 if t.publish_by else 1, -len(queue[t.slug]), [x.slug for x in batch].index(t.slug))
-        ready = sorted((t for t in batch if queue[t.slug] and t.slug != last), key=urgency)
-        if not ready:                       # only one topic left: it can't avoid itself (never happens in batch 1)
-            ready = [t for t in batch if queue[t.slug]]
-        t = ready[0]
-        order.append((t.slug, queue[t.slug].pop(0)))
-        last = t.slug
+    for rnd in (1, 2, 3):               # ROUNDS: Part 1 of every topic, then the Part 2s, then the Part 3s
+        todo = [t for t in batch if rnd in queue[t.slug]]
+        while todo:
+            def urgency(t):
+                return (0 if t.publish_by else 1, [x.slug for x in batch].index(t.slug))
+            ready = sorted((t for t in todo if t.slug != last), key=urgency) or todo
+            t = ready[0]
+            order.append((t.slug, rnd))
+            queue[t.slug].remove(rnd)
+            todo.remove(t)
+            last = t.slug
+    for t in batch:                     # deadline topics: Part 3 moves up into round 2, 3 videos after Part 2
+        if t.publish_by and (t.slug, 3) in order and (t.slug, 2) in order:
+            order.remove((t.slug, 3))
+            at = min(order.index((t.slug, 2)) + 3, len(order))
+            order.insert(at, (t.slug, 3))
     by = {t.slug: t for t in batch}
     entries, day = [], start
     for slug, part in order:
@@ -473,6 +484,7 @@ def propose_next(store, winner_slug: str, n: int = 5) -> list:
     def close(v):
         return (0 if family_of(v.key) == fam else 1 if getattr(pillar_of(v.key), "key", None) == pil else 2, v.n)
     ranked = sorted((v for v in LAUNCH if v.slug not in used), key=close)
+    ranked = [v for v in ranked if v.slug in RESERVED_NEXT] + [v for v in ranked if v.slug not in RESERVED_NEXT]
     return [v for v in ranked if ready(v)][:n]
 
 

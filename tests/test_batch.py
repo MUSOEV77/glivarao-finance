@@ -49,7 +49,7 @@ def test_planner_takes_the_next_batch_part(bstore, settings, monkeypatch):
     assert item.card["batch"]["entry"] == "aca-dec-15:p1" and item.format == "explainer"
     assert item.card["launch_facts"][0]["text"].startswith("With income between 100% and 400%")   # lead fact first
     assert "PART 1 of 3" in item.card["angle"]
-    assert batch.next_long(bstore)["id"] == "how-credit-scores-work:p1"
+    assert batch.next_long(bstore)["id"] == "emergency-fund:p1"
 
 
 def test_part_and_shorts_angles(bstore):
@@ -61,17 +61,17 @@ def test_part_and_shorts_angles(bstore):
 
 
 def test_record_jobs_and_previous_part_matching(bstore, settings, tmp_path):
-    e = next(x for x in batch.plan(batch.BATCH1) if x["id"] == "how-credit-scores-work:p1")
+    e = next(x for x in batch.plan(batch.BATCH1) if x["id"] == "emergency-fund:p1")
     card = batch.card_for(bstore, e)
     out = tmp_path / "out"
     (out / "j-long").mkdir(parents=True)
-    (out / "j-long" / "variety.json").write_text(json.dumps({"fingerprint": {"opening": "Your score dropped?"}}))
+    (out / "j-long" / "variety.json").write_text(json.dumps({"fingerprint": {"opening": "Could you cover $400?"}}))
     batch.record_jobs(bstore, card, [("j-long", "long", "pending_approval", "v", ""),
                                      ("j-s1", "short", "pending_approval", "v", ""),
                                      ("j-bad", "short", "rejected_compliance", None, "")], out)
-    assert [j["job"] for j in batch.topic_jobs(bstore, "how-credit-scores-work")] == ["j-long", "j-s1"]
-    e2 = next(x for x in batch.plan(batch.BATCH1) if x["id"] == "how-credit-scores-work:p2")
-    assert '"Your score dropped?"' in batch.card_for(bstore, e2)["angle"]        # a different hook next time
+    assert [j["job"] for j in batch.topic_jobs(bstore, "emergency-fund")] == ["j-long", "j-s1"]
+    e2 = next(x for x in batch.plan(batch.BATCH1) if x["id"] == "emergency-fund:p2")
+    assert '"Could you cover $400?"' in batch.card_for(bstore, e2)["angle"]        # a different hook next time
     # card-debt Part 1 (made before the batch) is found by its launch-list title
     job = bstore.create("long", "How to get out of credit card debt (a plan that works)")
     assert job.id in [j["job"] for j in batch.topic_jobs(bstore, "get-out-of-card-debt")]
@@ -124,7 +124,8 @@ def test_report_ranks_names_winner_and_proposes_close_topics(bstore, settings):
     assert w["ctr"] == pytest.approx(7.5) and w["avp"] == pytest.approx(55)
     props = batch.propose_next(bstore, w["topic"])
     assert len(props) == 5 and all(v.slug not in {t.slug for t in batch.BATCH1} for v in props)
-    assert props[0].slug == "snowball-vs-avalanche"                       # closest to card debt first
+    assert [v.slug for v in props[:2]] == batch.RESERVED_NEXT            # moved out of batch 1 by you: first
+    assert "snowball-vs-avalanche" in [v.slug for v in props]            # then the closest to card debt
     assert all(batch.ready(v) for v in props)                            # 3 different official lead facts each
 
     sent = []
@@ -196,30 +197,30 @@ def test_manual_videos_count_and_free_their_slot(bstore, settings, capsys, monke
     again, the next part takes its slot, the Shorts count for their topics; snowball isn't in batch 1."""
     from glivarao import __main__ as cli
 
-    long_ = bstore.create("long", "How credit scores really work")
-    fed, houses, snow = (bstore.create("short", t) for t in ("How the Fed affects your money",
+    long_ = bstore.create("long", "How to build an emergency fund")
+    fed, houses, snow = (bstore.create("short", t) for t in ("Roth IRA vs 401(k)",
                                                             "Why houses got so expensive", "Debt snowball"))
     before = batch.plan(batch.topics(bstore))
-    assert any(e["id"] == "how-credit-scores-work:p1" for e in before)
+    assert any(e["id"] == "emergency-fund:p1" for e in before)
     monkeypatch.setattr(cli, "get_settings", lambda: settings)
-    cli.main(["batch-mark-done", "how-credit-scores-work", "1", long_.id])
-    cli.main(["batch-mark-done", "how-the-fed-affects-you", "short", fed.id])
+    cli.main(["batch-mark-done", "emergency-fund", "1", long_.id])
+    cli.main(["batch-mark-done", "roth-ira-vs-401k", "short", fed.id])
     cli.main(["batch-mark-done", "why-houses-expensive", "short", houses.id])
     out = capsys.readouterr().out
     assert "won't be made again" in out and out.count("counted as") == 3
     with pytest.raises(SystemExit, match="not in the current batch"):
         cli.main(["batch-mark-done", "snowball-vs-avalanche", "short", snow.id])
     with pytest.raises(SystemExit, match="is a short video"):
-        cli.main(["batch-mark-done", "how-credit-scores-work", "2", fed.id])
+        cli.main(["batch-mark-done", "emergency-fund", "2", fed.id])
 
     after = batch.plan(batch.topics(bstore))
-    assert not any(e["id"] == "how-credit-scores-work:p1" for e in after)
+    assert not any(e["id"] == "emergency-fund:p1" for e in after)
     assert len(after) == len(before) - 1 and batch.plan_issues(batch.topics(bstore), after) == []
     assert after[1]["publish"] == "2026-11-27"                         # the freed slot is used, nothing left empty
-    assert batch.next_long(bstore)["id"] != "how-credit-scores-work:p1"
-    jobs = {j["job"] for j in batch.topic_jobs(bstore, "how-the-fed-affects-you")}
+    assert batch.next_long(bstore)["id"] != "emergency-fund:p1"
+    jobs = {j["job"] for j in batch.topic_jobs(bstore, "roth-ira-vs-401k")}
     assert fed.id in jobs
-    scores = [j for j in batch.topic_jobs(bstore, "how-credit-scores-work") if j["job"] == long_.id]
+    scores = [j for j in batch.topic_jobs(bstore, "emergency-fund") if j["job"] == long_.id]
     assert scores and scores[0]["part"] == 1
     text = batch.plan_text(bstore)
     assert f"Part 1 (already made, {long_.id})" in text and f"Short {fed.id} (made by you)" in text
@@ -246,3 +247,21 @@ def test_batch_make_makes_exactly_that_part_and_counts_it(world, monkeypatch):  
         daily_v2.batch_make(s, store, "aca-dec-15", 1, send=False)
     with pytest.raises(ValueError, match="not in the current batch"):
         daily_v2.batch_make(s, store, "snowball-vs-avalanche", 1, send=False)
+
+
+def test_batch_1_topics_rounds_and_official_fact_sheets():
+    assert [t.slug for t in batch.BATCH1] == ["get-out-of-card-debt", "aca-dec-15", "emergency-fund",
+                                              "roth-ira-vs-401k", "why-houses-expensive"]
+    order = [e["id"] for e in batch.plan(batch.BATCH1)]
+    assert order[:4] == ["aca-dec-15:p1", "emergency-fund:p1", "roth-ira-vs-401k:p1", "why-houses-expensive:p1"]
+    assert order.index("aca-dec-15:p3") < order.index("roth-ira-vs-401k:p2")   # deadline topic finishes early
+    assert all(order.index(f"{t}:p3") > order.index(f"{t}:p2") for t in ("emergency-fund", "roth-ira-vs-401k"))
+    for slug in ("emergency-fund", "roth-ira-vs-401k"):
+        t = batch.topic(type("KV", (), {"kv_get": lambda s, k, d=None: d})(), slug)
+        assert len(t.facts) >= 3 and len({t.lead[p] for p in (1, 2, 3)}) == 3
+        for f in t.facts:
+            assert f.verify and f.url.startswith(("https://www.irs.gov/", "https://www.federalreserve.gov/",
+                                                  "https://www.consumerfinance.gov/", "https://www.ssa.gov/",
+                                                  "https://www.investor.gov/")), f.url
+        assert 3 <= len(t.shorts) <= 5
+    assert {"how-credit-scores-work", "how-the-fed-affects-you"}.isdisjoint({t.slug for t in batch.BATCH1})

@@ -112,8 +112,8 @@ def test_batch_plan_uses_the_weekly_long_days(store, ws, monkeypatch):
     store.kv_set("batch_mode", "on")
     monkeypatch.setattr(week, "today_tk", lambda now=None: TUE)
     _made(store, "long", MON, JobStatus.APPROVED, "How to get out of credit card debt (a plan that works)")
-    cs = _made(store, "long", MON, topic="How credit scores really work")
-    batch.mark_done(store, "how-credit-scores-work", "1", cs)
+    ef = _made(store, "long", MON, topic="How to build an emergency fund")
+    batch.mark_done(store, "emergency-fund", "1", ef)
     text = batch.plan_text(store, settings=ws)
     assert "Dates = the day each part is made" in text and "Fri Nov 27  LONG  ACA" in text
     assert "Sun Nov 29  LONG" in text and "WEEK 2\nMon Nov 30  LONG" in text
