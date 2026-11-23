@@ -69,6 +69,7 @@ if [ "$SKIP_SYSTEMD" != "1" ]; then
   cp deploy/systemd/*.service deploy/systemd/*.timer /etc/systemd/system/
   cp deploy/logrotate-glivarao /etc/logrotate.d/glivarao
   systemctl daemon-reload
+  systemctl reset-failed 'glivarao-*' 2>/dev/null || true   # clear any old start-limit-hit state
   systemctl disable --now glivarao-propose.timer 2>/dev/null || true   # weekly ideas are only for TOPIC_MODE=queue
   # always on: Telegram polling, health report, backups
   systemctl enable --now glivarao-poll.timer glivarao-backup.timer glivarao-health.timer

@@ -151,3 +151,37 @@ def test_supervised_scheduled_gate(tmp_path, monkeypatch):
     # a manual run (not --scheduled) is never gated
     d.supervised_daily(s, store, today=DAY, notifier=lambda *a: None)
     assert len(calls) == 2 and calls[1]["deliver_day"] is None
+
+
+def test_failed_scheduled_runs_back_off_then_stop_for_the_day(tmp_path, monkeypatch):
+    """Crash-loop protection lives in the app (no systemd restarts): 30 min, 1 h, 2 h, then no more today.
+    Checks in between exit quietly (return None) without running anything."""
+    import pytest
+
+    import glivarao.daily_v2 as d
+
+    s, store = _s(tmp_path)
+    runs, alerts = [], []
+
+    def boom(*a, **k):
+        runs.append(1)
+        raise RuntimeError("research outage")
+
+    monkeypatch.setattr(d, "run_daily_v2", boom)
+    note = lambda st, t: alerts.append(t)  # noqa: E731
+    clock = {"t": _at(13, 30)}
+    monkeypatch.setattr(delivery, "now_local", lambda settings: clock["t"])
+    for k, (h, m, wait) in enumerate([(13, 30, "30 min"), (14, 0, "60 min"), (15, 0, "120 min")]):
+        clock["t"] = _at(h, m)
+        with pytest.raises(RuntimeError):
+            d.supervised_daily(s, store, today=DAY, scheduled=True, retries=0, notifier=note)
+        assert f"next automatic attempt in {wait}" in alerts[-1]
+        clock["t"] = _at(h, m + 15)                                    # the next 15-min check: quiet skip
+        assert d.supervised_daily(s, store, today=DAY, scheduled=True, retries=0, notifier=note) is None
+    clock["t"] = _at(17, 0)
+    with pytest.raises(RuntimeError):
+        d.supervised_daily(s, store, today=DAY, scheduled=True, retries=0, notifier=note)
+    assert "no more automatic attempts today" in alerts[-1] and len(runs) == 4
+    clock["t"] = _at(21, 45)
+    assert d.supervised_daily(s, store, today=DAY, scheduled=True, retries=0, notifier=note) is None
+    assert len(runs) == 4 and len(alerts) == 4

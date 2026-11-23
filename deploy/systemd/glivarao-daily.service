@@ -4,8 +4,12 @@ After=network-online.target
 Wants=network-online.target
 
 OnFailure=glivarao-alert@%n.service
-StartLimitIntervalSec=6h
-StartLimitBurst=3
+# The timer checks every 15 min (4 starts an hour). A check that finds nothing to do exits 0 in seconds.
+# Crash-loop protection: no systemd restarts (the next 15-min check is the retry); the app itself backs off
+# after a failed run (30 min, 1 h, 2 h, then no more automatic attempts that day). This limit only stops a
+# runaway loop: more than 6 starts in one hour. tests/test_systemd_limits.py checks timer vs this limit.
+StartLimitIntervalSec=1h
+StartLimitBurst=6
 
 [Service]
 Type=oneshot
@@ -16,7 +20,5 @@ StandardOutput=append:/opt/glivarao/app/logs/daily.log
 StandardError=append:/opt/glivarao/app/logs/daily.log
 TimeoutStartSec=4h
 Nice=5
-Restart=on-failure
-RestartSec=15min
 NoNewPrivileges=true
 PrivateTmp=true

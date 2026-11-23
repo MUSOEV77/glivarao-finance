@@ -1156,8 +1156,12 @@ def supervised_daily(settings: Settings, store: JobStore, today: date | None = N
                 if attempt < retries:
                     time.sleep(retry_delay)
         else:
+            nxt = ""
+            if scheduled:   # crash-loop protection: back off 30 min, 1 h, 2 h, then stop for today
+                nxt = _back_off(settings, store, today, delivery)
             notifier(settings, f"GLIVARAO daily run FAILED for {today} after {retries + 1} attempts: "
-                               f"{type(last).__name__}: {str(last)[:300]}\nSee logs/daily.log on the server.")
+                               f"{type(last).__name__}: {str(last)[:300]}\nSee logs/daily.log on the server."
+                               + (f"\n{nxt}" if nxt else ""))
             raise last
         if res.jobs:  # nothing produced (pace / waiting for your input) -> a later run today may still produce
             store.kv_set(done_key, json.dumps([j[0] for j in res.jobs]))
@@ -1180,6 +1184,26 @@ def supervised_daily(settings: Settings, store: JobStore, today: date | None = N
     finally:
         fcntl.flock(fh, fcntl.LOCK_UN)
         fh.close()
+
+
+DAILY_MAX_FAILED_RUNS = 4
+
+
+def _back_off(settings: Settings, store: JobStore, today: date, delivery) -> str:
+    """After a failed scheduled run: no new attempt for 30 min, then 1 h, then 2 h; after 4 failed runs, none
+    until tomorrow. Returns the line for the alert."""
+    key = f"daily_failures:{today.isoformat()}"
+    n = int(store.kv_get(key, "0")) + 1
+    store.kv_set(key, str(n))
+    now = delivery.now_local(settings)
+    if n >= DAILY_MAX_FAILED_RUNS:
+        end = now.replace(hour=23, minute=59, second=59, microsecond=0)
+        store.kv_set(f"daily_retry_after:{today.isoformat()}", str(end.timestamp()))
+        return (f"{n} failed runs today: no more automatic attempts today. Fix the cause, then run "
+                "python -m glivarao daily-v2 (or wait for tomorrow).")
+    wait = 30 * 2 ** (n - 1)
+    store.kv_set(f"daily_retry_after:{today.isoformat()}", str(now.timestamp() + wait * 60))
+    return f"Failed run {n} of {DAILY_MAX_FAILED_RUNS} today: next automatic attempt in {wait} min."
 
 
 def cost_dir(settings: Settings) -> Path:
