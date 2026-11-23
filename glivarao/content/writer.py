@@ -244,7 +244,8 @@ def _wrap(b: Brief, fmt: str, scenes: list[Scene], suffix: str = "") -> Script:
 
 # ------------------------------------------------------------------ Claude writer (paid; approval required)
 def write_with_claude(b: Brief, fmt: str, settings: Settings, angle: str = "", style: str | None = None,
-                      creator_text: str = "", avoid_lines: list[str] | None = None) -> Script:
+                      creator_text: str = "", avoid_lines: list[str] | None = None,
+                      variety_slot: int | None = None, previous: dict | None = None) -> Script:
     """Grounded generation: the model may only use facts from the brief's fact sheet; the format sets the
     structure; the host's own input is woven in as a 'creator' scene; recent openings are off limits."""
     from ..scriptgen.claude import generate_with_claude
@@ -280,8 +281,18 @@ def write_with_claude(b: Brief, fmt: str, settings: Settings, angle: str = "", s
     if avoid_lines:
         grounding += "\n\nDo NOT open or close with any of these lines used in recent videos:\n" + \
                      "\n".join(f"- {x}" for x in avoid_lines[:20])
+    if variety_slot is not None:   # 7-video rotation: never the previous video's hook type / lines
+        from ..studio.variety import HOOK_HOW, slot
+
+        hk = slot(variety_slot)["hook"]
+        grounding += (f"\n\nHOOK TYPE for this video: {hk}: {HOOK_HOW[hk]}. Still a real number or costly mistake "
+                      "to 'you' in the first 5 seconds.")
+        if previous:
+            grounding += ("\nThe previous video opened with: \"" + previous.get("opening", "")[:160] + "\" and ended "
+                          "with: \"" + previous.get("ending", "")[:160] + "\". Use a different opening line, ending "
+                          f"line and hook type (it used '{previous.get('hook_type', '')}').")
     script = generate_with_claude(b.topic, fmt, settings, angle=grounding)
-    return with_house_description(b, script).model_copy(update={"style": style})
+    return with_house_description(b, script).model_copy(update={"style": style, "variety_slot": variety_slot})
 
 
 def with_house_description(b: Brief, script: Script) -> Script:

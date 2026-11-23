@@ -63,6 +63,7 @@ class Script(BaseModel):
     hook: str = ""
     scenes: list[Scene]
     style: Optional[str] = None  # video format: explainer, myth_vs_fact, case_study, viewer_question, comparison, ...
+    variety_slot: Optional[int] = None  # 7-video rotation slot: hook type, music, thumbnail layout, Max pose
     cost_tag: str = Field(default="", exclude=True)  # which draft's writing cost this is (studio/costs.py)
 
     @property

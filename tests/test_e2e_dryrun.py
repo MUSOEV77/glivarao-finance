@@ -74,10 +74,34 @@ def fake_claude(prompt, fmt, seed):
     used: set = set()
     aca = "15,960" in prompt
     card = "22.36%" in prompt
+    m = re.search(r"HOOK TYPE for this video: (\w+)", prompt)
+    kinds = ("number", "mistake", "question", "myth", "story", "comparison", "warning")
+    hk = m.group(1) if m else kinds[seed % 7]
+    prev_hooks = {a or b for a, b in re.findall(r"previous video used '(\w+)'|previous video \((\w+)\)", prompt)}
+    while hk in prev_hooks:                              # like Claude: never the previous video's hook type
+        hk = kinds[(kinds.index(hk) + 1) % 7] if hk in kinds else kinds[0]
+    avoid = set(re.findall(r'ended with: \\?"([^"\\]+)', prompt)) | \
+        set(re.findall(r'same ending line as the previous video: \\?"([^"\\]+)', prompt))
+
+    def pick(options):                                   # like Claude: never the previous video's ending line
+        ok = [o for o in options if not any(o.startswith(a.rstrip(".")[:30]) for a in avoid)] or list(options)
+        return ok[seed % len(ok)]
     special, charts = [], {}
     if aca:
-        special = ["Miss December 15 and you start January without coverage." if fmt == "short" else
-                   "Miss December 15, and your Marketplace plan won't start on January 1.",
+        special = [{"question": "Miss December 15 and you start January without coverage?",
+                    "warning": "Don't miss December 15, or you start January without coverage.",
+                    "story": "You miss December 15 and you start January without coverage.",
+                    "myth": "You think January is fine, but miss December 15 and you lose coverage.",
+                    "comparison": "December 15 versus January 1: miss it and you go without coverage.",
+                    "mistake": "Miss December 15 and you start January without coverage, a costly mistake.",
+                    }.get(hk, "Miss December 15 and you start January without coverage.") if fmt == "short" else
+                   {"question": "Miss December 15, and will your Marketplace plan start on January 1?",
+                    "warning": "Don't miss December 15, or your Marketplace plan won't start on January 1.",
+                    "mistake": "Missing December 15 is a costly mistake: your plan won't start on January 1.",
+                    "myth": "You think January is fine, but miss December 15 and your plan won't start.",
+                    "story": "You open the Marketplace on December 16, and your plan won't start January 1.",
+                    "comparison": "December 15 versus January 1: miss it and your plan won't start on time.",
+                    }.get(hk, "Miss December 15, and your Marketplace plan won't start on January 1."),
                    "With income between 100% and 400% of the federal poverty level you qualify for the premium tax "
                    "credit.",
                    "The 2026 poverty guideline is $15,960 for one person and $33,000 for a family of four.",
@@ -89,8 +113,20 @@ def fake_claude(prompt, fmt, seed):
                       "source": "HealthCare.gov"}}
     elif card:
         calc = [float(x.replace(",", "")) for x in re.findall(r"total interest \$([\d,]+(?:\.\d+)?)", prompt)]
-        special = ["Your card could be charging you 22.36% a year." if fmt == "short" else
-                   "As of November 2026, your card balance probably costs you 22.36% a year."]
+        special = [{"number": "Your card could be charging you 22.36% a year.",
+                    "mistake": "Your card mistake costs you 22.36% a year.",
+                    "question": "Is your card really charging you 22.36%?",
+                    "myth": "You think your card rate is low, but it is 22.36%.",
+                    "story": "You open your card statement and see 22.36%.",
+                    "comparison": "Your card costs 22.36%, far more than savings pay you.",
+                    "warning": "Don't ignore your card rate: it costs you 22.36%."}[hk] if fmt == "short" else
+                   {"number": "As of November 2026, your card balance probably costs you 22.36% a year.",
+                    "mistake": "Your card mistake costs you 22.36% a year, as of November 2026.",
+                    "question": "Is your card balance really costing you 22.36% a year?",
+                    "myth": "You think your card rate is fine, but as of November 2026 it averaged 22.36%.",
+                    "story": "You open your card statement and the rate says 22.36% a year.",
+                    "comparison": "Your card costs you 22.36% a year, far more than your savings earn.",
+                    "warning": "Don't ignore your card rate: it averaged 22.36% a year."}[hk]]
         if len(calc) >= 2:
             special.append(f"For example, if you owe $5,000 at 22.36% and pay only the minimum, you'd pay about "
                            f"${round(calc[0]):,} in interest.")
@@ -106,9 +142,21 @@ def fake_claude(prompt, fmt, seed):
             text = special[0] + " " if special else ""
         body = _filler(rng, per, used) if fmt == "long" or i not in (0,) else ""
         narr = (text + body).strip() or _filler(rng, per, used)
+        if i == 0 and fmt == "long":   # 0-5 s hook, 5-15 s what it costs you, 15-30 s promise + open loop
+            narr = ((special[0] if special else "You're making a costly money mistake every single month.") +
+                    " That costs you real money in interest, every single month, for years." +
+                    " Most people never check the one statement line that shows it, so it keeps growing quietly." +
+                    " By the end, you'll know the one move that stops it, and here's the part most people miss. " +
+                    _filler(rng, per - 60, used))
         if i == n_sc - 1:
-            narr = ("Today, set one automatic payment above the minimum. This video is for education only and isn't "
-                    "financial advice.")
+            narr = (pick(["Today, set one automatic payment above the minimum.",
+                                "Today, open your statement and find your rate.",
+                                "This week, move one payment date to right after payday.",
+                                "Tonight, write down every balance and its rate.",
+                                "Today, call your card company and ask for a lower rate.",
+                                "This weekend, list your bills from the highest rate down.",
+                                "Today, turn on alerts for every payment due date."]) +
+                    " This video is for education only and isn't financial advice.")
         ch = charts.get(i, {"kind": "none", "title": "", "labels": [], "values": [], "unit": "",
                             "source": "Illustrative example"})
         scenes.append({"heading": head, "narration": narr, "character": "max", "pose": "talk",
@@ -117,17 +165,27 @@ def fake_claude(prompt, fmt, seed):
                        "key_points": [], "set": "auto", "entrance": "auto", "transition": "auto", "money_fx": "auto",
                        "beat": "none"})
     if fmt == "short":   # Shorts: hook with a fact, the labeled example, chart, what to do, sign-off
-        scenes[0]["narration"] = (special[0] if special else "You're skipping a money move that matters.") + \
+        scenes[0]["narration"] = (special[0] if special else "You're making a costly money mistake.") + \
             " Here's what that means for your budget."
         scenes[1]["narration"] = (special[-1] if len(special) > 1 else _filler(rng, 14, used))
         scenes[2]["narration"] = ("That gap adds up fast, so it pays to check the numbers once a year and keep a "
                                   "short note of what you pay.")
         scenes[3]["narration"] = ("Check your plan, set one reminder, and compare two options side by side before you "
                                   "decide anything.")
-        scenes[4]["narration"] = ("Do one thing today: check your number. This video is for education only and isn't "
-                                  "financial advice. Now look at that first number again.")      # loop line last
-    return {"title": "Your money: the plain truth", "description": "A clear guide.", "tags": ["money"],
-            "thumbnail_text": "Debt Wins", "hook": scenes[0]["narration"][:80], "scenes": scenes}
+        scenes[4]["narration"] = (pick(["Do one thing today: check your number.", "Check that rate tonight.",
+                                              "Write your number down today.", "Look at your statement today.",
+                                              "Set one reminder today.", "Ask about your rate this week.",
+                                              "Compare your number with this one today."]) +
+                                  " This video is for education only and isn't financial advice. " +
+                                  pick(["Now look at that first number again.", "So, back to that first number.",
+                                              "Which brings us back to the start.", "Now hear that number again.",
+                                              "Remember the very first thing I said?", "So look again at the top.",
+                                              "And that's why it starts the way it does."]))      # loop line last
+    title, thumb = (("Credit Card Interest: What 22.36% Costs You", "Your Card Rate") if card else
+                    ("ACA Deadline: Miss December 15, Pay More", "Miss December 15") if aca else
+                    ("Your Money Mistake: The Plain Truth", "Money Mistake"))
+    return {"title": title, "description": "A clear guide.", "tags": ["money"],
+            "thumbnail_text": thumb, "hook": scenes[0]["narration"][:80], "scenes": scenes}
 
 
 class FakeGeminiVoice:

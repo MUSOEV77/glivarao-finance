@@ -48,10 +48,16 @@ STYLE = ("Wide, detailed hand-drawn cartoon illustration filling the WHOLE frame
          "letters, no numbers, no words on signs, no logos, no watermark.")
 
 
-def place_for(text: str, avoid: str | None = None) -> str:
+def place_for(text: str, avoid: str | None = None, avoid_set=frozenset()) -> str:
+    """The place that fits the narration; never `avoid` (the previous scene's place) and, where another place
+    fits or any unused place is left, none of `avoid_set` (places the previous video used)."""
     low = text.lower()
+    banned = set(avoid_set) | ({avoid} if avoid else set())
     for rx, key in KEYWORDS:
-        if re.search(rx, low) and key != avoid:
+        if re.search(rx, low) and key not in banned:
+            return key
+    for key in ["city_street", "living_room"] + list(PLACES):
+        if key not in banned:
             return key
     return "city_street" if avoid != "city_street" else "living_room"
 

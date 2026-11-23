@@ -57,9 +57,73 @@ def _sentences_of(text: str) -> list[str]:
     return [s for s in SENT_SPLIT.split(" ".join(text.replace("*", "").split())) if s.strip()]
 
 
-def retention_issues(script: Script) -> list[str]:
-    """Hook in the first seconds, no intro, short sentences to 'you', open loops every 45-60 s (long videos)."""
+YOU_RE = re.compile(r"\byou(?:r|rs|'re|'ll|'d|'ve)?\b", re.I)
+NUM_RE = re.compile(r"\$\s?\d|\d[\d,.]*\s?(?:%|percent)|\d[\d,.]*\s(?:dollars|billion|trillion|million|years|months)|"
+                    r"\b\d[\d,.]*\b", re.I)
+MISTAKE_RE = re.compile(r"\b(?:mistake|wrong|costing|costs?|losing|lose|lost|overpay\w*|trap|wasting|throwing away|"
+                        r"penalt\w+|fees?|late|interest|paying|owe)\b", re.I)
+COST_RE = re.compile(r"\b(?:costs?|costing|pay|paying|paid|lose|losing|extra|interest|fees?|dollars?|years?|months?|"
+                     r"owe|price|bill|every (?:month|year))\b|\$|%|\d", re.I)
+PROMISE_RE = re.compile(r"\b(?:by the end|i'?ll show you|you'?ll (?:know|see|learn|have|get|find out)|here'?s how|"
+                        r"the fix|(?:one|two|three|3|2) (?:simple |easy |quick )?(?:moves?|steps?|ways?|fixes)|"
+                        r"how to (?:fix|stop|beat|get out|avoid|cut|lower)|we'?ll (?:fix|cover|walk)|"
+                        r"stay (?:with me|until)|you can (?:fix|stop|beat|avoid|cut|lower))\b", re.I)
+WPS = WPM_SPOKEN / 60            # spoken words per second (2.63)
+TITLE_STOP = set("the a an and or of to in on for is are your you what how why this that it its with from at by be "
+                 "as now still really most new vs explained guide here's heres".split())
+
+
+def _content_stems(text: str) -> set[str]:
+    return {w[:5] for w in re.findall(r"[a-z0-9$%]+", text.lower()) if len(w) >= 3 and w not in TITLE_STOP}
+
+
+def opening_issues(script: Script) -> list[str]:
+    """The first 30 seconds. Long: 0-5 s a shocking real number or costly mistake said to 'you'; 5-15 s what it
+    costs 'you'; 15-30 s a promise and an open loop. Short: the hook lands in 1.5 s. Both: the first line matches
+    the title and the thumbnail text."""
     out = []
+    words = " ".join(script.full_narration.replace("*", "").split()).split()
+    first = _sentences_of(script.scenes[0].narration)[0] if script.scenes and \
+        _sentences_of(script.scenes[0].narration) else ""
+
+    def span(a: float, b: float) -> str:
+        return " ".join(words[int(a * WPS):int(b * WPS) + 1])
+
+    if script.format == "short":
+        head = span(0, 1.5)                                            # ~4 words
+        if not (NUM_RE.search(head) or YOU_RE.search(head)):
+            out.append(f"hook doesn't land in 1.5 s: the first words \"{head}\" have no real number and no 'you'")
+        if not (YOU_RE.search(first) and (NUM_RE.search(first) or MISTAKE_RE.search(first))):
+            out.append(f"first line must be a real number or costly mistake said to 'you': \"{first[:80]}\"")
+    else:
+        a, b, c = span(0, 5), span(5, 15), span(15, 32)
+        if not (YOU_RE.search(a) and (NUM_RE.search(a) or MISTAKE_RE.search(a))):
+            out.append(f"0-5 s must hit 'you' with a shocking real number or a costly mistake: \"{a[:90]}\"")
+        if not (YOU_RE.search(b) and COST_RE.search(b)):
+            out.append(f"5-15 s must say what it costs 'you' (money, interest, years): \"{b[:90]}\"")
+        if not PROMISE_RE.search(c):
+            out.append(f"15-30 s needs a promise of what 'you' get by the end: \"{c[:90]}\"")
+        if not (LOOP_RE.search(c) or "?" in c or PROMISE_RE.search(c) and re.search(r"\bby the end\b", c, re.I)):
+            out.append(f"15-30 s needs an open loop (something answered later): \"{c[:90]}\"")
+    title_k = _content_stems(script.title.replace("#Shorts", ""))
+    first_k = _content_stems(first)
+    if title_k and not (title_k & first_k):
+        out.append(f"first line doesn't match the title (no shared key word): \"{first[:60]}\" vs \"{script.title[:60]}\"")
+    thumb = (script.thumbnail_text or "").replace("#Shorts", "")
+    thumb_k = _content_stems(thumb)
+    if thumb_k and not (thumb_k & (first_k | _content_stems(span(0, 5)))):
+        out.append(f"first line doesn't match the thumbnail text \"{thumb[:40]}\"")
+    return out
+
+
+def retention_issues(script: Script, previous: dict | None = None) -> list[str]:
+    """Hook in the first seconds, no intro, short sentences to 'you', open loops every 45-60 s (long videos), the
+    0-30 s opening structure, and no repeats of the previous video (studio/variety.py)."""
+    out = opening_issues(script)
+    if previous is not None:
+        from .studio.variety import script_issues
+
+        out += script_issues(script, previous)
     first_scene = script.scenes[0].narration if script.scenes else ""
     sents = _sentences_of(first_scene)
     hook = sents[0] if sents else ""
@@ -174,10 +238,10 @@ def overlap_ratio(a: str, b: str, n: int = 8) -> float:
 
 def check_script(script: Script, enforce_length: bool = True,
                  previous_scripts: list[str] | None = None, evergreen: bool = False,
-                 retention: bool = False) -> ComplianceReport:
+                 retention: bool = False, previous_video: dict | None = None) -> ComplianceReport:
     r = ComplianceReport()
     if retention:
-        for issue in retention_issues(script):
+        for issue in retention_issues(script, previous_video):
             (r.errors if enforce_length else r.warnings).append(f"Won't hold viewers: {issue}")
     if evergreen:
         for issue in evergreen_issues(script):

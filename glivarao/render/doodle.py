@@ -8,7 +8,6 @@ with a hard cut.
 """
 from __future__ import annotations
 
-import math
 import re
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -18,7 +17,10 @@ from PIL import Image, ImageDraw, ImageFilter
 from ..art import doodle as D
 
 FPS = 24
-MIN_SHOT, MAX_SHOT = 6.0, 10.0
+MIN_SHOT, MAX_SHOT = 4.0, 6.0          # after the first 30 s: a visual change every 4-6 s
+FAST_MIN, FAST_MAX = 2.0, 3.0          # first 30 s: a new image, zoom, pan or big text every 2-3 s
+FAST_UNTIL = 30.0
+NO_LOGO_UNTIL = 5.0                    # no logo/intro: the brand mark appears only after the hook
 # (x0, y0, x1, y1) as fractions of the frame: text and cards stay inside; captions live below y1
 SAFE = {False: (0.05, 0.06, 0.95, 0.80), True: (0.07, 0.06, 0.93, 0.56)}
 NUM = re.compile(r"\$\s?\d[\d,]*(?:\.\d+)?(?:\s?(?:trillion|billion|million|thousand))?|\d[\d,]*(?:\.\d+)?\s?(?:%|percent)"
@@ -38,31 +40,57 @@ class Shot:
     data: dict = field(default_factory=dict)
 
 
-def plan_shots(sentences: list[tuple[float, float, str]], duration: float) -> list[tuple[float, float, str]]:
-    """Group sentences into 6-10 s shots (long sentences are split evenly). Returns (start, end, text)."""
-    out, cur = [], None
-    for s, e, txt in sentences or [(0.0, duration, "")]:
-        if cur is None:
-            cur = [s if not out else out[-1][1], e, txt]
-        elif e - cur[0] <= MAX_SHOT or cur[1] - cur[0] < MIN_SHOT:
-            cur[1], cur[2] = e, f"{cur[2]} {txt}".strip()
-        else:
-            out.append(tuple(cur))
-            cur = [cur[1], e, txt]
-    if cur is not None:
-        out.append(tuple(cur))
-    if not out:
-        out = [(0.0, duration, "")]
-    out[0] = (0.0, out[0][1], out[0][2])
-    out[-1] = (out[-1][0], max(out[-1][1], duration), out[-1][2])
-    if len(out) > 1 and out[-1][1] - out[-1][0] < 4.0:
-        a, b = out[-2], out[-1]
-        out[-2:] = [(a[0], b[1], f"{a[2]} {b[2]}")]
-    split = []
-    for s, e, txt in out:
-        n = max(1, math.ceil((e - s) / MAX_SHOT))
-        split += [(s + (e - s) * k / n, s + (e - s) * (k + 1) / n, txt) for k in range(n)]
-    return split
+def plan_shots(sentences: list[tuple[float, float, str]], duration: float,
+               offset: float = 0.0) -> list[tuple[float, float, str]]:
+    """Cut the scene into shots: 2-3 s while the VIDEO is in its first 30 s (`offset` = this scene's start in the
+    video), 4-6 s after that. Cuts snap to sentence ends when one is close. Returns (start, end, text)."""
+    sents = sentences or [(0.0, duration, "")]
+    ends = sorted({round(e, 3) for _, e, _ in sents if 0 < e < duration})
+    cuts, t = [0.0], 0.0
+    while duration - t > 1e-6:
+        fast = offset + t < FAST_UNTIL
+        lo, hi = (FAST_MIN, FAST_MAX) if fast else (MIN_SHOT, MAX_SHOT)
+        tgt = (lo + hi) / 2
+        rem = duration - t
+        if rem <= hi:
+            cuts.append(duration)
+            break
+        near = [b for b in ends if t + lo <= b <= t + hi]
+        nxt = min(near, key=lambda b: abs(b - (t + tgt))) if near else t + tgt
+        if duration - nxt < lo:                       # don't leave a sliver: split what is left evenly
+            nxt = t + rem / 2
+        cuts.append(nxt)
+        t = nxt
+    out = []
+    for s0, s1 in zip(cuts, cuts[1:]):
+        mid = (s0 + s1) / 2
+        txt = " ".join(x for a, b, x in sents if a < s1 and b > s0 and (a + b) / 2 >= s0 - 0.01 and (a + b) / 2 < s1)
+        if not txt:
+            txt = next((x for a, b, x in sents if a <= mid < b), sents[-1][2])
+        out.append((s0, s1, txt.strip()))
+    return out or [(0.0, duration, "")]
+
+
+def key_phrase(text: str, n: int = 5) -> str:
+    """Big on-screen words for a shot: the number and what follows it, else the first words."""
+    m = NUM.search(text)
+    words = text.replace("*", "").split()
+    if m:
+        after = text[m.end():].split()[:3]
+        return " ".join([m.group(0)] + [w.strip(",.;:!?") for w in after]).strip()
+    return " ".join(w.strip(",.;:!?") for w in words[:n])
+
+
+def count_text(num: str, frac: float) -> str:
+    """'$1,368.5 billion' at frac 0.5 -> '$684.3 billion' (same format), for numbers that count up on screen."""
+    m = re.match(r"^(\$?\s?)([\d,]*\.?\d+)(.*)$", num.strip())
+    if not m or frac >= 1:
+        return num
+    pre, digits, post = m.groups()
+    v = float(digits.replace(",", "")) * max(0.0, frac)
+    dec = len(digits.split(".")[1]) if "." in digits else 0
+    body = f"{v:,.{dec}f}" if "," in digits or v >= 1000 else f"{v:.{dec}f}"
+    return f"{pre}{body}{post}"
 
 
 def mood(text: str, fallback: str = "explaining") -> str:
@@ -73,23 +101,49 @@ def mood(text: str, fallback: str = "explaining") -> str:
     return fallback
 
 
-def shots_for(scene, sentences, duration: float, first_scene: bool = False) -> list[Shot]:
-    shots, used_chart, used_points = [], False, False
+def shots_for(scene, sentences, duration: float, first_scene: bool = False, offset: float = 0.0) -> list[Shot]:
+    """Shot kinds: the video's first shot is the HOOK (big text from frame 1); then the chart once, numbers
+    (counting up), key points once, and big words / the picture alone alternating, so every cut also changes
+    what is on screen."""
+    shots, used_chart, used_points, last = [], False, False, ""
     has_chart = scene.chart.kind != "none"
-    for k, (s, e, txt) in enumerate(plan_shots(sentences, duration)):
+    for k, (s, e, txt) in enumerate(plan_shots(sentences, duration, offset)):
         num = NUM.search(txt)
-        if k == 0:
+        if k == 0 and first_scene:
+            kind = "hook"
+        elif k == 0:
             kind = "title"
         elif has_chart and not used_chart:
             kind, used_chart = "chart", True
-        elif num:
+        elif num and last != "number":
             kind = "number"
         elif scene.key_points and not used_points:
             kind, used_points = "points", True
         else:
-            kind = "scene"          # the picture alone (Max acting / in the place)
-        shots.append(Shot(s, e, kind, txt, {"num": num.group(0) if num else ""}))
+            kind = "words" if last != "words" and offset + s < FAST_UNTIL else (
+                "scene" if last != "scene" else "words")
+        shots.append(Shot(s, e, kind, txt, {"num": num.group(0) if num else "", "phrase": key_phrase(txt)}))
+        last = kind
     return shots
+
+
+def change_times(shots_per_scene: list[list[Shot]], scene_starts: list[float]) -> list[float]:
+    """Absolute times (s) of every visual change: each cut (new shot: new camera move and new card)."""
+    out = []
+    for shots, t0 in zip(shots_per_scene, scene_starts):
+        out += [round(t0 + sh.start, 3) for sh in shots]
+    return sorted(set(out))
+
+
+def pacing_issues(times: list[float], total: float) -> list[str]:
+    """Never static: a change at least every 3 s in the first 30 s, every 6 s after."""
+    out = []
+    pts = sorted(set(times + [total]))
+    for a, b in zip(pts, pts[1:]):
+        limit = FAST_MAX if a < FAST_UNTIL else MAX_SHOT
+        if b - a > limit + 0.05:
+            out.append(f"{b - a:.1f} s without a visual change at {a:.1f} s (max {limit:g} s)")
+    return out
 
 
 # ------------------------------------------------------------------------------------------- safe text
@@ -176,7 +230,24 @@ def build_overlay(scene, shot: Shot, size: tuple[int, int], portrait: bool, seed
     sx0, sy0, sx1, sy1 = ov.safe
     sw, sh = sx1 - sx0, sy1 - sy0
     pad = int(min(size) * 0.025)
-    if shot.kind == "title":
+    if shot.kind == "hook":                      # frame 1: the hook in BIG text (number first if there is one)
+        big = shot.data.get("num") or shot.data.get("phrase") or scene.heading
+        box = (sx0, sy0, sx1 if portrait else sx0 + sw * 0.62, sy0 + sh * (0.5 if portrait else 0.6))
+        ov.card(box, seed)
+        y = ov.text(big, (box[0] + pad * 1.6, box[1] + pad * 1.4, box[2] - pad * 1.6,
+                          box[1] + (box[3] - box[1]) * 0.62), int(size[1] * (0.11 if portrait else 0.16)),
+                    align="center", max_lines=2)
+        rest = shot.data.get("phrase", "") if shot.data.get("num") else scene.heading
+        if rest and rest != big:
+            ov.text(rest, (box[0] + pad, y, box[2] - pad, box[3] - pad), int(size[1] * (0.045 if portrait else 0.06)),
+                    color=D.GREEN, align="center", max_lines=2)
+    elif shot.kind == "words":                   # big on-screen words (pattern change between pictures)
+        box = (sx0, sy0, sx1 if portrait else sx0 + sw * 0.55, sy0 + sh * (0.34 if portrait else 0.42))
+        ov.card(box, seed)
+        ov.text(shot.data.get("phrase") or scene.heading, (box[0] + pad * 1.4, box[1] + pad * 1.2,
+                                                          box[2] - pad * 1.4, box[3] - pad * 1.2),
+                int(size[1] * (0.075 if portrait else 0.11)), align="center", max_lines=2)
+    elif shot.kind == "title":
         box = (sx0, sy0, sx0 + sw * (1.0 if portrait else 0.56), sy0 + sh * (0.34 if portrait else 0.36))
         ov.card(box, seed)
         y = ov.text(scene.heading, (box[0] + pad, box[1] + pad, box[2] - pad, box[3] - pad * 1.6),
@@ -243,7 +314,9 @@ def camera(bg: Image.Image, frame_size: tuple[int, int], t: float, move: str) ->
     fw, fh = frame_size
     bw, bh = bg.size
     base = min(bw / fw, bh / fh)                     # view size (in picture pixels) at zoom 1 = cover fit
-    z0, z1 = {"zoom_in": (1.0, 1.12), "zoom_out": (1.12, 1.0)}.get(move, (1.08, 1.08))
+    if move == "punch_in":                           # linear: visible motion from the very first frame
+        e = t
+    z0, z1 = {"zoom_in": (1.0, 1.12), "zoom_out": (1.12, 1.0), "punch_in": (1.0, 1.16)}.get(move, (1.08, 1.08))
     z = z0 + (z1 - z0) * e
     vw, vh = fw * base / z, fh * base / z
     fx, fy = {"pan_right": (0.15 + 0.7 * e, 0.5), "pan_left": (0.85 - 0.7 * e, 0.5),
@@ -286,12 +359,15 @@ def empty_ratio(img: Image.Image, block: int = 8, std_max: float = 4.0) -> float
 
 class DoodleFrames:
     """frame(f, portrait) for one scene. bg_path: the scene's picture; max_pose_path: Max cutout to place (None
-    when the picture already shows Max acting in it)."""
+    when the picture already shows Max acting in it). `offset`: the scene's start in the video (s)."""
 
-    def __init__(self, script, i: int, sentences, n_frames: int):
+    COUNT_UP = 0.6          # numbers count up on screen over the first 0.6 s of their shot
+
+    def __init__(self, script, i: int, sentences, n_frames: int, offset: float = 0.0):
         self.scene = script.scenes[i]
         self.i = i
-        self.shots = shots_for(self.scene, sentences, n_frames / FPS, i == 0)
+        self.offset = offset
+        self.shots = shots_for(self.scene, sentences, n_frames / FPS, i == 0, offset)
         self._ov: dict = {}
 
     def _shot_at(self, t: float) -> int:
@@ -300,12 +376,21 @@ class DoodleFrames:
                 return k
         return len(self.shots) - 1
 
-    def overlay(self, k: int, portrait: bool) -> Overlay:
-        key = (k, portrait)
+    def overlay(self, k: int, portrait: bool, step: int = 6) -> Overlay:
+        key = (k, portrait, step)
         if key not in self._ov:
             size = (1080, 1920) if portrait else (1920, 1080)
-            self._ov = {key: build_overlay(self.scene, self.shots[k], size, portrait, seed=self.i * 7 + k)}
+            shot = self.shots[k]
+            if shot.kind == "number" and step < 6:
+                shot = Shot(shot.start, shot.end, shot.kind, shot.text,
+                            {**shot.data, "num": count_text(shot.data.get("num", ""), step / 6)})
+            self._ov = {key: build_overlay(self.scene, shot, size, portrait, seed=self.i * 7 + k)}
         return self._ov[key]
+
+    def move(self, k: int) -> str:
+        if self.i == 0 and k == 0:
+            return "punch_in"           # motion from frame 1 (no ease-in)
+        return MOVES[(self.i * 3 + k) % len(MOVES)]
 
     def frame(self, f: int, portrait: bool) -> Image.Image:
         t = f / FPS
@@ -315,7 +400,7 @@ class DoodleFrames:
         prog = min(1.0, max(0.0, (t - s.start) / max(0.1, s.end - s.start)))
         bgp = getattr(self.scene, "bg_path", None) or getattr(self.scene, "art_path", None)
         if bgp:
-            out = camera(_load_bg(bgp), size, prog, MOVES[(self.i * 3 + k) % len(MOVES)])
+            out = camera(_load_bg(bgp), size, prog, self.move(k))
         else:   # no picture at all: plain paper (the caller avoids this by falling back to the editorial theme)
             out = D.paper(*size).copy()
         pose = getattr(self.scene, "max_pose_path", None)
@@ -328,11 +413,13 @@ class DoodleFrames:
             ImageDraw.Draw(sh).ellipse((cut.width * 0.15, 0, cut.width * 0.85, sh.height - 1), fill=90)
             out.paste((30, 28, 24), (x, y + h - sh.height // 2), sh.filter(ImageFilter.GaussianBlur(6)))
             out.paste(cut, (x, y), cut)
-        ov = self.overlay(k, portrait)
+        step = min(6, int((t - s.start) / self.COUNT_UP * 6)) if s.kind == "number" else 6
+        ov = self.overlay(k, portrait, step)
         out.paste(ov.img, (0, 0), ov.img)
-        D.brand_mark(out, "tr", scale=1.0)
+        if self.offset + t >= NO_LOGO_UNTIL:      # no logo during the hook
+            D.brand_mark(out, "tr", scale=1.0)
         return out
 
 
-__all__ = ["DoodleFrames", "plan_shots", "shots_for", "build_overlay", "camera", "Shot", "fit_text", "safe_box",
+__all__ = ["DoodleFrames", "plan_shots", "shots_for", "change_times", "pacing_issues", "count_text", "key_phrase", "build_overlay", "camera", "Shot", "fit_text", "safe_box",
            "empty_ratio", "SAFE", "MIN_SHOT", "MAX_SHOT", "Overlay"]

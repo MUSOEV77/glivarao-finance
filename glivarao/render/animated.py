@@ -244,7 +244,8 @@ def _frames(i: int):
     if _JOB.get("theme") == "doodle":
         from .doodle import DoodleFrames
 
-        return DoodleFrames(script, i, _JOB["sentences"][i], _JOB["starts"][i + 1] - _JOB["starts"][i])
+        return DoodleFrames(script, i, _JOB["sentences"][i], _JOB["starts"][i + 1] - _JOB["starts"][i],
+                            offset=_JOB["starts_sec"][i])
     if _JOB.get("theme") == "editorial":
         from .editorial import EditorialFrames
 
@@ -359,6 +360,17 @@ def render_animated(script: Script, workdir: Path, settings: Settings, voice: st
         sentences = [sentence_tuples(n) for n in narrations]
         ass = write_ass(cues, workdir / "captions.ass", fw, fh, portrait=portrait,
                         margin_v=PORTRAIT_CAPTION_MARGIN_V if portrait else 46, theme="editorial")
+        from .doodle import FPS as _DF, change_times, pacing_issues, shots_for
+
+        fs = [int(round(x * _DF)) for x in starts_sec]
+        shot_lists = [shots_for(sc, sentences[i], (fs[i + 1] - fs[i]) / _DF, i == 0, starts_sec[i])
+                      for i, sc in enumerate(script.scenes)]
+        times = change_times(shot_lists, starts_sec[:-1])
+        pace = {"changes": times, "issues": pacing_issues(times, total),
+                "kinds": [[s.kind for s in sl] for sl in shot_lists]}
+        (workdir / "pacing.json").write_text(json.dumps(pace, indent=1))
+        if pace["issues"]:
+            log.warning("pacing: %s", "; ".join(pace["issues"]))
     else:
         ass = write_ass(cues, workdir / "captions.ass", fw, fh, portrait=portrait,
                         margin_v=(PH - 1010) if portrait else None)
@@ -373,8 +385,12 @@ def render_animated(script: Script, workdir: Path, settings: Settings, voice: st
             sfx_cues = []  # music bed only: calm explainer, no cartoon sound effects
         else:
             sfx_cues = cue_list(plans, starts_sec[:-1])
-        mixed = mix(audio, sfx_cues, seed=zlib.crc32(script.title.encode()) % 1000,
-                    sfx_level=0.3 if beats is not None else 0.45)  # stable per title
+        seed, bpm = zlib.crc32(script.title.encode()) % 1000, 84     # stable per title
+        if getattr(script, "variety_slot", None) is not None:       # 7-video rotation: never the previous music
+            from ..studio.variety import MUSIC, slot
+
+            seed, bpm = MUSIC[slot(script.variety_slot)["music"]]
+        mixed = mix(audio, sfx_cues, seed=seed, sfx_level=0.3 if beats is not None else 0.45, bpm=bpm)
         sf.write(raw_wav, mixed, KOKORO_SR, subtype="PCM_16")
     else:
         from ..anim.audio import master_voice

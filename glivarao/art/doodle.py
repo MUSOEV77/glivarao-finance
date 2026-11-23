@@ -365,16 +365,13 @@ def series_chart(img: Image.Image, box, values: list[float], seed: int = 11, wei
     """Real data only: one point per value, evenly spaced across the full width, y axis from ZERO (no exaggerated
     trend), grey line for the earlier points, green for the last step, gold dot on the latest value."""
     x0, y0, x1, y1 = box
-    w, h = x1 - x0, y1 - y0
+    w = x1 - x0
     lw = max(5, w * 0.008) * weight
     p = Pen(img, seed=seed, width=lw, wobble=w * 0.0015)
     p.arrow(x0, y1, x0, y0, lw, head=w * 0.03)
     p.arrow(x0, y1, x1, y1, lw, head=w * 0.03)
-    top = max(values) or 1.0
-    n = len(values) - 1
-    xs = [x0 + w * 0.08 + w * 0.8 * k / n for k in range(n + 1)]
-    ys = [y1 - h * 0.85 * v / top for v in values]
-    pts = list(zip(xs, ys))
+    pts = series_points_xy(box, values)
+    xs, ys = [x for x, _ in pts], [y for _, y in pts]
     tint = (lambda c: c + (255,)) if img.mode == "RGBA" else (lambda c: c)
     p.d.polygon(pts + [(xs[-1], y1 - lw), (xs[0], y1 - lw)], fill=tint((214, 214, 208)))
     p.line(pts[:-1], lw * 1.2, GREY)
@@ -384,7 +381,42 @@ def series_chart(img: Image.Image, box, values: list[float], seed: int = 11, wei
     p.dot(pts[-1][0], pts[-1][1], lw * 1.9, GOLD)
     p.circle(pts[-1][0], pts[-1][1], lw * 1.9, width=lw * 0.5)
     return {"end": pts[-1], "start_x": xs[0], "base_y": y1, "dot_r": lw * 1.9, "line_top": min(ys),
-            "line_bottom": max(ys)}
+            "line_bottom": max(ys), "points": pts}
+
+
+def series_points_xy(box, values: list[float]) -> list[tuple[float, float]]:
+    """Where series_chart puts each value (evenly spaced, axis from zero)."""
+    x0, y0, x1, y1 = box
+    w, h = x1 - x0, y1 - y0
+    top = max(values) or 1.0
+    n = max(1, len(values) - 1)
+    return [(x0 + w * 0.08 + w * 0.8 * k / n, y1 - h * 0.85 * v / top) for k, v in enumerate(values)]
+
+
+def _hits_line(box, pts, margin: float) -> bool:
+    x0, y0, x1, y1 = box[0] - margin, box[1] - margin, box[2] + margin, box[3] + margin
+    for (ax, ay), (bx, by) in zip(pts, pts[1:]):
+        for k in range(41):
+            x, y = ax + (bx - ax) * k / 40, ay + (by - ay) * k / 40
+            if x0 <= x <= x1 and y0 <= y <= y1:
+                return True
+    return False
+
+
+def free_spot(cbox, pts, text: str, start: int, smallest: int, margin: float):
+    """Largest pill size and position inside the chart box that doesn't touch the line: (vs, x0, y0, w, h)."""
+    x0, y0, x1, y1 = cbox
+    for vs in range(start, smallest - 1, -4):
+        w = hand(vs).getlength(text) + vs * 0.7
+        h = vs * 1.41
+        ins = margin
+        for cx, cy in ((x0 + ins, y0 + ins), ((x0 + x1 - w) / 2, y0 + ins), (x1 - w - ins, y1 - h - ins),
+                       ((x0 + x1 - w) / 2, y1 - h - ins), (x0 + ins + w * 0.1, (y0 + y1 - h) / 2),
+                       (x1 - w - ins, y0 + ins), (x0 + ins, y1 - h - ins)):
+            b = (cx, cy, cx + w, cy + h)
+            if b[0] >= x0 and b[2] <= x1 and b[1] >= y0 and b[3] <= y1 and not _hits_line(b, pts, margin):
+                return vs, cx, cy, w, h
+    return None
 
 
 def bar_chart(img: Image.Image, box, values: list[float], labels: list[str], seed: int = 13) -> None:
@@ -464,7 +496,7 @@ def _contrast(c1, c2) -> float:
 def thumbnail(text: str, emotion: str = "shocked", out: Path | None = None, seed: int = 1,
               size: tuple[int, int] = (1280, 720), history=None, spike=None,
               max_img: Image.Image | None = None, value: str = "", start_year: str = "", end_year: str = "",
-              info: dict | None = None, points: list | None = None) -> Image.Image:
+              info: dict | None = None, points: list | None = None, layout: str = "max_right") -> Image.Image:
     """Warm paper, a complete 2-4 word statement ending with a period (huge), a soft green panel and Max with an
     emotion. Drawn at 2x, saved at 1280x720. `info` receives the text boxes (in output pixels) for the readability
     test.
@@ -474,7 +506,9 @@ def thumbnail(text: str, emotion: str = "shocked", out: Path | None = None, seed
       values (axis from zero), first and last year under it, the latest value in gold at the end;
     * otherwise -> ONE big number badge (e.g. '22.36% APR'), no line, no years. (`start_year`/`end_year` are
       ignored: two years around one number would suggest a trend.)
-    * no number at all -> no panel."""
+    * no number at all -> no panel.
+    Layouts (rotated so consecutive videos differ): 'max_right' (statement top-left, panel below, Max right),
+    'max_left' (the mirror: Max left), 'panel_top' (panel on top, statement under it, Max right)."""
     W2, H2 = size[0] * 2, size[1] * 2
     img = Image.blend(paper(W2, H2, seed=3 + seed).copy(), Image.new("RGB", (W2, H2), THUMB_PAPER), 0.6)
     p = Pen(img, seed=seed, width=12)
@@ -488,19 +522,30 @@ def thumbnail(text: str, emotion: str = "shocked", out: Path | None = None, seed
     while size_ > 160 and (max(hand(size_).getlength(ln) for ln in lines) > W2 * 0.58 or
                            size_ * 0.92 * len(lines) > H2 * 0.38):
         size_ -= 10
-    y = H2 * 0.05 + size_ * 0.5
+    pts = [(str(yr), float(v)) for yr, v in (points or [])]
+    chart_ok = len(pts) >= 3
+    has_panel = chart_ok or bool(value)
+    ox = W2 * 0.355 if layout == "max_left" else 0.0          # text + panel column offset
+    stmt_h = size_ * 0.92 * len(lines)
+    if layout == "panel_top" and has_panel:
+        y = H2 * 0.925 - stmt_h + size_ * 0.42                # statement at the bottom, panel above it
+    else:
+        y = H2 * 0.05 + size_ * 0.5
+    y_first = y
     for ln in lines:
-        p.text((W2 * 0.045, y), ln, size_, INK, anchor="lm", bold=max(6, size_ // 28))
-        boxes["statement"].append(p.d.textbbox((W2 * 0.045, y), ln, font=hand(size_), anchor="lm",
+        p.text((ox + W2 * 0.045, y), ln, size_, INK, anchor="lm", bold=max(6, size_ // 28))
+        boxes["statement"].append(p.d.textbbox((ox + W2 * 0.045, y), ln, font=hand(size_), anchor="lm",
                                                stroke_width=max(6, size_ // 28)))
         y += size_ * 0.92
     last_w = hand(size_).getlength(lines[-1])
-    underline(p, W2 * 0.05, W2 * 0.05 + last_w * 0.97, y - size_ * 0.27, GREEN, 26)
-    pts = [(str(yr), float(v)) for yr, v in (points or [])]
-    chart_ok = len(pts) >= 3
-    if chart_ok or value:
+    underline(p, ox + W2 * 0.05, ox + W2 * 0.05 + last_w * 0.97, y - size_ * 0.27, GREEN, 26)
+    if has_panel:
         # soft coloured panel (with a shadow), so the chart / number stands out on YouTube
-        px0, py0, px1, py1 = W2 * 0.035, max(y - size_ * 0.27 + H2 * 0.03, H2 * 0.44), W2 * 0.6, H2 * 0.965
+        if layout == "panel_top":
+            px0, py0, px1, py1 = W2 * 0.035, H2 * 0.04, W2 * 0.6, y_first - size_ * 0.62
+        else:
+            px0, py0, px1, py1 = (ox + W2 * 0.035, max(y - size_ * 0.27 + H2 * 0.03, H2 * 0.44), ox + W2 * 0.6,
+                                  H2 * 0.965)
         sh = Image.new("L", (W2, H2), 0)
         ImageDraw.Draw(sh).rounded_rectangle((px0 + 16, py0 + 20, px1 + 16, py1 + 20), 40, fill=90)
         from PIL import ImageFilter
@@ -510,26 +555,32 @@ def thumbnail(text: str, emotion: str = "shocked", out: Path | None = None, seed
     if chart_ok:          # a line chart ONLY with >= 3 real data points (axis from zero: no exaggeration)
         ys = int(H2 * 0.092)                    # year labels
         cbox = (px0 + W2 * 0.035, py0 + H2 * 0.045, px1 - W2 * 0.03, py1 - ys * 1.3)
-        chart = series_chart(img, cbox, [v for _, v in pts], seed=seed + 5, weight=2.0)
+        vals = [v for _, v in pts]
+        readable = int(H2 * 0.145)            # the number stays readable at phone size (160x90)
+        g = lw_gap(W2)
+
+        def spot_for(cb):
+            return free_spot((cb[0] + g * 2, cb[1], cb[2], cb[3] - g), series_points_xy(cb, vals), value,
+                             int(H2 * 0.17), readable, g) if value else None
+
+        spot = spot_for(cbox)
+        side = None
+        if value and spot is None:            # no free space on the plot: the number gets its own row on top
+            vs = int(H2 * 0.15)
+            while vs > H2 * 0.09 and hand(vs).getlength(value) + vs * 0.7 > (px1 - px0) * 0.9:
+                vs -= 4
+            sw, sh_ = hand(vs).getlength(value) + vs * 0.7, vs * 1.41
+            side = (vs, px0 + W2 * 0.03, py0 + H2 * 0.025, sw, sh_)
+            cbox = (cbox[0], py0 + H2 * 0.025 + sh_ + H2 * 0.03, cbox[2], cbox[3])
+        chart = series_chart(img, cbox, vals, seed=seed + 5, weight=2.0)
         ex, ey = chart["end"]
         for yr, x in ((pts[0][0], chart["start_x"]), (pts[-1][0], ex)):
             yy = chart["base_y"] + ys * 0.15
             p.d.text((x, yy), yr, font=hand(ys), fill=INK, anchor="mt", stroke_width=2, stroke_fill=INK)
             boxes["years"].append(p.d.textbbox((x, yy), yr, font=hand(ys), anchor="mt", stroke_width=2))
-        if value:                               # the latest real value in gold, in free space (never on the line)
-            vs = int(H2 * 0.11)
+        if value and (spot or side):          # the latest real value in gold, never on the line
+            vs, bx0, by0, bw_, bh_ = spot or side
             f = hand(vs)
-            tw = f.getlength(value)
-            padx, pady = vs * 0.35, vs * 0.18
-            bw_, bh_ = tw + 2 * padx, vs * 1.05 + 2 * pady
-            cx = (cbox[0] + cbox[2]) / 2
-            below = chart["base_y"] - chart["line_bottom"] - lw_gap(W2)   # room under the line (axis from zero)
-            above = chart["line_top"] - cbox[1]
-            if below >= bh_ + H2 * 0.02:
-                by0 = chart["line_bottom"] + (below - bh_) / 2 + lw_gap(W2) * 0.5
-            else:
-                by0 = max(cbox[1], cbox[1] + (above - bh_) / 2)
-            bx0 = cx - bw_ / 2
             p.d.rounded_rectangle((bx0, by0, bx0 + bw_, by0 + bh_), int(bh_ * 0.3), fill=INK)
             p.d.text((bx0 + bw_ / 2, by0 + bh_ / 2), value, font=f, fill=GOLD, anchor="mm", stroke_width=3,
                      stroke_fill=GOLD)
@@ -554,10 +605,12 @@ def thumbnail(text: str, emotion: str = "shocked", out: Path | None = None, seed
         if cut.width > W2 * 0.4:
             s2 = W2 * 0.4 / cut.width
             cut = cut.resize((int(cut.width * s2), int(cut.height * s2)), Image.LANCZOS)
-        img.paste(cut, (int(W2 * 0.8 - cut.width / 2), H2 - cut.height + int(H2 * 0.04)), cut)
+        mx = 0.2 if layout == "max_left" else 0.8
+        img.paste(cut, (int(W2 * mx - cut.width / 2), H2 - cut.height + int(H2 * 0.04)), cut)
     else:
-        draw_max(img, W2 * 0.8, H2 * 1.22, u=H2 * 0.125, emotion=emotion, seed=seed + 9)
-    brand_mark(img, "tr", scale=2.2)
+        draw_max(img, W2 * (0.2 if layout == "max_left" else 0.8), H2 * 1.22, u=H2 * 0.125, emotion=emotion,
+                 seed=seed + 9)
+    brand_mark(img, "tl" if layout == "max_left" else "tr", scale=2.2)
     out_img = finish(img, size)
     if info is not None:
         k = size[0] / W2

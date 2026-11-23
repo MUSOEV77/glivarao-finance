@@ -254,11 +254,11 @@ def duck_gain(voice: np.ndarray, music_level: float = 0.16, duck_to: float = 0.3
 
 
 def mix(voice: np.ndarray, cues: list[tuple[float, str]], seed: int = 0, music_level: float = 0.09,
-        duck_to: float = 0.4, sfx_level: float = 0.45) -> np.ndarray:
+        duck_to: float = 0.4, sfx_level: float = 0.45, bpm: int = 84) -> np.ndarray:
     """voice: float32 mono at SR. Returns the mixed track (same length)."""
     voice = master_voice(voice)
     n = len(voice)
-    music = music_bed(n / SR, seed=seed)[:n]
+    music = music_bed(n / SR, seed=seed, bpm=bpm)[:n]
     if len(music) < n:
         music = np.pad(music, (0, n - len(music)))
     out = voice + music * duck_gain(voice, music_level, duck_to)

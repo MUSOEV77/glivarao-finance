@@ -31,7 +31,14 @@ def paid(settings, monkeypatch):
             sc["narration"] = (f"But here's the part most people miss about your card, part {i}. "
                                + " ".join(words[13:]))
         rest = d["scenes"][0]["narration"].split()[13:]               # the hook replaces the opening words
-        d["scenes"][0]["narration"] = "Your card could cost you 22% a year. " + " ".join(rest)
+        opening = "Your card could cost you 22% a year. "
+        if fmt == "long":   # like Claude under the rules: 0-5 s hook, 5-15 s the cost, 15-30 s promise + open loop
+            opening += ("That costs you real money in interest, every single month, for years. Most people never "
+                        "check the one statement line that shows it, so it keeps growing quietly. By the end, "
+                        "you'll know the one move that stops it, and here's the part most people miss. ")
+            rest = rest[45:]
+        d["scenes"][0]["narration"] = opening + " ".join(rest)
+        d["thumbnail_text"] = "Your Card Rate"                        # matches the first line
         d["scenes"][-1]["narration"] += " This video is for education only and isn't financial advice."
         d["scenes"][-2]["heading"] = "What to do this weekend"   # like Claude: the closing action section
         return d

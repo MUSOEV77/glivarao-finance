@@ -47,7 +47,16 @@ RETENTION (US viewers decide in seconds; checked by code):
 - The FIRST sentence is the hook: a surprising real number from the fact sheet, or a costly mistake the viewer is
   probably making, said to "you". No intro, no greeting, no channel name, no "welcome", "hey guys", "in this video",
   "today we're going to", "let's talk about". Long video: the hook lands in the first 5 seconds (first sentence
-  at most 20 words). Short: within 2 seconds (first sentence at most 10 words).
+  at most 20 words). Short: the real number or "you" in the first 4 words (1.5 seconds), first sentence at most
+  10 words.
+- LONG VIDEO OPENING, second by second (about 2.6 spoken words per second):
+  0-5 s (first ~13 words): the shocking real number or the costly mistake, said to "you".
+  5-15 s (next ~26 words): what it costs "you" in money, interest or years (fact-sheet numbers or a labeled
+  worked example).
+  15-30 s (next ~40 words): the promise ("By the end, you'll know ...", "I'll show you the one move that ...")
+  plus an open loop that is answered later ("and the part most people miss comes at the end").
+- The first sentence uses the key words of the title and of thumbnail_text (same number or same words), so the
+  click is confirmed at once.
 - Talk to "you". Simple everyday words. Short sentences: mostly 8-14 words, never more than 25.
 - Long videos: a pattern interrupt or open loop at least every 45-60 seconds (about every 120-160 words): "But
   here's the part most people miss.", "Stick with me, because this is where it gets expensive.", a direct
@@ -187,9 +196,11 @@ def sponsor_prompt(draft_json: str, issues: list[str], needs_what_to_do: bool,
                     "as 'as of <Month Year>':\n" + "\n".join(f"- {i}" for i in evergreen_issues[:15]))
     if retention_issues:
         asks.append("Make it hold US viewers (RETENTION rules). Fix these: first sentence = a surprising fact-sheet "
-                    "number or a costly mistake, to 'you', no intro; short sentences; talk to 'you'; an open loop or "
-                    "pattern interrupt every 45-60 seconds; one clear final action (Shorts: one idea, loop line "
-                    "last):\n" + "\n".join(f"- {i}" for i in retention_issues[:15]))
+                    "number or a costly mistake, to 'you', no intro, using the title's and thumbnail_text's key "
+                    "words; long videos: 5-15 s what it costs 'you', 15-30 s a promise plus an open loop; short "
+                    "sentences; talk to 'you'; an open loop or pattern interrupt every 45-60 seconds; one clear final "
+                    "action (Shorts: one idea, loop line last); never repeat the previous video's hook type, opening "
+                    "or ending line:\n" + "\n".join(f"- {i}" for i in retention_issues[:15]))
     if needs_what_to_do:
         asks.append("Add a closing section before the disclaimer whose heading starts with \"What to do\": 3-5 "
                     "concrete steps for a US household, free options first; where it fits naturally one step names "

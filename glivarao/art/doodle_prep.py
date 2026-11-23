@@ -23,12 +23,13 @@ class DoodleUnavailable(RuntimeError):
     pass
 
 
-def key_scene_prompt(scene, portrait: bool) -> str:
+def key_scene_prompt(scene, portrait: bool, pose: str | None = None, avoid_set=frozenset()) -> str:
     gist = " ".join(scene.narration.replace("*", "").split())[:420]
-    place = scene_library.PLACES[scene_library.place_for(f"{scene.heading} {scene.narration}")]
+    place = scene_library.PLACES[scene_library.place_for(f"{scene.heading} {scene.narration}", avoid_set=avoid_set)]
+    how = f" Max's pose: {max_assets.POSES[pose]}." if pose in max_assets.POSES else ""
     return (f"{'Tall 9:16' if portrait else 'Wide 16:9'} full-frame scene for a personal-finance explainer video: "
             f"\"{scene.heading}\". What the narrator says: {gist} Show the moment as a lively scene set in {place}, "
-            f"with {max_assets.CHARACTER} acting in it with clear body language and a readable facial expression "
+            f"with {max_assets.CHARACTER} acting in it with clear body language and a readable facial expression{how} "
             "(exactly as in the reference sheet: same face, glasses, hair, sweater, coin pin). Max is on the "
             f"{'lower half' if portrait else 'right half'} of the picture; keep the "
             f"{'top third' if portrait else 'upper-left area'} a little calmer for a text card. "
@@ -50,8 +51,11 @@ def key_indices(script, n: int) -> list[int]:
     return sorted(out)
 
 
-def prepare(script, out: Path, settings, store=None, gi=None) -> tuple:
-    """Returns (script with bg_path / max_pose_path on every scene, stats)."""
+def prepare(script, out: Path, settings, store=None, gi=None, avoid_places=frozenset(),
+            opening_pose: str | None = None) -> tuple:
+    """Returns (script with bg_path / max_pose_path on every scene, stats). `avoid_places`: library places the
+    previous video used (not used again when another fits); `opening_pose`: Max's pose in the first scene (from
+    the 7-video rotation). stats['places'] / stats['opening_pose'] record what was used."""
     from ..render.doodle import mood
 
     if not max_assets.ready(settings):
@@ -65,23 +69,28 @@ def prepare(script, out: Path, settings, store=None, gi=None) -> tuple:
     sheet = max_assets.sheet_path(settings).read_bytes()
     n_key = settings.doodle_key_scenes_short if portrait else settings.doodle_key_scenes_long
     keys = key_indices(script, n_key)
-    scenes, stats, prev_place = list(script.scenes), {"key_ai": 0, "library": 0, "note": ""}, None
+    scenes, stats, prev_place = list(script.scenes), {"key_ai": 0, "library": 0, "note": "", "places": [],
+                                                       "opening_pose": None}, None
     start = gi.spent_usd if gi is not None else 0.0
     for i, sc in enumerate(scenes):
         upd = None
         if i in keys and gi is not None:
             try:
-                img = gi.generate(key_scene_prompt(sc, portrait), "1K" if portrait else "2K",
+                pz = opening_pose if i == 0 else None
+                img = gi.generate(key_scene_prompt(sc, portrait, pz, avoid_places), "1K" if portrait else "2K",
                                   "9:16" if portrait else "16:9", [sheet])
                 dst = out / "scene_art" / f"key_{i:02d}.png"
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 img.save(dst, "PNG")
                 upd = {"bg_path": str(dst), "max_pose_path": None, "art_path": None}
                 stats["key_ai"] += 1
+                stats["places"].append(f"ai:{out.name}:{i}")      # a new picture: never a repeat
+                if i == 0:
+                    stats["opening_pose"] = pz
             except ImageUnavailable as exc:
                 stats["note"] = str(exc)
         if upd is None:
-            place = scene_library.place_for(f"{sc.heading} {sc.narration}", avoid=prev_place)
+            place = scene_library.place_for(f"{sc.heading} {sc.narration}", avoid=prev_place, avoid_set=avoid_places)
             bg = scene_library.background(settings, place, portrait, gi)
             if bg is None:
                 cached = scene_library.any_cached(settings, portrait)
@@ -90,6 +99,11 @@ def prepare(script, out: Path, settings, store=None, gi=None) -> tuple:
                 raise DoodleUnavailable(f"no scene pictures available ({stats['note'] or 'image API off'})")
             prev_place = place
             pose = max_assets.MOOD_POSE.get(mood(sc.narration), "explaining")
+            if i == 0 and opening_pose in max_assets.POSES:
+                pose = opening_pose
+            if i == 0:
+                stats["opening_pose"] = pose
+            stats["places"].append(place)
             upd = {"bg_path": str(bg), "max_pose_path": str(max_assets.pose_path(settings, pose)), "art_path": None}
             stats["library"] += 1
         scenes[i] = sc.model_copy(update=upd)

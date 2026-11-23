@@ -167,12 +167,14 @@ def test_cost_estimate_fits_the_image_budget(settings):
     assert e["fits"] and e["per_month"] + e["library_once"] < settings.image_monthly_budget_usd
 
 
-def test_shots_are_6_to_10_seconds():
+def test_shots_are_2_to_3_s_in_the_first_30_s_then_4_to_6_s():
     sents = [(0.0, 2.5, "a"), (2.5, 5.0, "b"), (5.0, 9.5, "c"), (9.5, 12.0, "d"), (12.0, 37.0, "long one"),
              (37.0, 40.0, "e")]
     shots = R.plan_shots(sents, 41.0)
     assert shots[0][0] == 0.0 and shots[-1][1] == 41.0
-    assert all(4.0 <= e - s <= 10.0 for s, e, _ in shots)
+    assert all(e - s <= 3.0 for s, e, _ in shots if s < 30) and all(e - s <= 6.0 for s, e, _ in shots)
+    late = R.plan_shots(sents, 41.0, offset=60.0)             # a scene later in the video
+    assert all(e - s <= 6.0 for s, e, _ in late) and min(e - s for s, e, _ in late) >= 3.0   # leftover split evenly
 
 
 def test_style_samples_command_cap_cost_checks_and_telegram(ds, store, tmp_path, monkeypatch, capsys):

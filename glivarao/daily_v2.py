@@ -89,24 +89,32 @@ def _remind(settings: Settings, store: JobStore, send: bool) -> str:
     return note
 
 
-def _write_long(brief, style, creator, used, paid, settings, variant=0):
+def _write_long(brief, style, creator, used, paid, settings, variant=0, store=None):
     from .content.format_writer import write_long_format
+    from .studio import variety
 
+    vs = variety.next_slot(store, "long") if store is not None else None
     if paid:
         from .studio import costs
 
         t = costs.new_draft("long")
         with costs.tag(t):
-            s = write_with_claude(brief, "long", settings, style=style, creator_text=creator, avoid_lines=used)
-        return s.model_copy(update={"cost_tag": t})
-    return write_long_format(brief, style, creator, used, variant=variant)
+            s = write_with_claude(brief, "long", settings, style=style, creator_text=creator, avoid_lines=used,
+                                  variety_slot=vs, previous=variety.previous(store, "long") if store else None)
+        return s.model_copy(update={"cost_tag": t, "variety_slot": vs})
+    return write_long_format(brief, style, creator, used, variant=variant).model_copy(update={"variety_slot": vs})
 
 
-def _write_shorts(brief, style, n, used, paid, settings):
+def _write_shorts(brief, style, n, used, paid, settings, store=None):
     from .content.format_writer import write_shorts_format
+    from .studio import variety
+
+    def vs(i):
+        return variety.next_slot(store, "short", i) if store is not None else None
 
     if not paid:
-        return write_shorts_format(brief, style, n=n, used_lines=used)
+        return [x.model_copy(update={"variety_slot": vs(i)})
+                for i, x in enumerate(write_shorts_format(brief, style, n=n, used_lines=used))]
     angles = ("ONE surprising number from the fact sheet, with its own hook in the first two seconds",
               "ONE common myth and the fact that corrects it, with its own hook",
               "ONE mistake people make and what to do instead, with its own hook")
@@ -115,10 +123,12 @@ def _write_shorts(brief, style, n, used, paid, settings):
     out = []
     for i, a in enumerate(angles[:n]):
         t = costs.new_draft("short")
+        prev = (variety.previous(store, "short") if i == 0 else
+                variety.script_fingerprint(out[-1])) if store is not None else None
         with costs.tag(t):
             s = write_with_claude(brief, "short", settings, angle=a + ". Not a cut-down of the long video.",
-                                  avoid_lines=used)
-        out.append(s.model_copy(update={"style": f"short_{i}", "cost_tag": t}))
+                                  avoid_lines=used, variety_slot=vs(i), previous=prev)
+        out.append(s.model_copy(update={"style": f"short_{i}", "cost_tag": t, "variety_slot": vs(i)}))
     return out
 
 
@@ -137,10 +147,10 @@ def _originality_gate(script, brief, today, history, settings, paid, used, regen
 
             from .studio import costs
 
-            t = script.cost_tag
+            t, vs_ = script.cost_tag, script.variety_slot
             with costs.tag(t):
                 script = rewrite_for_originality(script, sim.reasons, sim.repeated_phrases, settings)
-            script = script.model_copy(update={"cost_tag": t})
+            script = script.model_copy(update={"cost_tag": t, "variety_slot": vs_})
         else:
             script = regen(attempt + 1)
         sim = originality.check(script, brief.topic_key, history, today, settings.similarity_max_phrase,
@@ -241,9 +251,9 @@ def run_daily_v2(settings: Settings, store: JobStore, today: date | None = None,
             long_script, drafts = None, []
         else:
             long_script, long_sim = _originality_gate(
-                _write_long(brief, style, creator, used, paid, settings), brief, today, history, settings, paid, used,
+                _write_long(brief, style, creator, used, paid, settings, store=store), brief, today, history, settings, paid, used,
                 lambda k: _write_long(brief, style if k < 2 else choose_format(brief, [style]), creator, used, paid,
-                                      settings, variant=k))
+                                      settings, variant=k, store=store))
             drafts = [(long_script, long_sim)]
             if paid:  # which backend actually wrote it (Claude on Vertex / Anthropic API, or the Gemini fallback)
                 from .scriptgen.claude import LAST_WRITER
@@ -256,7 +266,7 @@ def run_daily_v2(settings: Settings, store: JobStore, today: date | None = None,
         # Shorts are checked against past videos and each other. Sharing a line with their own companion long video
         # is normal (they point to it); their own hook and point are enforced below and by the writer.
         session = list(history)
-        for sh in _write_shorts(brief, lead_style, shorts, used + [lead_hook], paid, settings):
+        for sh in _write_shorts(brief, lead_style, shorts, used + [lead_hook], paid, settings, store=store):
             alternates: list = []
 
             def regen(k, sh=sh, alternates=alternates):  # free writer only (paid drafts are rewritten by Claude)
@@ -355,9 +365,19 @@ def _fix_rejected(job_id: str, brief, settings: Settings, store: JobStore):
         from .studio import costs
 
         old = _Script.model_validate_json(Path(store.get(job_id).script_path).read_text())
+        errs = errs or ["failed the automatic checks"]
+        from .studio import variety
+
+        if old.variety_slot is None:       # made before the rotation existed: give it the next slot
+            old = old.model_copy(update={"variety_slot": variety.next_slot(store, old.format)})
+        hk = variety.slot(old.variety_slot)["hook"]     # keep the rotation; never repeat the last video
+        prev = variety.previous(store, old.format) or {}
+        errs = errs + [f"HOOK TYPE for this video: {hk}: {variety.HOOK_HOW[hk]}" +
+                       (f" (the previous video used '{prev.get('hook_type')}' and opened with "
+                        f"\"{prev.get('opening', '')[:120]}\")" if prev else "")]
         with costs.tag(job_id):   # the fix's cost belongs to the video that replaces this one
-            fixed = rewrite_for_compliance(old, errs or ["failed the automatic checks"], facts, settings)
-        return fixed.model_copy(update={"cost_tag": job_id})
+            fixed = rewrite_for_compliance(old, errs, facts, settings)
+        return fixed.model_copy(update={"cost_tag": job_id, "variety_slot": old.variety_slot})
     except ClaudeUnavailable as exc:
         log.warning("fix of %s skipped: Claude unavailable (%s)", job_id, exc)
         return None
@@ -385,6 +405,7 @@ def _produce_job(job, script, sim, brief, creator, writer, paid, card, item, rep
 
     out = settings.output_dir / job.id
     out.mkdir(parents=True, exist_ok=True)
+    vslot = script.variety_slot
     (out / "brief.json").write_text(brief.to_json())
     (out / "fact_sheet.md").write_text(brief.fact_sheet_md())
     claims = factcheck.check_claims(script, brief, creator)
@@ -402,7 +423,10 @@ def _produce_job(job, script, sim, brief, creator, writer, paid, card, item, rep
 
     issues = sponsor_issues(script)
     ever = [] if brief.timely else evergreen_issues(script)
-    hold = retention_issues(script)
+    from .studio import variety
+
+    prev_video = variety.previous(store, script.format)
+    hold = retention_issues(script, prev_video)
     if (issues or ever or hold or not has_what_to_do(script)) and paid:  # sponsor, evergreen, retention, "What to do"
         from .scriptgen.claude import ClaudeUnavailable, rewrite_for_sponsor
 
@@ -413,13 +437,15 @@ def _produce_job(job, script, sim, brief, creator, writer, paid, card, item, rep
             missing = factcheck.needs_source(claims)
         except ClaudeUnavailable as exc:  # keep the draft; the compliance check below rejects it
             log.warning("sponsor rewrite skipped for %s: Claude unavailable (%s)", job.id, exc)
+    script = script.model_copy(update={"variety_slot": vslot})     # Claude's rewrites don't carry the slot
     (out / "fact_check.md").write_text("# " + factcheck.report(claims, limit=500).replace("\n", "\n\n") + "\n")
     job.script_path = str(out / "script.json")
     Path(job.script_path).write_text(script.model_dump_json(indent=2))
     store.transition(job, JobStatus.SCRIPTED, f"{writer}; {script.style}; {script.word_count} words")
 
     ok, why = finance_only_check(script)
-    report_c = check_script(script, enforce_length=paid, evergreen=not brief.timely, retention=True)
+    report_c = check_script(script, enforce_length=paid, evergreen=not brief.timely, retention=True,
+                            previous_video=prev_video)
     if not ok:
         report_c.errors.append(f"Finance-only gate failed: {why}")
     if not sim.ok:
@@ -485,12 +511,13 @@ def make_now(settings: Settings, store: JobStore, n: int, short: bool = False, s
 
         try:
             if short:
-                sh = _write_shorts(brief, style, 1, used, True, settings)[0]
+                sh = _write_shorts(brief, style, 1, used, True, settings, store=store)[0]
                 drafts = [_originality_gate(sh, brief, today, history, settings, True, used, lambda k: sh)]
             else:
-                drafts = [_originality_gate(_write_long(brief, style, "", used, True, settings), brief, today, history,
+                drafts = [_originality_gate(_write_long(brief, style, "", used, True, settings, store=store), brief, today, history,
                                             settings, True, used,
-                                            lambda k: _write_long(brief, style, "", used, True, settings, variant=k))]
+                                            lambda k: _write_long(brief, style, "", used, True, settings, variant=k,
+                                                                  store=store))]
         except ClaudeUnavailable as exc:
             return _hold_for_writer(settings, store, today, brief.topic, str(exc), send)
         _release_writer_hold(settings, store, send)
@@ -637,8 +664,15 @@ def _render_and_review(job, script, brief, claims, ctx: dict, settings: Settings
 
             from .art.doodle_prep import DoodleUnavailable, prepare
 
+            from .studio import variety as _var
+
+            prev_v = _var.previous(store, script.format) or {}
+            sl = _var.slot(script.variety_slot) if script.variety_slot is not None else {}
             try:
-                script, art_stats = prepare(script, out, settings, store)
+                script, art_stats = prepare(script, out, settings, store,
+                                            avoid_places=frozenset(p for p in prev_v.get("backgrounds", [])
+                                                                   if not p.startswith("ai:")),
+                                            opening_pose=sl.get("pose"))
             except DoodleUnavailable as exc:   # never a half-empty doodle video: this one uses the editorial style
                 log.warning("doodle style unavailable for %s: %s", job.id, exc)
                 rs = _replace(settings, theme="editorial")
@@ -699,6 +733,7 @@ def _render_and_review(job, script, brief, claims, ctx: dict, settings: Settings
         job.thumbnail_path, job.duration_sec = str(thumb), round(res.duration, 2)
         store.transition(job, JobStatus.RENDERED, f"{res.duration:.1f}s in {res.render_seconds:.0f}s")
         originality.record(store, script, brief.topic_key, today)
+        _record_variety(script, store, art_stats, out)
         _release_held(store, job.id)
     except VoiceUnavailable as exc:  # hold the video; no other voice is ever used
         log.warning("voice unavailable for %s: %s", job.id, exc)
@@ -909,6 +944,20 @@ def _hold_for_writer(settings: Settings, store: JobStore, today: date, topic: st
     return DailyResult(topic, "claude (held)", note=f"held: waiting for Claude ({why[:120]})")
 
 
+def _record_variety(script, store: JobStore, art_stats: dict, out: Path) -> None:
+    """Save what this video used (for the next video's no-repeat checks); log any repeat."""
+    from .studio import variety
+
+    sl = variety.slot(script.variety_slot) if script.variety_slot is not None else {}
+    fp = {**variety.script_fingerprint(script), "backgrounds": (art_stats or {}).get("places", []),
+          "opening_pose": (art_stats or {}).get("opening_pose") or sl.get("pose"),
+          "thumb_layout": sl.get("layout"), "music": sl.get("music"), "job": out.name}
+    issues = variety.record(store, script.format, fp)
+    (out / "variety.json").write_text(json.dumps({"fingerprint": fp, "repeats_previous": issues}, indent=2))
+    if issues:
+        log.warning("%s repeats the previous %s video: %s", out.name, script.format, "; ".join(map(str, issues)))
+
+
 def make_thumbnails(script, brief, out: Path, settings: Settings, store: JobStore, today: date,
                     theme: str) -> tuple[Path, list[str]]:
     """The video's thumbnail(s): long = 3 options (you pick in Telegram), Short = 1. Returns (first, how).
@@ -922,17 +971,23 @@ def make_thumbnails(script, brief, out: Path, settings: Settings, store: JobStor
         from .art.doodle import thumbnail as doodle_thumb
         from .art.max_assets import load_pose
 
+        from .studio import variety
+
         data = thumb_data([(f.text, f.url) for f in brief.facts if f.kind == "DATA" and f.url], today.year)
         words_list = bold_words(script, 3 if script.format == "long" else 1)
+        sl = variety.slot(script.variety_slot) if script.variety_slot is not None else {}
+        layout = sl.get("layout", "max_right")      # 7-video rotation: never the previous video's layout
+        first = sl.get("pose", "shocked")
+        emotions = [first] + [e for e in ("shocked", "worried", "pointing", "thinking") if e != first]
         paths = []
-        for k, (words, emo) in enumerate(zip(words_list, ("shocked", "worried", "pointing"))):
+        for k, (words, emo) in enumerate(zip(words_list, emotions)):
             dst = out / (f"thumbnail_{k + 1}.jpg" if script.format == "long" else "thumbnail.jpg")
             doodle_thumb(words, emo, dst, seed=k + 1, max_img=load_pose(settings, emo), value=data["value"],
-                         points=data["points"])
+                         points=data["points"], layout=layout)
             paths.append(dst)
         panel = (f"line chart of {len(data['points'])} real data points" if data["points"] else
                  f"number badge {data['value']}" if data["value"] else "no number")
-        return paths[0], [f"doodle (code-drawn) \"{w}\", {panel}" for w in words_list[:len(paths)]]
+        return paths[0], [f"doodle (code-drawn) \"{w}\", {panel}, layout {layout}" for w in words_list[:len(paths)]]
     if script.format == "long":  # 3 options (AI + our own bold words); you pick one in Telegram
         from .art.ai_visuals import thumbnail_options
 
