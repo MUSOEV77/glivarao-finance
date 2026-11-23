@@ -178,6 +178,30 @@ def request_approval(job: Job, store: JobStore, settings: Settings, script: Scri
     return store.transition(job, JobStatus.PENDING_APPROVAL, "review package sent to telegram")
 
 
+DECIDED = {"approved": "✅ Approved", "rejected": "❌ Rejected"}
+
+
+def _answer(client, cq: dict, text: str) -> None:
+    """Answer a button press (the small notice on the phone). Never raises: an old press (Telegram refuses
+    answers after ~15 minutes) must not stop the other decisions from being processed."""
+    try:
+        client.call("answerCallbackQuery", callback_query_id=cq["id"], text=text[:200])
+    except Exception as exc:  # noqa: BLE001
+        log.warning("could not answer a button press (%s): %s", text, exc)
+
+
+def _show_decision(client, cq: dict, chat_id, label: str) -> None:
+    """Replace the Approve/Reject buttons with the decision itself (one inert button)."""
+    mid = cq.get("message", {}).get("message_id")
+    if mid is None:
+        return
+    try:
+        client.call("editMessageReplyMarkup", chat_id=chat_id, message_id=mid,
+                    reply_markup={"inline_keyboard": [[{"text": label, "callback_data": "noop:decided"}]]})
+    except Exception as exc:  # noqa: BLE001  cosmetic
+        log.warning("could not show the decision on the buttons: %s", exc)
+
+
 def poll_decisions(store: JobStore, settings: Settings, client: TelegramClient | None = None) -> list[tuple[str, str]]:
     """Process pending button presses. Returns [(job_id, decision)]."""
     client = _client(settings, client)
@@ -297,25 +321,33 @@ def poll_decisions(store: JobStore, settings: Settings, client: TelegramClient |
             except Exception as exc:  # noqa: BLE001
                 log.warning("could not handle topic button: %s", exc)
             continue
+        if action == "noop":
+            _answer(client, cq, "Already decided")
+            continue
+        if action not in ("approve", "reject"):
+            _answer(client, cq, "Unknown button")
+            continue
         try:
             job = store.get(job_id)
         except KeyError:
-            client.call("answerCallbackQuery", callback_query_id=cq["id"], text="Unknown job")
+            _answer(client, cq, "Unknown video")
             continue
         if job.status != JobStatus.PENDING_APPROVAL:
-            client.call("answerCallbackQuery", callback_query_id=cq["id"], text=f"Already {job.status.value}")
+            label = DECIDED.get(job.status.value, job.status.value)
+            _answer(client, cq, f"Already decided: {label}")
+            _show_decision(client, cq, chat_id, label)
             continue
         to = JobStatus.APPROVED if action == "approve" else JobStatus.REJECTED
+        _answer(client, cq, DECIDED[to.value])                 # immediate feedback on the phone
         store.transition(job, to, f"telegram user {sender}")
-        client.call("answerCallbackQuery", callback_query_id=cq["id"], text=f"{to.value}")
-        mid = cq.get("message", {}).get("message_id")
-        if mid is not None:  # remove the buttons; cosmetic, so a failure must not block other decisions
-            try:
-                client.call("editMessageReplyMarkup", chat_id=chat_id, message_id=mid,
-                            reply_markup={"inline_keyboard": []})
-            except Exception as exc:  # noqa: BLE001
-                log.warning("could not remove buttons for %s: %s", job_id, exc)
-        client.call("sendMessage", chat_id=chat_id, text=f"{job_id}: {to.value.upper()}")
+        _show_decision(client, cq, chat_id, DECIDED[to.value])
+        try:
+            client.call("sendMessage", chat_id=chat_id, text=(
+                f"{DECIDED[to.value]}: \"{job.topic}\" ({job.format}, {job_id})."
+                + (" The upload pack follows. Nothing is uploaded automatically." if to == JobStatus.APPROVED
+                   else " It will not be used.")))
+        except Exception as exc:  # noqa: BLE001  the decision is recorded either way
+            log.warning("could not confirm the decision for %s: %s", job_id, exc)
         decisions.append((job_id, to.value))
         if to == JobStatus.APPROVED:  # deliver the full-quality file + copy-paste upload pack (no upload here)
             try:

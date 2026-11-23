@@ -713,7 +713,7 @@ def cmd_poll(args, s):
     # Tolerant by design (runs every 5 minutes): a network or Telegram error never makes the service fail.
     # After a failure the next polls back off (5, 10, 20, ... up to 60 min); one alert after 6 failures in a row.
     state = json.loads(store.kv_get("poll_backoff", '{"fails": 0, "next": 0}'))
-    if _t.time() < state["next"]:
+    if _t.time() < state["next"] and not getattr(args, "now", False):
         print(f"backing off after {state['fails']} failure(s); next try in {int(state['next'] - _t.time())} s")
         return
     try:
@@ -944,6 +944,7 @@ def main(argv=None):
     ls.add_argument("--limit", type=int, default=30)
     ls.set_defaults(fn=cmd_list)
     po = sub.add_parser("poll-approvals")
+    po.add_argument("--now", action="store_true", help="poll now, even during the backoff after errors")
     po.set_defaults(fn=cmd_poll)
     de = sub.add_parser("decide")
     de.add_argument("job_id")
