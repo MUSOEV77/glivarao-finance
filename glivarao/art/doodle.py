@@ -787,3 +787,46 @@ def reference_sheet(path: Path | None = None) -> Image.Image:
 __all__ = ["compact_number", "key_number", "phone_readability", "THUMB_PAPER", "THUMB_PANEL", "sparkle", "paper", "Pen", "draw_max", "max_figure", "icon", "spike_chart", "bar_chart", "thumbnail",
            "reference_sheet", "brand_mark", "statement", "wrap", "hand", "EMOTIONS", "GREEN", "GOLD", "INK", "PAPER",
            "GREY", "VERSION"]
+
+
+def cover(text: str, palette: str = "green", layout: str = "text_top", max_img: Image.Image | None = None,
+          size: tuple[int, int] = (1080, 1920), emotion: str = "shocked") -> Image.Image:
+    """Shorts frame 1: a flat high-contrast background, a BIG complete 2-4 word hook in the top 40% and Max LARGE
+    (about 42% of the frame height, on a contrasting disc) below it, with a strong emotion. No busy picture.
+    Layouts: text centered / left / right with Max centered / right / left."""
+    from ..studio.variety import COVER_PALETTES
+
+    bg, ink, accent = COVER_PALETTES.get(palette, COVER_PALETTES["green"])
+    W2, H2 = size[0] * 2, size[1] * 2
+    img = Image.new("RGB", (W2, H2), bg)
+    p = Pen(img, seed=7, width=12)
+    words = statement(text).split()
+    splits = [[" ".join(words[:k]), " ".join(words[k:])] for k in range(1, len(words))] or [[" ".join(words)]]
+    lines = min(splits, key=lambda ls: max(hand(100).getlength(x) for x in ls)) if len(words) > 2 else [" ".join(words)]
+    lines = [ln for ln in lines if ln]
+    box_w = W2 * 0.88
+    sz = 560
+    while sz > 140 and (max(hand(sz).getlength(ln) for ln in lines) > box_w or sz * 1.05 * len(lines) > H2 * 0.34):
+        sz -= 10
+    align = {"text_left": "l", "text_right": "r"}.get(layout, "c")
+    y = H2 * 0.07
+    for ln in lines:
+        w = hand(sz).getlength(ln)
+        x = {"l": W2 * 0.06, "r": W2 * 0.94 - w}.get(align, (W2 - w) / 2)
+        p.text((x, y + sz * 0.5), ln, sz, ink, anchor="lm", bold=max(8, sz // 22))
+        y += sz * 1.05
+    ux = {"l": W2 * 0.06, "r": W2 * 0.94 - W2 * 0.4}.get(align, W2 * 0.3)
+    p.d.rounded_rectangle((ux, y + 10, ux + W2 * 0.4, y + 34), 12, fill=accent)
+    cx = {"l": 0.62, "r": 0.38}.get(align, 0.5) * W2
+    disc = H2 * 0.25                                      # a contrasting disc so Max stands out on any color
+    dc = (247, 238, 214) if palette in ("green", "dark", "gold") else (31, 138, 76)
+    cy = H2 * 0.73
+    p.d.ellipse((cx - disc, cy - disc, cx + disc, cy + disc), fill=dc)
+    mh = int(H2 * 0.42)                                   # Max: about 40% of the frame
+    if max_img is not None:
+        s_ = mh / max_img.height
+        cut = max_img.resize((max(1, int(max_img.width * s_)), mh), Image.LANCZOS)
+        img.paste(cut, (int(cx - cut.width / 2), H2 - mh - int(H2 * 0.03)), cut)
+    else:
+        draw_max(img, cx, H2 * 0.99, u=H2 * 0.052, emotion=emotion, seed=11)
+    return finish(img, size)

@@ -56,6 +56,20 @@ _RX = {
 NUMBER = re.compile(r"\$\s?\d|\d[\d,.]*\s?(?:%|percent|dollars|billion|trillion|million)|\b\d{2,}\b", re.I)
 
 
+COVER_PALETTES = {   # Shorts cover colors (background, text, accent): rotate every Short
+    "green": ((31, 138, 76), (255, 248, 230), (224, 165, 38)),
+    "gold": ((224, 165, 38), (26, 26, 26), (31, 138, 76)),
+    "cream": ((247, 238, 214), (26, 26, 26), (31, 138, 76)),
+    "dark": ((26, 30, 34), (255, 248, 230), (224, 165, 38)),
+}
+COVER_LAYOUTS = ("text_top", "text_left", "text_right")
+
+
+def cover_style(n: int) -> tuple[str, str]:
+    """(palette, layout) for Short n: 4 colors x 3 layouts, consecutive Shorts always differ in both."""
+    return list(COVER_PALETTES)[n % 4], COVER_LAYOUTS[n % 3]
+
+
 def slot(n: int) -> dict:
     return ROTATION[n % len(ROTATION)]
 

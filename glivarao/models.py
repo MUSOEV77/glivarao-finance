@@ -45,6 +45,8 @@ class Scene(BaseModel):
     # Format beat for the editorial renderer: myth, fact, question, case, option_a, option_b, verdict, update,
     # creator (the host's own take). None = ordinary scene.
     beat: Optional[str] = None
+    # Shorts: frame-1 cover (text, palette, layout, pose_path), set by art/doodle_prep.py
+    cover: Optional[dict] = None
     # AI scene illustration (long videos; set by art/ai_visuals.py). None/missing file = code-drawn plate.
     art_path: Optional[str] = None
     # Doodle theme (set before rendering): the full picture behind the scene and the Max cutout standing in it

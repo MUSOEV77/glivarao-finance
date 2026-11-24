@@ -295,6 +295,35 @@ def cmd_batch_plan(args, s):
         print("sent to Telegram")
 
 
+def cmd_cover_samples(args, s):
+    """3 sample Shorts covers (rotating colors/layouts, real Max), saved and sent to Telegram."""
+    from pathlib import Path as _P
+
+    from .art import doodle as D
+    from .art.max_assets import load_pose
+    from .studio.variety import cover_style
+
+    out = _P(s.output_dir) / "cover_samples"
+    out.mkdir(parents=True, exist_ok=True)
+    paths = []
+    for n, (text, pose) in enumerate([("The Minimum Trap", "shocked"), ("Your Card Rate", "worried"),
+                                      ("Miss December 15", "pointing")]):
+        pal, lay = cover_style(n)
+        p = out / f"cover_{n + 1}_{pal}_{lay}.jpg"
+        D.cover(text, pal, lay, load_pose(s, pose), emotion=pose).save(p, "JPEG", quality=90)
+        paths.append(p)
+        print(p)
+    if not args.no_telegram:
+        from .publish.telegram import _client
+
+        c = _client(s, None)
+        for p in paths:
+            with open(p, "rb") as fh:
+                c.call("sendPhoto", files={"photo": fh}, chat_id=s.telegram_approver_chat_id,
+                       caption=f"Shorts cover sample: {p.stem}")
+        print("sent to Telegram")
+
+
 def cmd_recheck_rejected(args, s):
     """Today's rejected drafts re-checked with the current rules: rejected before vs. would be rejected now."""
     from datetime import date as _d
@@ -1050,6 +1079,9 @@ def main(argv=None):
     bp = sub.add_parser("batch-plan", help="the batch test's 4-week plan (--send: to Telegram)")
     bp.add_argument("--send", action="store_true")
     bp.set_defaults(fn=cmd_batch_plan)
+    cs = sub.add_parser("cover-samples", help="3 sample Shorts covers to Telegram")
+    cs.add_argument("--no-telegram", action="store_true")
+    cs.set_defaults(fn=cmd_cover_samples)
     rr = sub.add_parser("recheck-rejected", help="re-check today's rejected drafts with the current rules (free)")
     rr.add_argument("--date", help="YYYY-MM-DD (default today, Tashkent)")
     rr.set_defaults(fn=cmd_recheck_rejected)

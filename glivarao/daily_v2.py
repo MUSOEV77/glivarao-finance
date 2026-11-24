@@ -857,11 +857,18 @@ def _render_and_review(job, script, brief, claims, ctx: dict, settings: Settings
 
             prev_v = _var.previous(store, script.format) or {}
             sl = _var.slot(script.variety_slot) if script.variety_slot is not None else {}
+            recent = _var.history(store, script.format)[-10:] if script.format == "short" else [prev_v]
+            avoid = frozenset(p for h in recent for p in h.get("backgrounds", []) if not p.startswith("ai:"))
+            cov = None
+            if script.format == "short":   # frame-1 cover: complete 2-4 word hook, rotating colors and layouts
+                from .art.ai_visuals import bold_words
+
+                n = int(store.kv_get("variety_count:short", "0"))
+                pal, lay = _var.cover_style(n)
+                cov = {"text": bold_words(script, 1)[0], "palette": pal, "layout": lay, "pose": sl.get("pose")}
             try:
-                script, art_stats = prepare(script, out, settings, store,
-                                            avoid_places=frozenset(p for p in prev_v.get("backgrounds", [])
-                                                                   if not p.startswith("ai:")),
-                                            opening_pose=sl.get("pose"))
+                script, art_stats = prepare(script, out, settings, store, avoid_places=avoid,
+                                            opening_pose=sl.get("pose"), cover=cov)
             except DoodleUnavailable as exc:   # never a half-empty doodle video: this one uses the editorial style
                 log.warning("doodle style unavailable for %s: %s", job.id, exc)
                 rs = _replace(settings, theme="editorial")

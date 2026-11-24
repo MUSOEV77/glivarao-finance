@@ -17,7 +17,7 @@ log = logging.getLogger(__name__)
 PLACES = {
     "kitchen_bills": "a cozy American kitchen table at night covered with bills, envelopes, a laptop, a calculator, "
                      "a coffee mug and a desk lamp, warm light, a window with the city behind",
-    "city_street": "a busy American downtown street with shops, cafes, people walking, cars and yellow taxis, trees",
+    "city_street": "a quiet American street corner with two simple shop fronts and one parked car",
     "suburb": "a sunny American suburban street with rows of houses, lawns, mailboxes, a for-sale sign with no words, "
               "kids biking",
     "bank_lobby": "a big bank lobby with marble columns, teller windows, a vault door, people waiting in line",
@@ -41,7 +41,7 @@ KEYWORDS = [(r"medical|hospital|doctor|health|insur|aca\b", "hospital"),
             (r"budget|save|savings|emergency|family|household", "living_room"),
             (r"tax|irs|return|refund|paperwork|form", "home_office"),
             (r"job|work|paycheck|salary|employer", "office")]
-STYLE = ("Wide, detailed hand-drawn cartoon illustration filling the WHOLE frame edge to edge (no empty paper, no "
+STYLE = ("SIMPLE, uncluttered hand-drawn cartoon illustration with few large shapes and no small details or crowds filling the WHOLE frame edge to edge (no empty paper, no "
          "border): bold slightly wobbly black ink outlines, flat warm colors with deep green (#1f8a4c) and gold "
          "(#e0a526) accents, simple cel shading, friendly cartoon people with simple faces (no real or famous "
          "people). Keep the lower-right third a little calmer because a character will stand there. No text, no "
@@ -67,7 +67,7 @@ def library_dir(settings) -> Path:
 
 
 def path_for(settings, key: str, portrait: bool) -> Path:
-    return library_dir(settings) / f"{key}_{'portrait' if portrait else 'landscape'}.png"
+    return library_dir(settings) / f"{key}_{'portrait' if portrait else 'landscape'}_v2.png"   # v2: simple style
 
 
 def background(settings, key: str, portrait: bool, gi=None) -> Path | None:

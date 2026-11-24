@@ -32,7 +32,8 @@ def key_scene_prompt(scene, portrait: bool, pose: str | None = None, avoid_set=f
             f"with {max_assets.CHARACTER} acting in it with clear body language and a readable facial expression{how} "
             "(exactly as in the reference sheet: same face, glasses, hair, sweater, coin pin). Max is on the "
             f"{'lower half' if portrait else 'right half'} of the picture; keep the "
-            f"{'top third' if portrait else 'upper-left area'} a little calmer for a text card. "
+            f"{'top third' if portrait else 'upper-left area'} a little calmer for a text card. SIMPLE and uncluttered: "
+            "a plain background with only a few large shapes, no crowds, no small details. "
             f"{scene_library.STYLE}")
 
 
@@ -52,7 +53,7 @@ def key_indices(script, n: int) -> list[int]:
 
 
 def prepare(script, out: Path, settings, store=None, gi=None, avoid_places=frozenset(),
-            opening_pose: str | None = None) -> tuple:
+            opening_pose: str | None = None, cover: dict | None = None) -> tuple:
     """Returns (script with bg_path / max_pose_path on every scene, stats). `avoid_places`: library places the
     previous video used (not used again when another fits); `opening_pose`: Max's pose in the first scene (from
     the 7-video rotation). stats['places'] / stats['opening_pose'] record what was used."""
@@ -107,6 +108,10 @@ def prepare(script, out: Path, settings, store=None, gi=None, avoid_places=froze
             upd = {"bg_path": str(bg), "max_pose_path": str(max_assets.pose_path(settings, pose)), "art_path": None}
             stats["library"] += 1
         scenes[i] = sc.model_copy(update=upd)
+    if portrait and cover and scenes:     # frame 1 of the Short: the cover (big hook + big Max)
+        pose = cover.get("pose") or opening_pose or "shocked"
+        scenes[0] = scenes[0].model_copy(update={"cover": {**cover, "emotion": pose,
+                                                           "pose_path": str(max_assets.pose_path(settings, pose))}})
     stats["usd"] = round((gi.spent_usd - start) if gi is not None else 0.0, 3)
     return script.model_copy(update={"scenes": scenes}), stats
 

@@ -71,14 +71,20 @@ def plan_shots(sentences: list[tuple[float, float, str]], duration: float,
     return out or [(0.0, duration, "")]
 
 
-def key_phrase(text: str, n: int = 5) -> str:
+def key_phrase(text: str, n: int = 7) -> str:
     """Big on-screen words for a shot: the number and what follows it, else the first words."""
+    from ..art.ai_visuals import HEAD_STOP
+
     m = NUM.search(text)
     words = text.replace("*", "").split()
     if m:
-        after = text[m.end():].split()[:3]
-        return " ".join([m.group(0)] + [w.strip(",.;:!?") for w in after]).strip()
-    return " ".join(w.strip(",.;:!?") for w in words[:n])
+        ws = [m.group(0)] + [w.strip(",.;:!?") for w in text[m.end():].split()[:3]]
+    else:
+        first = re.split(r"[,.;:!?]", text.replace("*", ""))[0].split()   # stop at the first clause break
+        ws = [w.strip(",.;:!?") for w in (first or words)[:n]]
+    while len(ws) > 1 and ws[-1].lower() in HEAD_STOP:                  # never end on "a", "the", "for", ...
+        ws.pop()
+    return " ".join(ws).strip()
 
 
 def count_text(num: str, frac: float) -> str:
@@ -384,8 +390,16 @@ class DoodleFrames:
             if shot.kind == "number" and step < 6:
                 shot = Shot(shot.start, shot.end, shot.kind, shot.text,
                             {**shot.data, "num": count_text(shot.data.get("num", ""), step / 6)})
-            self._ov = {key: build_overlay(self.scene, shot, size, portrait, seed=self.i * 7 + k)}
+            self._ov = {**({"cover": self._ov["cover"]} if "cover" in self._ov else {}),
+                        key: build_overlay(self.scene, shot, size, portrait, seed=self.i * 7 + k)}
         return self._ov[key]
+
+    def _cover(self, cov: dict, size) -> Image.Image:
+        if "img" not in self._ov.get("cover", {}):
+            mx = Image.open(cov["pose_path"]).convert("RGBA") if cov.get("pose_path") else None
+            self._ov["cover"] = {"img": D.cover(cov["text"], cov["palette"], cov["layout"], mx, size,
+                                                cov.get("emotion", "shocked"))}
+        return self._ov["cover"]["img"]
 
     def move(self, k: int) -> str:
         if self.i == 0 and k == 0:
@@ -398,6 +412,9 @@ class DoodleFrames:
         s = self.shots[k]
         size = (1080, 1920) if portrait else (1920, 1080)
         prog = min(1.0, max(0.0, (t - s.start) / max(0.1, s.end - s.start)))
+        cov = getattr(self.scene, "cover", None)
+        if cov and portrait and self.i == 0 and k == 0:      # Shorts frame 1: the cover (big hook + big Max)
+            return camera(self._cover(cov, size), size, prog, "punch_in")
         bgp = getattr(self.scene, "bg_path", None) or getattr(self.scene, "art_path", None)
         if bgp:
             out = camera(_load_bg(bgp), size, prog, self.move(k))
