@@ -43,7 +43,7 @@ def test_cut_headline_is_rejected_and_regenerated_never_cut():
 
 
 def test_one_number_gives_a_badge_and_no_chart():
-    assert D.thumb_data([CARD], 2026) == {"value": "22.36% APR", "points": []}
+    assert D.thumb_data([CARD], 2026) == {"value": "22.36% APR", "points": [], "pair": None}
     # two numbers ('up from 6.26% a year earlier') are still not a series: badge only
     assert D.thumb_data([("The 30-year mortgage rate averaged 7.28%, up from 6.26% a year earlier.", "u")],
                         2026)["points"] == []
@@ -123,3 +123,36 @@ def test_thumb_remake_regenerates_and_sends(settings, store, tmp_path):
     assert json.loads((out / "metadata.json").read_text())["thumbnail_options"] == r["how"]
     methods = [m for m, _ in tg.calls]
     assert methods[0] == "sendMessage" and methods.count("sendPhoto") == 3
+
+
+def test_long_thumbnail_styles_rotate_and_badge_is_the_surprising_number():
+    from glivarao.studio.fact_library import ACA
+
+    styles = [D.thumb_style(n) for n in range(12)]
+    assert all(a[0] != b[0] and a[1] != b[1] for a, b in zip(styles, styles[1:]))
+    assert {s[1] for s in styles} == set(D.THUMB_LAYOUTS) and {s[0] for s in styles} == set(D.THUMB_BG)
+    assert D.thumb_data([(f.text, f.url) for f in ACA], 2026)["value"] != "100%"
+    for pal, lay in styles[:4]:
+        info = {}
+        D.thumbnail("Miss December 15", "worried", None, value="$15,960", layout=lay, palette=pal,
+                    prop="hospital", info=info)
+        assert D.phone_readability(info) == [], (pal, lay)
+
+
+def test_real_visuals_only_and_short_emotional_headline():
+    from glivarao.studio.fact_library import R_401K
+    from glivarao.studio.launch_plan import CARD_RATE, MORTGAGE
+
+    d = D.thumb_data([(MORTGAGE.text, MORTGAGE.url)], 2026)
+    assert d["pair"] == ("6.26%", "a year earlier", "7.28%", "now") and D.visual_options(d)[:2] == ["bars",
+                                                                                                    "before_after"]
+    assert D.thumb_data([(R_401K.text, R_401K.url)], 2026)["pair"] == ("$24,500", "2026", "$25,500", "2027")
+    card = D.thumb_data([(CARD_RATE.text, CARD_RATE.url)], 2026)
+    assert card["pair"] is None and D.visual_options(card) == ["badge"]          # never an invented comparison
+    heads = bold_words(_script("Stuck On The Minimum"), 3, max_words=3)
+    assert all(len(h.split()) <= 3 and headline_problem(h, 3) == "" for h in heads)
+    for vis in ("bars", "before_after"):
+        info = {}
+        D.thumbnail("Don't Be Fooled", "worried", None, value=d["value"], visual=vis, pair=d["pair"],
+                    layout="max_right", palette="cream", prop="house", info=info)
+        assert D.phone_readability(info) == [], vis

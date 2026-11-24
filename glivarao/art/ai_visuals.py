@@ -98,18 +98,22 @@ def _clean_headline(text: str) -> str:
     return " ".join(w.strip(",.;:!") for w in t.split() if w.strip(",.;:!"))
 
 
-def headline_problem(text: str) -> str:
-    """'' if `text` is a complete 2-4 word thumbnail headline, else why it is not."""
+EMOTIONAL = ("Don't Be Fooled", "Stop Overpaying", "Watch This Number", "It Adds Up", "Not So Fast",
+             "Check This First", "This Costs You", "Big Mistake", "Read This First", "Don't Wait")
+
+
+def headline_problem(text: str, max_words: int = 4) -> str:
+    """'' if `text` is a complete 2-max_words word thumbnail headline, else why it is not."""
     ws = _clean_headline(text).split()
-    if not 2 <= len(ws) <= 4:
-        return f"{len(ws)} words (needs 2-4)"
+    if not 2 <= len(ws) <= max_words:
+        return f"{len(ws)} words (needs 2-{max_words})"
     last = ws[-1].strip("?").lower()
     if last in HEAD_STOP:
         return f"ends on '{ws[-1]}' (reads as cut off)"
     return ""
 
 
-def bold_words(script, n: int) -> list[str]:
+def bold_words(script, n: int, max_words: int = 4) -> list[str]:
     """n different complete 2-4 word headlines for the thumbnail options (exact text, drawn by our code).
     Never cut: the writer's thumbnail text is used whole when it is a complete 2-4 word phrase; otherwise it is
     rejected and the headline is regenerated from the topic words (no extra spend)."""
@@ -118,7 +122,7 @@ def bold_words(script, n: int) -> list[str]:
                               for m in FIN.finditer(f"{script.title} {script.topic}")))
     f1 = fins[0] if fins else "MONEY"
     cands = []
-    why = headline_problem(base) if base else "empty"
+    why = headline_problem(base, max_words) if base else "empty"
     if why:
         log.info("thumbnail text %r rejected: %s; regenerating", base, why)
     else:
@@ -126,10 +130,13 @@ def bold_words(script, n: int) -> list[str]:
     cands += [f"THE {f1} TRAP" if "TRAP" not in base.upper() else f"STOP THE {f1} TRAP",
               f"YOUR {' '.join(fins[1:3])}" if len(fins) >= 3 else f"{f1} MISTAKES?",
               f"{f1} TRUTH", f"{f1} MISTAKE?", f"FIX YOUR {f1}", f"{f1} 101", f"BEAT THE {f1}", "MONEY TRUTH"]
+    if max_words <= 3:   # long thumbnails: a short emotional phrase ("Don't Be Fooled.") rotates in
+        k = sum(map(ord, script.title)) % len(EMOTIONAL)
+        cands = cands[:1] + [EMOTIONAL[(k + i) % len(EMOTIONAL)] for i in range(3)] + cands[1:]
     out = []
     for o in cands:
         o = _clean_headline(o).upper()
-        if o and not headline_problem(o) and o not in out:
+        if o and not headline_problem(o, max_words) and o not in out:
             out.append(o)
     return out[:n]
 

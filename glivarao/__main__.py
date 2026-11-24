@@ -295,6 +295,40 @@ def cmd_batch_plan(args, s):
         print("sent to Telegram")
 
 
+def cmd_thumb_samples(args, s):
+    """3 sample long thumbnails for the next videos (real facts, rotating layout/visual), sent to Telegram."""
+    from pathlib import Path as _P
+
+    from .art import doodle as D
+    from .art.max_assets import load_pose
+    from .studio.fact_library import EMERGENCY, ROTH
+    from .studio.launch_plan import MORT_BAL, MORTGAGE, NEW_HOME
+
+    out = _P(s.output_dir) / "thumb_samples"
+    out.mkdir(parents=True, exist_ok=True)
+    samples = [("Don't Be Fooled", [MORTGAGE, NEW_HOME, MORT_BAL], "house", "worried", "bars"),
+               ("Watch This Number", list(ROTH), "coin_stack", "shocked", "before_after"),
+               ("It Adds Up", list(EMERGENCY), "piggy_bank", "worried", "badge")]
+    paths = []
+    for n, (text, facts, prop, emo, vis) in enumerate(samples):
+        data = D.thumb_data([(f.text, f.url) for f in facts], 2026)
+        pal, lay = D.thumb_style(n)
+        p = out / f"thumb_{n + 1}_{vis}_{lay}.jpg"
+        D.thumbnail(text, emo, p, seed=n + 1, max_img=load_pose(s, emo), value=data["value"], layout=lay,
+                    palette=pal, prop=prop, visual=vis, pair=data["pair"])
+        paths.append(p)
+        print(p)
+    if not args.no_telegram:
+        from .publish.telegram import _client
+
+        c = _client(s, None)
+        for p in paths:
+            with open(p, "rb") as fh:
+                c.call("sendPhoto", files={"photo": fh}, chat_id=s.telegram_approver_chat_id,
+                       caption=f"Long thumbnail sample: {p.stem}")
+        print("sent to Telegram")
+
+
 def cmd_cover_samples(args, s):
     """3 sample Shorts covers (rotating colors/layouts, real Max), saved and sent to Telegram."""
     from pathlib import Path as _P
@@ -1091,6 +1125,9 @@ def main(argv=None):
     bp = sub.add_parser("batch-plan", help="the batch test's 4-week plan (--send: to Telegram)")
     bp.add_argument("--send", action="store_true")
     bp.set_defaults(fn=cmd_batch_plan)
+    ts = sub.add_parser("thumb-samples", help="3 sample long thumbnails to Telegram")
+    ts.add_argument("--no-telegram", action="store_true")
+    ts.set_defaults(fn=cmd_thumb_samples)
     cs = sub.add_parser("cover-samples", help="3 sample Shorts covers to Telegram")
     cs.add_argument("--no-telegram", action="store_true")
     cs.set_defaults(fn=cmd_cover_samples)

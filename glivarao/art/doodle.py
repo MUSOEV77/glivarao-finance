@@ -481,6 +481,19 @@ def statement(words: str) -> str:
 
 THUMB_PAPER = (236, 222, 192)        # warmer, slightly darker paper than the video frames
 THUMB_PANEL = (205, 231, 212)        # soft green panel behind the chart
+THUMB_BG = {"cream": (THUMB_PAPER, INK), "mint": ((222, 239, 227), INK),             # simple LIGHT backgrounds
+            "gold": ((250, 236, 198), INK), "white": ((250, 248, 243), INK)}         # (background, text)
+THUMB_LAYOUTS = ("max_right", "panel_top_left", "max_left", "panel_top")
+TOPIC_PROP = {"credit_card": "credit_card", "debt_payoff": "credit_card", "bnpl": "credit_card",
+              "aca_marketplace": "hospital", "insurance": "hospital", "medical_debt": "hospital",
+              "us_housing": "house", "mortgage": "house", "rent_vs_buy": "house", "emergency_fund": "piggy_bank",
+              "hysa": "piggy_bank", "ira_roth": "coin_stack", "retirement_401k": "coin_stack",
+              "fed_rates": "bank", "us_banks": "bank", "credit_score": "shield", "student_loan": "calendar"}
+
+
+def thumb_style(n: int) -> tuple[str, str]:
+    """(background color, layout) for long video n: never the same color or layout twice in a row."""
+    return list(THUMB_BG)[n % 4], THUMB_LAYOUTS[(n + n // 4) % 4]
 
 
 def _contrast(c1, c2) -> float:
@@ -496,7 +509,9 @@ def _contrast(c1, c2) -> float:
 def thumbnail(text: str, emotion: str = "shocked", out: Path | None = None, seed: int = 1,
               size: tuple[int, int] = (1280, 720), history=None, spike=None,
               max_img: Image.Image | None = None, value: str = "", start_year: str = "", end_year: str = "",
-              info: dict | None = None, points: list | None = None, layout: str = "max_right") -> Image.Image:
+              info: dict | None = None, points: list | None = None, layout: str = "max_right",
+              palette: str = "cream", scene_bg: Image.Image | None = None, prop: str = "",
+              visual: str = "", pair: tuple | None = None) -> Image.Image:
     """Warm paper, a complete 2-4 word statement ending with a period (huge), a soft green panel and Max with an
     emotion. Drawn at 2x, saved at 1280x720. `info` receives the text boxes (in output pixels) for the readability
     test.
@@ -508,9 +523,16 @@ def thumbnail(text: str, emotion: str = "shocked", out: Path | None = None, seed
       ignored: two years around one number would suggest a trend.)
     * no number at all -> no panel.
     Layouts (rotated so consecutive videos differ): 'max_right' (statement top-left, panel below, Max right),
-    'max_left' (the mirror: Max left), 'panel_top' (panel on top, statement under it, Max right)."""
+    'max_left' (the mirror: Max left), 'panel_top' (panel on top, statement under it, Max right), 'panel_top_left'
+    (panel_top mirrored: Max left). palette: cream / green / gold / dark background; scene_bg: the topic's scene,
+    faded behind; prop: a topic object Max holds (credit_card, hospital, house, coin_stack, ...)."""
     W2, H2 = size[0] * 2, size[1] * 2
-    img = Image.blend(paper(W2, H2, seed=3 + seed).copy(), Image.new("RGB", (W2, H2), THUMB_PAPER), 0.6)
+    bg_col, ink = THUMB_BG.get(palette, THUMB_BG["cream"])
+    img = Image.blend(paper(W2, H2, seed=3 + seed).copy(), Image.new("RGB", (W2, H2), bg_col),
+                      0.6 if palette == "cream" else 0.92)
+    if scene_bg is not None:              # the topic's scene, faded so text and Max stay readable
+        sc = scene_bg.convert("RGB").resize((W2, H2), Image.LANCZOS)
+        img = Image.blend(img, sc, 0.22)
     p = Pen(img, seed=seed, width=12)
     boxes = {"statement": [], "value": None, "years": []}
     st = statement(text)
@@ -524,25 +546,28 @@ def thumbnail(text: str, emotion: str = "shocked", out: Path | None = None, seed
         size_ -= 10
     pts = [(str(yr), float(v)) for yr, v in (points or [])]
     chart_ok = len(pts) >= 3
-    has_panel = chart_ok or bool(value)
-    ox = W2 * 0.355 if layout == "max_left" else 0.0          # text + panel column offset
+    if visual in ("bars", "before_after") and not pair:
+        visual = ""
+    has_panel = chart_ok or bool(value) or visual in ("bars", "before_after")
+    ox = W2 * 0.355 if layout in ("max_left", "panel_top_left") else 0.0     # text + panel column offset
     stmt_h = size_ * 0.92 * len(lines)
-    if layout == "panel_top" and has_panel:
+    if layout in ("panel_top", "panel_top_left") and has_panel:
         y = H2 * 0.925 - stmt_h + size_ * 0.42                # statement at the bottom, panel above it
     else:
         y = H2 * 0.05 + size_ * 0.5
     y_first = y
     for ln in lines:
-        p.text((ox + W2 * 0.045, y), ln, size_, INK, anchor="lm", bold=max(6, size_ // 28))
+        p.text((ox + W2 * 0.045, y), ln, size_, ink, anchor="lm", bold=max(6, size_ // 28))
         boxes["statement"].append(p.d.textbbox((ox + W2 * 0.045, y), ln, font=hand(size_), anchor="lm",
                                                stroke_width=max(6, size_ // 28)))
         y += size_ * 0.92
     last_w = hand(size_).getlength(lines[-1])
-    underline(p, ox + W2 * 0.05, ox + W2 * 0.05 + last_w * 0.97, y - size_ * 0.27, GREEN, 26)
+    underline(p, ox + W2 * 0.05, ox + W2 * 0.05 + last_w * 0.97, y - size_ * 0.27,
+              GOLD if palette in ("green", "dark") else GREEN, 26)
     if has_panel:
         # soft coloured panel (with a shadow), so the chart / number stands out on YouTube
-        if layout == "panel_top":
-            px0, py0, px1, py1 = W2 * 0.035, H2 * 0.04, W2 * 0.6, y_first - size_ * 0.62
+        if layout in ("panel_top", "panel_top_left"):
+            px0, py0, px1, py1 = ox + W2 * 0.035, H2 * 0.04, ox + W2 * 0.6, y_first - size_ * 0.62
         else:
             px0, py0, px1, py1 = (ox + W2 * 0.035, max(y - size_ * 0.27 + H2 * 0.03, H2 * 0.44), ox + W2 * 0.6,
                                   H2 * 0.965)
@@ -551,7 +576,47 @@ def thumbnail(text: str, emotion: str = "shocked", out: Path | None = None, seed
         from PIL import ImageFilter
 
         img.paste((60, 40, 20), (0, 0), sh.filter(ImageFilter.GaussianBlur(18)))
-        p.d.rounded_rectangle((px0, py0, px1, py1), 40, fill=THUMB_PANEL, outline=INK, width=10)
+        p.d.rounded_rectangle((px0, py0, px1, py1), 40, fill=PAPER if palette == "green" else THUMB_PANEL,
+                              outline=INK, width=10)
+    if visual in ("bars", "before_after"):        # a real before/after pair from ONE fact on the sheet
+        b_val, b_lab, a_val, a_lab = pair
+        pw, ph = px1 - px0, py1 - py0
+        if visual == "bars":                       # two bars, real heights (axis from zero), values on top
+            bv, av = _amount(b_val), _amount(a_val)
+            top = max(bv, av) or 1.0
+            base = py1 - ph * 0.17
+            bw = pw * 0.3
+            for k, (v, lab, txt) in enumerate(((bv, b_lab, b_val), (av, a_lab, a_val))):
+                bx = px0 + pw * (0.1 if k == 0 else 0.6)
+                bh = (ph * 0.34) * v / top
+                p.d.rectangle((bx, base - bh, bx + bw, base), fill=GREY if k == 0 else GREEN, outline=INK, width=8)
+                vs = int(ph * 0.31)
+                while vs > ph * 0.12 and hand(vs).getlength(txt) > pw * 0.48:
+                    vs -= 4
+                p.d.text((bx + bw / 2, base - bh - vs * 0.15), txt, font=hand(vs), fill=INK, anchor="mb",
+                         stroke_width=2, stroke_fill=INK)
+                p.d.text((bx + bw / 2, base + ph * 0.04), lab[:16], font=hand(int(ph * 0.09)), fill=INK, anchor="mt")
+                if k == 1:
+                    boxes["value"] = p.d.textbbox((bx + bw / 2, base - bh - vs * 0.15), txt, font=hand(vs),
+                                                  anchor="mb", stroke_width=2)
+        else:                                       # big before -> after numbers, a drawn arrow between them
+            vs = int(ph * 0.3)
+            gap = pw * 0.16
+            while vs > ph * 0.12 and hand(vs).getlength(b_val) + hand(vs).getlength(a_val) + gap > pw * 0.92:
+                vs -= 4
+            bw_, aw_ = hand(vs).getlength(b_val), hand(vs).getlength(a_val)
+            x = (px0 + px1 - (bw_ + aw_ + gap)) / 2
+            cy = py0 + ph * 0.45
+            p.d.text((x, cy), b_val, font=hand(vs), fill=GREY, anchor="lm", stroke_width=2, stroke_fill=GREY)
+            p.arrow(x + bw_ + gap * 0.15, cy, x + bw_ + gap * 0.85, cy, max(8, vs * 0.06), head=gap * 0.25)
+            p.d.text((x + bw_ + gap, cy), a_val, font=hand(vs), fill=INK, anchor="lm", stroke_width=3,
+                     stroke_fill=INK)
+            boxes["value"] = p.d.textbbox((x + bw_ + gap, cy), a_val, font=hand(vs), anchor="lm", stroke_width=3)
+            ls = int(ph * 0.11)
+            p.d.text((x + bw_ / 2, cy + vs * 0.7), b_lab[:16], font=hand(ls), fill=GREEN, anchor="mt")
+            p.d.text((x + bw_ + gap + aw_ / 2, cy + vs * 0.7), a_lab[:16], font=hand(ls), fill=GREEN, anchor="mt")
+        chart_ok = False
+        value = ""
     if chart_ok:          # a line chart ONLY with >= 3 real data points (axis from zero: no exaggeration)
         ys = int(H2 * 0.092)                    # year labels
         cbox = (px0 + W2 * 0.035, py0 + H2 * 0.045, px1 - W2 * 0.03, py1 - ys * 1.3)
@@ -605,12 +670,16 @@ def thumbnail(text: str, emotion: str = "shocked", out: Path | None = None, seed
         if cut.width > W2 * 0.4:
             s2 = W2 * 0.4 / cut.width
             cut = cut.resize((int(cut.width * s2), int(cut.height * s2)), Image.LANCZOS)
-        mx = 0.2 if layout == "max_left" else 0.8
+        mx = 0.2 if layout in ("max_left", "panel_top_left") else 0.8
         img.paste(cut, (int(W2 * mx - cut.width / 2), H2 - cut.height + int(H2 * 0.04)), cut)
     else:
-        draw_max(img, W2 * (0.2 if layout == "max_left" else 0.8), H2 * 1.22, u=H2 * 0.125, emotion=emotion,
-                 seed=seed + 9)
-    brand_mark(img, "tl" if layout == "max_left" else "tr", scale=2.2)
+        draw_max(img, W2 * (0.2 if layout in ("max_left", "panel_top_left") else 0.8), H2 * 1.22, u=H2 * 0.125,
+                 emotion=emotion, seed=seed + 9)
+    left = layout in ("max_left", "panel_top_left")
+    if prop:                              # the topic object Max holds (in front of his hand / chest)
+        mxc = W2 * (0.2 if left else 0.8)
+        icon(img, prop, mxc + (W2 * 0.11 if left else -W2 * 0.11), H2 * 0.62, s=H2 * 0.11, seed=seed + 3)
+    brand_mark(img, "tl" if left else "tr", scale=2.2)
     out_img = finish(img, size)
     if info is not None:
         k = size[0] / W2
@@ -618,7 +687,8 @@ def thumbnail(text: str, emotion: str = "shocked", out: Path | None = None, seed
         info.update({"statement": [sc(b) for b in boxes["statement"]],
                      "value": sc(boxes["value"]) if boxes["value"] else None,
                      "years": [sc(b) for b in boxes["years"]],
-                     "contrast_statement": _contrast(INK, THUMB_PAPER), "contrast_value": _contrast(GOLD, INK),
+                     "contrast_statement": _contrast(ink, bg_col), "contrast_value": _contrast(GOLD, INK) if visual not in ("bars", "before_after") else
+                     _contrast(INK, THUMB_PANEL),
                      "contrast_years": _contrast(INK, THUMB_PANEL)})
     if out is not None:
         out_img.save(out, "JPEG", quality=92, optimize=True)
@@ -715,6 +785,56 @@ def series_points(facts: list, unit_out: list | None = None) -> list[tuple[str, 
     return sorted(groups[key].items())
 
 
+def surprising_number(facts: list) -> tuple[str, str]:
+    """(number, its fact) to put in the badge: the most surprising figure on the fact sheet, never a range bound
+    ('between 100% and 400%') or a plain 100%. Big dollar totals and exact rates beat round numbers."""
+    import re as _re
+
+    from ..render.doodle import NUM
+
+    best, best_score = ("", ""), -1
+    for k, (text, _url) in enumerate(facts):
+        for m in NUM.finditer(text):
+            v, before = m.group(0), text[max(0, m.start() - 9):m.start()].lower()
+            amt = _amount(v)
+            pct = "%" in v or "percent" in v.lower()
+            if pct and amt in (100.0, 400.0) or "between" in before or _re.match(r"\s*(?:and|to)\s+\$?\d", text[m.end():]):
+                continue
+            if _re.search(r"trillion|billion|million", v, _re.I):
+                score = 5
+            elif pct and "." in v:
+                score = 4
+            elif "$" in v and amt >= 1000:
+                score = 3
+            elif pct:
+                score = 2
+            else:
+                score = 1
+            score -= k * 0.01                     # ties: the earlier (lead) fact
+            if score > best_score:
+                best, best_score = (v, text), score
+    return best
+
+
+def value_pair(facts: list) -> tuple | None:
+    """(before, before label, after, after label) when ONE fact states a change: 'X, up from Y a year earlier',
+    'to X, up from Y for 2026'. Only numbers written in that fact."""
+    import re as _re
+
+    from ..render.doodle import NUM
+
+    for text, _url in facts:
+        m = _re.search(r"(?P<a>" + NUM.pattern + r")[^.;]{0,30}?\b(?:up|down) from (?P<b>" + NUM.pattern +
+                       r")(?P<lab>(?: [a-z0-9]+){0,3})", text, _re.I)
+        if m:
+            lab = m.group("lab").strip() or "before"
+            lab = _re.sub(r"^(?:for|in) ", "", lab)
+            yr = _re.search(r"\b(20\d\d)\b", lab)
+            after = str(int(yr.group(1)) + 1) if yr else "now"
+            return m.group("b"), lab, m.group("a"), after
+    return None
+
+
 def thumb_data(facts: list, today_year: int) -> dict:
     """What the thumbnail panel may show, from the verified facts ((text, url) pairs): 'value' (the key number,
     as a badge) and 'points' (a line chart only with >= 3 real data points)."""
@@ -724,12 +844,19 @@ def thumb_data(facts: list, today_year: int) -> dict:
     if len(pts) >= 3:     # the chart's own latest value goes in the gold pill
         v = pts[-1][1]
         return {"value": f"{v:g}%" if unit[0] == "%" else compact_number(f"${v:,.2f}"), "points": pts}
-    src = next((t for t, _ in facts if value and value.rstrip("%") in t.replace(",", "")), "") if value else ""
-    if not src and value:
-        from ..render.doodle import NUM
+    num, src = surprising_number(facts)
+    if num:
+        pct = "%" in num or "percent" in num.lower()
+        value = compact_number(num) if pct or _amount(num) >= 100000 else num
+    return {"value": badge_text(src, value) if value else "", "points": pts if len(pts) >= 3 else [],
+            "pair": value_pair(facts)}
 
-        src = next((t for t, _ in facts if NUM.search(t)), "")
-    return {"value": badge_text(src, value) if value else "", "points": pts if len(pts) >= 3 else []}
+
+def visual_options(data: dict) -> list[str]:
+    """The real visuals this fact sheet supports (never invented): line (3+ points), bars / before_after (a
+    stated change), badge (one number)."""
+    out = (["line"] if data.get("points") else []) + (["bars", "before_after"] if data.get("pair") else [])
+    return out + (["badge"] if data.get("value") else [])
 
 
 def phone_readability(info: dict, size: tuple[int, int] = (1280, 720), phone=(160, 90)) -> list[str]:

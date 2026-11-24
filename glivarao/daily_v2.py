@@ -1264,7 +1264,8 @@ def _record_variety(script, store: JobStore, art_stats: dict, out: Path) -> None
     sl = variety.slot(script.variety_slot) if script.variety_slot is not None else {}
     fp = {**variety.script_fingerprint(script), "backgrounds": (art_stats or {}).get("places", []),
           "opening_pose": (art_stats or {}).get("opening_pose") or sl.get("pose"),
-          "thumb_layout": sl.get("layout"), "music": sl.get("music"), "job": out.name}
+          "thumb_layout": "/".join(__import__("glivarao.art.doodle", fromlist=["thumb_style"]).thumb_style(
+              int(store.kv_get(f"variety_count:{script.format}", "0")))), "music": sl.get("music"), "job": out.name}
     issues = variety.record(store, script.format, fp)
     from .studio.repetition import record_examples
     from .studio.week import today_tk
@@ -1291,20 +1292,33 @@ def make_thumbnails(script, brief, out: Path, settings: Settings, store: JobStor
         from .studio import variety
 
         data = thumb_data([(f.text, f.url) for f in brief.facts if f.kind == "DATA" and f.url], today.year)
-        words_list = bold_words(script, 3 if script.format == "long" else 1)
-        sl = variety.slot(script.variety_slot) if script.variety_slot is not None else {}
-        layout = sl.get("layout", "max_right")      # 7-video rotation: never the previous video's layout
-        first = sl.get("pose", "shocked")
-        emotions = [first] + [e for e in ("shocked", "worried", "pointing", "thinking") if e != first]
+        words_list = bold_words(script, 3 if script.format == "long" else 1,
+                                max_words=3 if script.format == "long" else 4)
+        from .art.doodle import TOPIC_PROP, thumb_style
+
+        palette, layout = thumb_style(int(store.kv_get(f"variety_count:{script.format}", "0")))
+        prop = TOPIC_PROP.get(brief.topic_key, "coin_stack")
+        from .art.doodle import HOOK_EMOTION, visual_options
+
+        first = HOOK_EMOTION.get(variety.hook_type(variety.opening_line(script)), "shocked")   # matches the hook
+        emotions = [first] + [e for e in ("shocked", "worried", "thinking", "pointing") if e != first]
+        opts = visual_options(data)              # real visuals only; a different one than the last long video
+        last_vis = store.kv_get("thumb_visual_last", "")
+        vis = next((v for v in opts if v != last_vis), opts[0] if opts else "")
+        if script.format == "long" and vis:
+            store.kv_set("thumb_visual_last", vis)
         paths = []
         for k, (words, emo) in enumerate(zip(words_list, emotions)):
             dst = out / (f"thumbnail_{k + 1}.jpg" if script.format == "long" else "thumbnail.jpg")
             doodle_thumb(words, emo, dst, seed=k + 1, max_img=load_pose(settings, emo), value=data["value"],
-                         points=data["points"], layout=layout)
+                         points=data["points"] if vis == "line" else None, layout=layout, palette=palette,
+                         prop=prop, visual=vis, pair=data.get("pair"))
             paths.append(dst)
-        panel = (f"line chart of {len(data['points'])} real data points" if data["points"] else
-                 f"number badge {data['value']}" if data["value"] else "no number")
-        return paths[0], [f"doodle (code-drawn) \"{w}\", {panel}, layout {layout}" for w in words_list[:len(paths)]]
+        panel = (f"line chart of {len(data['points'])} real data points" if vis == "line" else
+                 f"{vis.replace('_', '/')} {data['pair'][0]} vs {data['pair'][2]}" if vis in ("bars", "before_after")
+                 else f"number badge {data['value']}" if data["value"] else "no number")
+        return paths[0], [f"doodle (code-drawn) \"{w}\", {panel}, layout {layout}, {palette} background, holds "
+                          f"{prop}" for w in words_list[:len(paths)]]
     if script.format == "long":  # 3 options (AI + our own bold words); you pick one in Telegram
         from .art.ai_visuals import thumbnail_options
 
