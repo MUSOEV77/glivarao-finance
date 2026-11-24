@@ -306,11 +306,12 @@ def cmd_cover_samples(args, s):
     out = _P(s.output_dir) / "cover_samples"
     out.mkdir(parents=True, exist_ok=True)
     paths = []
-    for n, (text, pose) in enumerate([("The Minimum Trap", "shocked"), ("Your Card Rate", "worried"),
-                                      ("Miss December 15", "pointing")]):
+    for n, (text, pose, num) in enumerate([("The Minimum Trap", "shocked", "22.36%"),
+                                           ("Your Card Rate", "worried", "$1,368.5B"),
+                                           ("Miss December 15", "worried", "")]):
         pal, lay = cover_style(n)
         p = out / f"cover_{n + 1}_{pal}_{lay}.jpg"
-        D.cover(text, pal, lay, load_pose(s, pose), emotion=pose).save(p, "JPEG", quality=90)
+        D.cover(text, pal, lay, load_pose(s, pose), emotion=pose, number=num).save(p, "JPEG", quality=90)
         paths.append(p)
         print(p)
     if not args.no_telegram:
@@ -322,6 +323,17 @@ def cmd_cover_samples(args, s):
                 c.call("sendPhoto", files={"photo": fh}, chat_id=s.telegram_approver_chat_id,
                        caption=f"Shorts cover sample: {p.stem}")
         print("sent to Telegram")
+
+
+def cmd_render_draft(args, s):
+    """Render a rejected draft from its saved script (no new writing cost) and send it for review."""
+    from .daily_v2 import render_draft
+
+    try:
+        r = render_draft(s, _store(s), args.job_id, send=not args.no_telegram, force=args.force)
+    except (ValueError, KeyError) as exc:
+        raise SystemExit(f"not rendered: {exc}")
+    print(f"{r[0]} {r[1]} {r[2]} {r[3] or ''} {r[4]}")
 
 
 def cmd_recheck_rejected(args, s):
@@ -1082,6 +1094,11 @@ def main(argv=None):
     cs = sub.add_parser("cover-samples", help="3 sample Shorts covers to Telegram")
     cs.add_argument("--no-telegram", action="store_true")
     cs.set_defaults(fn=cmd_cover_samples)
+    rd = sub.add_parser("render-draft", help="render a rejected draft from its saved script (no writing cost)")
+    rd.add_argument("job_id")
+    rd.add_argument("--force", action="store_true", help="render even if it still fails a check")
+    rd.add_argument("--no-telegram", action="store_true")
+    rd.set_defaults(fn=cmd_render_draft)
     rr = sub.add_parser("recheck-rejected", help="re-check today's rejected drafts with the current rules (free)")
     rr.add_argument("--date", help="YYYY-MM-DD (default today, Tashkent)")
     rr.set_defaults(fn=cmd_recheck_rejected)

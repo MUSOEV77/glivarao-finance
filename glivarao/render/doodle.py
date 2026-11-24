@@ -398,7 +398,7 @@ class DoodleFrames:
         if "img" not in self._ov.get("cover", {}):
             mx = Image.open(cov["pose_path"]).convert("RGBA") if cov.get("pose_path") else None
             self._ov["cover"] = {"img": D.cover(cov["text"], cov["palette"], cov["layout"], mx, size,
-                                                cov.get("emotion", "shocked"))}
+                                                cov.get("emotion", "shocked"), cov.get("number", ""))}
         return self._ov["cover"]["img"]
 
     def move(self, k: int) -> str:

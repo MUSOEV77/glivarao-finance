@@ -196,7 +196,23 @@ def retention_issues(script: Script, previous: dict | None = None) -> list[str]:
         max_gap = max(max_gap, pos - last)
         if max_gap > gap:
             out.append(f"{max_gap / WPM_SPOKEN * 60:.0f} s without a pattern interrupt or open loop (max ~60 s)")
-    return out
+    return [i for i in out if "pattern interrupt" not in i]
+
+
+def pacing_warnings(script: Script) -> list[str]:
+    """Long videos: gaps over ~60 s without an open loop. A warning in the review, never a rejection or rewrite."""
+    if script.format != "long":
+        return []
+    body = [s for sc in script.scenes for s in _sentences_of(sc.narration)]
+    max_gap, pos, last = 0, 0, 0
+    for s in body:
+        pos += len(s.split())
+        if LOOP_RE.search(s) or s.rstrip().endswith("?"):
+            max_gap, last = max(max_gap, pos - last), pos
+    max_gap = max(max_gap, pos - last)
+    if max_gap > int(WPM_SPOKEN * 1.1):
+        return [f"{max_gap / WPM_SPOKEN * 60:.0f} s without a pattern interrupt or open loop (aim for ~60 s)"]
+    return []
 
 
 def sponsor_issues(script: Script) -> list[str]:
@@ -283,6 +299,7 @@ def check_script(script: Script, enforce_length: bool = True,
     if retention:
         for issue in retention_issues(script, previous_video):
             (r.errors if enforce_length else r.warnings).append(f"Won't hold viewers: {issue}")
+        r.warnings += [f"⚠ PACING: {i}" for i in pacing_warnings(script)]
         if previous_video is not None:      # variety repeats: a warning in the review, never a rejection
             from .studio.variety import script_issues
 

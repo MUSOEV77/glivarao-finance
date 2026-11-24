@@ -41,13 +41,18 @@ def test_hook_must_be_concrete():
                 if "hook" in i]
 
 
-def test_long_videos_need_an_open_loop_every_minute():
+def test_long_video_loop_gaps_are_a_warning_only():
     sents = _long_body(0)
     no_loops = _s("long", [AFTER] + [" ".join(sents[i:i + 10]) for i in range(0, len(sents), 10)] + [DISC])
-    assert any("without a pattern interrupt" in i for i in retention_issues(no_loops))
+    from glivarao.compliance import check_script, pacing_warnings
+
+    assert not any("pattern interrupt" in i for i in retention_issues(no_loops))      # never a rejection
+    assert pacing_warnings(no_loops)
+    rep = check_script(no_loops, retention=True)
+    assert any("PACING" in w for w in rep.warnings) and not any("pattern interrupt" in e for e in rep.errors)
     sents = _long_body(110)                                  # about every 42 s
     looped = _s("long", [AFTER] + [" ".join(sents[i:i + 10]) for i in range(0, len(sents), 10)] + [DISC])
-    assert not [i for i in retention_issues(looped) if "pattern interrupt" in i]
+    assert not pacing_warnings(looped)
 
 
 def test_short_words_and_you():

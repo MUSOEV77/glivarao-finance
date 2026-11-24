@@ -631,6 +631,34 @@ def recheck(settings: Settings, store: JobStore, job_id: str) -> list[str]:
     return errs
 
 
+def render_draft(settings: Settings, store: JobStore, job_id: str, send: bool = True, workers: int | None = None,
+                 force: bool = False) -> tuple:
+    """Render a REJECTED draft from its saved script and facts, with no new writing (no Claude cost): re-checked
+    with the current rules first (refused if it still fails, unless force), then voiced, rendered and sent for
+    review like any video. Never publishes."""
+    from .content.brief import load_brief
+    from .models import Script
+    from .studio import factcheck
+
+    job = store.get(job_id)
+    if job.status != JobStatus.REJECTED_COMPLIANCE:
+        raise ValueError(f"{job_id} is {job.status.value}, not rejected_compliance")
+    errs = recheck(settings, store, job_id)
+    if errs and not force:
+        raise ValueError("still fails the current checks: " + " | ".join(e[:120] for e in errs[:3]))
+    out = settings.output_dir / job_id
+    script = Script.model_validate_json((out / "script.json").read_text())
+    brief = load_brief(out / "brief.json")
+    claims = factcheck.check_claims(script, brief, "")
+    store.transition(job, JobStatus.SCRIPTED, "rendered from the saved script (render-draft, no new writing)")
+    ctx = {"writer": "claude (saved draft, re-checked)", "creator": "", "item_id": None, "card": None,
+           "date": date.today().isoformat(),
+           "compliance": "Re-checked with the current rules: " + ("OK" if not errs else "FORCED: " + "; ".join(errs)),
+           "sim": {"summary": "Originality: checked when this draft was written", "phrase_overlap": 0.0,
+                   "structure_ratio": 0.0}}
+    return render_and_review(store.get(job_id), script, brief, claims, ctx, settings, store, send, workers)
+
+
 def recheck_rejected(settings: Settings, store: JobStore, day: date | None = None) -> dict:
     """Today's rejected drafts: how many were rejected (before) and how many the CURRENT rules would still reject
     (after), with the reasons. Free: nothing is written, voiced or rendered."""
@@ -883,7 +911,14 @@ def _render_and_review(job, script, brief, claims, ctx: dict, settings: Settings
 
                 n = int(store.kv_get("variety_count:short", "0"))
                 pal, lay = _var.cover_style(n)
-                cov = {"text": bold_words(script, 1)[0], "palette": pal, "layout": lay, "pose": sl.get("pose")}
+                from .art.doodle import HOOK_EMOTION
+                from .render.doodle import NUM as _NUM
+
+                hk = _var.hook_type(_var.opening_line(script))
+                first = " ".join(script.scenes[0].narration.split()[:40]) if script.scenes else ""
+                m = _NUM.search(first)
+                cov = {"text": bold_words(script, 1)[0], "palette": pal, "layout": lay,
+                       "pose": HOOK_EMOTION.get(hk, "shocked"), "number": m.group(0) if m else ""}
             try:
                 script, art_stats = prepare(script, out, settings, store, avoid_places=avoid,
                                             opening_pose=sl.get("pose"), cover=cov)
