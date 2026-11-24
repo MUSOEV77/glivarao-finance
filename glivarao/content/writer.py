@@ -245,7 +245,8 @@ def _wrap(b: Brief, fmt: str, scenes: list[Scene], suffix: str = "") -> Script:
 # ------------------------------------------------------------------ Claude writer (paid; approval required)
 def write_with_claude(b: Brief, fmt: str, settings: Settings, angle: str = "", style: str | None = None,
                       creator_text: str = "", avoid_lines: list[str] | None = None,
-                      variety_slot: int | None = None, previous: dict | None = None) -> Script:
+                      variety_slot: int | None = None, previous: dict | None = None,
+                      avoid_numbers: set[str] | None = None) -> Script:
     """Grounded generation: the model may only use facts from the brief's fact sheet; the format sets the
     structure; the host's own input is woven in as a 'creator' scene; recent openings are off limits."""
     from ..scriptgen.claude import generate_with_claude
@@ -281,6 +282,9 @@ def write_with_claude(b: Brief, fmt: str, settings: Settings, angle: str = "", s
     if avoid_lines:
         grounding += "\n\nDo NOT open or close with any of these lines used in recent videos:\n" + \
                      "\n".join(f"- {x}" for x in avoid_lines[:20])
+    if avoid_numbers:              # worked examples: never the example numbers of the last 30 days
+        grounding += ("\n\nDo NOT reuse these worked-example numbers (used in the last 30 days); pick other "
+                      "example amounts: " + ", ".join(sorted(avoid_numbers)[:40]))
     if variety_slot is not None:   # 7-video rotation: never the previous video's hook type / lines
         from ..studio.variety import HOOK_HOW, slot
 

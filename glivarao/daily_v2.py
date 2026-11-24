@@ -106,7 +106,8 @@ def _write_long(brief, style, creator, used, paid, settings, variant=0, store=No
         t = costs.new_draft("long")
         with costs.tag(t):
             s = write_with_claude(brief, "long", settings, style=style, creator_text=creator, avoid_lines=used,
-                                  variety_slot=vs, previous=variety.previous(store, "long") if store else None)
+                                  variety_slot=vs, previous=variety.previous(store, "long") if store else None,
+                                  avoid_numbers=_avoid_numbers(store))
         return s.model_copy(update={"cost_tag": t, "variety_slot": vs})
     return write_long_format(brief, style, creator, used, variant=variant).model_copy(update={"variety_slot": vs})
 
@@ -121,9 +122,10 @@ def _write_shorts(brief, style, n, used, paid, settings, store=None, angles=None
     if not paid:
         return [x.model_copy(update={"variety_slot": vs(i)})
                 for i, x in enumerate(write_shorts_format(brief, style, n=n, used_lines=used))]
-    angles = angles or ("ONE surprising number from the fact sheet, with its own hook in the first two seconds",
-                        "ONE common myth and the fact that corrects it, with its own hook",
-                        "ONE mistake people make and what to do instead, with its own hook")
+    if not angles:                 # Short formats rotate: consecutive Shorts never share a format
+        from .studio.repetition import SHORT_FORMATS, next_short_formats
+
+        angles = next_short_formats(store, n) if store is not None else list(SHORT_FORMATS[:n])
     from .studio import costs
 
     out = []
@@ -134,9 +136,19 @@ def _write_shorts(brief, style, n, used, paid, settings, store=None, angles=None
         with costs.tag(t):
             s = write_with_claude(brief, "short", settings,
                                   angle=a if "Not a cut-down" in a else a + ". Not a cut-down of the long video.",
-                                  avoid_lines=used, variety_slot=vs(i), previous=prev)
+                                  avoid_lines=used, variety_slot=vs(i), previous=prev,
+                                  avoid_numbers=_avoid_numbers(store))
         out.append(s.model_copy(update={"style": f"short_{i}", "cost_tag": t, "variety_slot": vs(i)}))
     return out
+
+
+def _avoid_numbers(store) -> set[str]:
+    if store is None:
+        return set()
+    from .studio.repetition import recent_examples
+    from .studio.week import today_tk
+
+    return recent_examples(store, today_tk())
 
 
 def _originality_gate(script, brief, today, history, settings, paid, used, regen):
@@ -244,9 +256,12 @@ def run_daily_v2(settings: Settings, store: JobStore, today: date | None = None,
 
         planned = active_item(store)  # never collide with the long video that is waiting for your take
         recent_long = {h[1] for h in json.loads(store.kv_get("used_topics", "[]"))[-3:]}
+        from .studio.repetition import recent_topics
+
         card, short_why, _ = pick_topic(report, store, free_writer=not paid, history_key="used_short_topics",
                                         recent_videos=10, family_gap=0,
-                                        exclude=recent_long | ({planned.key} if planned else set()), today=today)
+                                        exclude=recent_long | ({planned.key} if planned else set()) |
+                                        recent_topics(store, today), today=today)
         if card is None:
             return DailyResult("", "skipped", note=f"{pace_note}; no Shorts topic passed today's checks")
         style = "explainer"
@@ -480,6 +495,9 @@ def _produce_job(job, script, sim, brief, creator, writer, paid, card, item, rep
     ok, why = finance_only_check(script)
     report_c = check_script(script, enforce_length=paid, evergreen=not brief.timely, retention=True,
                             previous_video=prev_video)
+    from .studio.repetition import example_issues
+
+    report_c.warnings += [f"⚠ REPEAT: {i}" for i in example_issues(script, store, today)]   # warning only
     for issue in absolute_claim_issues(script, sheet):     # literally true for the viewer, or on the fact sheet
         (report_c.errors if paid else report_c.warnings).append(f"Overstated: {issue}")
     if not ok:
@@ -1213,6 +1231,10 @@ def _record_variety(script, store: JobStore, art_stats: dict, out: Path) -> None
           "opening_pose": (art_stats or {}).get("opening_pose") or sl.get("pose"),
           "thumb_layout": sl.get("layout"), "music": sl.get("music"), "job": out.name}
     issues = variety.record(store, script.format, fp)
+    from .studio.repetition import record_examples
+    from .studio.week import today_tk
+
+    record_examples(store, script, today_tk())
     (out / "variety.json").write_text(json.dumps({"fingerprint": fp, "repeats_previous": issues}, indent=2))
     if issues:
         log.warning("%s repeats the previous %s video: %s", out.name, script.format, "; ".join(map(str, issues)))

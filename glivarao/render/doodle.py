@@ -79,9 +79,9 @@ def key_phrase(text: str, n: int = 7) -> str:
     words = text.replace("*", "").split()
     if m:
         ws = [m.group(0)] + [w.strip(",.;:!?") for w in text[m.end():].split()[:3]]
-    else:
-        first = re.split(r"[,.;:!?]", text.replace("*", ""))[0].split()   # stop at the first clause break
-        ws = [w.strip(",.;:!?") for w in (first or words)[:n]]
+    else:   # the script's own words only: the whole first clause when short enough, never new words
+        first = re.split(r"[,.;:!?]", text.replace("*", ""))[0].split() or words
+        ws = [w.strip(",.;:!?") for w in (first if len(first) <= n + 2 else first[:n])]
     while len(ws) > 1 and ws[-1].lower() in HEAD_STOP:                  # never end on "a", "the", "for", ...
         ws.pop()
     return " ".join(ws).strip()

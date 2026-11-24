@@ -23,9 +23,11 @@ def test_cover_has_big_text_and_large_max():
     assert rows.min() > 960                                   # Max sits under the hook, never over it
 
 
-def test_card_phrases_are_complete():
-    p = R.key_phrase("It's the cutoff for a new plan, and it matters.")
-    assert p == "It's the cutoff for a new plan" and p.split()[-1].lower() not in ("a", "for", "the", "to")
+def test_card_phrases_use_only_the_scripts_own_words():
+    txt = "It's the cutoff for a January 1 start, so act now."
+    p = R.key_phrase(txt)
+    assert p == "It's the cutoff for a January 1 start"
+    assert set(p.lower().split()) <= set(txt.lower().replace(",", " ").replace(".", " ").split())
 
 
 def test_shorts_never_reuse_a_background_from_the_last_10(store):

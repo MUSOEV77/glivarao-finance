@@ -112,7 +112,10 @@ def plan_next(settings, store, today: date | None = None, research_dir: Path | N
         skipped = {}
     else:
         report = json.loads(cached.read_text()) if cached.exists() else run_research(today, research_dir, store)
-        card, why, skipped = pick_topic(report, store, free_writer=not paid_writer_allowed(settings), today=today)
+        from .repetition import recent_topics
+
+        card, why, skipped = pick_topic(report, store, free_writer=not paid_writer_allowed(settings), today=today,
+                                        exclude=recent_topics(store, today))
     if card is None:
         log.warning("no eligible topic today (%s)", skipped)
         if send:
