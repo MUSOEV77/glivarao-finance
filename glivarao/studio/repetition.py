@@ -25,16 +25,12 @@ def _norm(n: str) -> str:
     return n.replace(" ", "").replace(",", "")
 
 
-def example_numbers(script) -> set[str]:
-    """Numbers used in the script's worked examples (labeled sentences)."""
-    from .factcheck import EXAMPLE_RE
-
-    out = set()
-    for sc in script.scenes:
-        for s in re.split(r"(?<=[.!?])\s+", sc.narration):
-            if EXAMPLE_RE.search(s):
-                out |= {_norm(m.group(0)) for m in NUM.finditer(s)}
-    return out
+def example_numbers(script, facts: list[str] | None = None) -> set[str]:
+    """The script's own example numbers: every $ amount or % in the narration that is NOT on the fact
+    sheet (fact-sheet numbers may repeat; invented example inputs and results may not)."""
+    sheet = {_norm(m.group(0)) for f in (facts or []) for m in NUM.finditer(f)}
+    text = " ".join(sc.narration for sc in script.scenes)     # charts are checked against the fact sheet
+    return {_norm(m.group(0)) for m in NUM.finditer(text)} - sheet
 
 
 def recent_examples(store, day: date, days: int = 30) -> set[str]:
@@ -42,15 +38,28 @@ def recent_examples(store, day: date, days: int = 30) -> set[str]:
     return {n for d, n in json.loads(store.kv_get("example_numbers", "[]")) if d >= cut}
 
 
-def record_examples(store, script, day: date) -> None:
+def record_examples(store, script, day: date, facts: list[str] | None = None) -> None:
     rows = json.loads(store.kv_get("example_numbers", "[]")) + [[day.isoformat(), n]
-                                                                 for n in sorted(example_numbers(script))]
+                                                                 for n in sorted(example_numbers(script, facts))]
     store.kv_set("example_numbers", json.dumps(rows[-2000:]))
 
 
-def example_issues(script, store, day: date) -> list[str]:
-    again = sorted(example_numbers(script) & recent_examples(store, day))
-    return [f"worked-example number(s) used in the last 30 days: {', '.join(again)}"] if again else []
+def example_issues(script, store, day: date, facts: list[str] | None = None) -> list[str]:
+    """Two or more example numbers that another video used in the last 30 days = the same example again."""
+    again = sorted(example_numbers(script, facts) & recent_examples(store, day))
+    return ([f"reuses an example from the last 30 days ({', '.join(again)}): use a different worked example"]
+            if len(again) >= 2 else [])
+
+
+def topic_issues(script, brief) -> list[str]:
+    """The script must be about its picked topic: the topic's key words appear in the title or the first scenes."""
+    stop = set("the a an and or of to in on for is are your you how why what with from at by be as it this".split())
+    want = {w[:5] for w in re.findall(r"[a-z]+", f"{brief.topic} {brief.topic_key.replace('_', ' ')}".lower())
+            if len(w) > 3 and w not in stop}
+    text = f"{script.title} " + " ".join(sc.narration for sc in script.scenes[:2])
+    have = {w[:5] for w in re.findall(r"[a-z]+", text.lower())}
+    return [] if not want or want & have else [f"not about its topic \"{brief.topic}\": say what it is about in the "
+                                                "title and the first scene"]
 
 
 def recent_topics(store, day: date, days: int = 14) -> set[str]:

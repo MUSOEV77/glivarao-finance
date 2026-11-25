@@ -72,8 +72,8 @@ def fake_claude(prompt, fmt, seed):
     fact-sheet data, closing 'What to do', disclaimer."""
     rng = random.Random(seed)
     used: set = set()
-    aca = "15,960" in prompt
     card = "22.36%" in prompt
+    aca = ("15,960" in prompt or "December 15" in prompt) and not card
     m = re.search(r"HOOK TYPE for this video: (\w+)", prompt)
     kinds = ("number", "mistake", "question", "myth", "story", "comparison", "warning")
     hk = m.group(1) if m else kinds[seed % 7]
@@ -88,13 +88,13 @@ def fake_claude(prompt, fmt, seed):
         return ok[seed % len(ok)]
     special, charts = [], {}
     if aca:
-        special = [{"question": "Miss December 15, and could your new plan start late?",
-                    "warning": "Don't miss December 15 if you're new: your plan may not start January 1.",
-                    "story": "You miss December 15, and your new plan may not start January 1.",
-                    "myth": "You think January is fine, but if you're new, December 15 may be your real deadline.",
-                    "comparison": "December 15 versus January 1: if you're new, the earlier date may decide when you're covered.",
-                    "mistake": "If you're new, missing December 15 could be a costly mistake.",
-                    }.get(hk, "If you're new to the Marketplace, miss December 15 and your plan may not start January 1.") if fmt == "short" else
+        special = [{"question": "Miss December 15, and could your plan start late?",
+                    "warning": "Don't miss December 15 if you're new to Marketplace.",
+                    "story": "You miss December 15, and your plan may start late.",
+                    "myth": "Think January works? New enrollees face a December 15 deadline.",
+                    "comparison": "December 15 versus January 1: which date covers you?",
+                    "mistake": "If you're new, missing December 15 could cost you.",
+                    }.get(hk, "New to the Marketplace? December 15 decides your January start.") if fmt == "short" else
                    {"question": "Miss December 15, and will your Marketplace plan start on January 1?",
                     "warning": "Don't miss December 15, or your Marketplace plan won't start on January 1.",
                     "mistake": "Missing December 15 is a costly mistake: your plan won't start on January 1.",
@@ -105,7 +105,8 @@ def fake_claude(prompt, fmt, seed):
                    "With income between 100% and 400% of the federal poverty level you qualify for the premium tax "
                    "credit.",
                    "The 2026 poverty guideline is $15,960 for one person and $33,000 for a family of four.",
-                   "Say, with made-up numbers, two plans differ by $50 a month. Over a year, that's $600."]
+                   f"Say, with made-up numbers, two plans differ by ${40 + 10 * (seed % 9)} a month. Over a year, "
+                   f"that's ${12 * (40 + 10 * (seed % 9))}."]
         charts = {1: {"kind": "bar_compare", "title": "2026 federal poverty guideline", "labels": ["1", "2", "3", "4"],
                       "values": [15960, 21640, 27320, 33000], "unit": "$", "source": "HHS poverty guidelines (ASPE)"},
                   2: {"kind": "bar_compare", "title": "Income line for premium tax credits",
@@ -151,8 +152,8 @@ def fake_claude(prompt, fmt, seed):
         if i == n_sc - 1:
             narr = (pick(["Today, set one automatic payment above the minimum.",
                                 "Today, open your statement and find your rate.",
-                                "This week, move one payment date to right after payday.",
-                                "Tonight, write down every balance and its rate.",
+                                "Next payday, move one payment date to right after it.",
+                                "Today, write down every balance and its rate.",
                                 "Today, call your card company and ask for a lower rate.",
                                 "This weekend, list your bills from the highest rate down.",
                                 "Today, turn on alerts for every payment due date."]) +
@@ -170,9 +171,9 @@ def fake_claude(prompt, fmt, seed):
         scenes[1]["narration"] = (special[-1] if len(special) > 1 else _filler(rng, 14, used))
         scenes[2]["narration"] = _filler(rng, 16, used)          # each Short its own words, like Claude
         scenes[3]["narration"] = _filler(rng, 14, used)
-        scenes[4]["narration"] = (pick(["Do one thing today: check your number.", "Check that rate tonight.",
+        scenes[4]["narration"] = (pick(["Do one thing today: check your number.", "Check that rate before your next bill.",
                                               "Write your number down today.", "Look at your statement today.",
-                                              "Set one reminder today.", "Ask about your rate this week.",
+                                              "Set one reminder today.", "Ask about your rate at your next bill.",
                                               "Compare your number with this one today."]) +
                                   " This video is for education only and isn't financial advice. " +
                                   pick(["Now look at that first number again.", "So, back to that first number.",

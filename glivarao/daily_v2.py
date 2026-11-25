@@ -252,9 +252,22 @@ def run_daily_v2(settings: Settings, store: JobStore, today: date | None = None,
         if card.get("batch"):        # batch test: this part's Shorts = the topic's single ideas for it
             from .studio import batch as _batch
 
-            batch_angles = _batch.short_angles(store, card)
+            batch_angles = _batch.short_angles(store, card)[:1]    # one Short from today's long topic
             quota, shorts = shorts, min(shorts, len(batch_angles))
     else:
+        from .studio import batch as _batch
+
+        bt = _batch.next_short_topic(store, today) if _batch.active(store) else None
+    if shorts_only and bt is not None:          # batch topics first (round-robin, one pillar once a day)
+        card = _batch.short_card(store, bt)
+        report = {"ranked": []}
+        style = "explainer"
+        quota, shorts = shorts, 1               # one Short per topic; the next one gets another topic
+        b = card["batch_short"]
+        if b["idea"]:
+            batch_angles = [f"ONE single idea only: {b['idea']}. Build it on this fact: {b['fact']} Its own hook "
+                            "in the first two seconds."]
+    elif shorts_only:
         from .studio.autopick import pick_topic
 
         report = json.loads(cached.read_text()) if cached.exists() else run_research(today, research_dir, store)
@@ -270,7 +283,12 @@ def run_daily_v2(settings: Settings, store: JobStore, today: date | None = None,
                                         recent_topics(store, today), today=today)
         if card is None:
             return DailyResult("", "skipped", note=f"{pace_note}; no Shorts topic passed today's checks")
+        from .studio.pillars import pillar_of
+
+        if getattr(pillar_of(card["key"]), "key", card["key"]) in _batch.pillars_today(store, today):
+            return DailyResult("", "skipped", note=f"{pace_note}; research topic's pillar already used today")
         style = "explainer"
+        quota = shorts
     brief = build_brief(card, today)
     if not settings.dry_run:   # the topic's library facts (e.g. HHS poverty guidelines) re-checked on official pages
         from .studio.fact_library import verify_brief
@@ -354,12 +372,20 @@ def run_daily_v2(settings: Settings, store: JobStore, today: date | None = None,
     if item is not None and produced:
         TopicQueue(store).update(item.id, status="produced", produced_on=today.isoformat(),
                                  jobs=[j[0] for j in result.jobs])
+    from .studio import batch as _bt
+
+    if made_shorts:
+        _bt.note_pillar(store, today, card["key"])
+    if shorts_only and card.get("batch_short") and quota > 1:   # next Short: another topic/pillar (one try each;
+        more = run_daily_v2(settings, store, today=today, research_dir=research_dir, send=send, workers=workers,
+                            shorts=quota - 1, deliver_day=deliver_day, only_shorts=True)   # failures: next run)
+        result.jobs += more.jobs
     if card.get("batch"):
         from .studio import batch as _batch
 
         _batch.record_jobs(store, card, result.jobs, settings.output_dir)
         rest = quota - made_shorts
-        if rest > 0 and not only_shorts:   # keep 3 Shorts a day: the other slots are research-picked (not batch)
+        if rest > 0 and not only_shorts:   # keep 3 Shorts a day: the other slots are other topics/pillars
             more = run_daily_v2(settings, store, today=today, research_dir=research_dir, send=send, workers=workers,
                                 shorts=rest, deliver_day=deliver_day, only_shorts=True)
             result.jobs += more.jobs
@@ -481,7 +507,10 @@ def _produce_job(job, script, sim, brief, creator, writer, paid, card, item, rep
 
     prev_video = variety.previous(store, script.format)
     sheet = [f.text for f in brief.facts]
-    hold = retention_issues(script, prev_video) + absolute_claim_issues(script, sheet)
+    from .studio.repetition import example_issues as _ex, topic_issues as _top
+
+    hold = (retention_issues(script, prev_video) + absolute_claim_issues(script, sheet) +
+            _ex(script, store, today, sheet) + _top(script, brief))
     if (issues or ever or hold or not has_what_to_do(script)) and paid:  # sponsor, evergreen, retention, "What to do"
         from .scriptgen.claude import ClaudeUnavailable, rewrite_for_sponsor
 
@@ -501,9 +530,10 @@ def _produce_job(job, script, sim, brief, creator, writer, paid, card, item, rep
     ok, why = finance_only_check(script)
     report_c = check_script(script, enforce_length=paid, evergreen=not brief.timely, retention=True,
                             previous_video=prev_video)
-    from .studio.repetition import example_issues
+    from .studio.repetition import example_issues, topic_issues
 
-    report_c.warnings += [f"⚠ REPEAT: {i}" for i in example_issues(script, store, today)]   # warning only
+    for issue in example_issues(script, store, today, sheet) + topic_issues(script, brief):   # block (rewrite once)
+        (report_c.errors if paid else report_c.warnings).append(f"Repeat/topic: {issue}")
     for issue in absolute_claim_issues(script, sheet):     # literally true for the viewer, or on the fact sheet
         (report_c.errors if paid else report_c.warnings).append(f"Overstated: {issue}")
     if not ok:
@@ -519,6 +549,11 @@ def _produce_job(job, script, sim, brief, creator, writer, paid, card, item, rep
         report_c.errors = []
         log.warning("%s: only the variety check failed after 2 rewrites; sent with a warning", job.id)
     (out / "compliance.txt").write_text(report_c.summary() + "\n\n" + sim.summary())
+    if report_c.ok:                       # claim its example numbers now: later drafts today can't reuse them
+        from .studio.repetition import record_examples
+        from .studio.week import today_tk
+
+        record_examples(store, script, today_tk(), sheet)
     if not report_c.ok:
         store.transition(job, JobStatus.REJECTED_COMPLIANCE, report_c.summary()[:500])
         return (job.id, script.format, "rejected_compliance", None, report_c.errors[0])
@@ -996,7 +1031,7 @@ def _render_and_review(job, script, brief, claims, ctx: dict, settings: Settings
         job.thumbnail_path, job.duration_sec = str(thumb), round(res.duration, 2)
         store.transition(job, JobStatus.RENDERED, f"{res.duration:.1f}s in {res.render_seconds:.0f}s")
         originality.record(store, script, brief.topic_key, today)
-        _record_variety(script, store, art_stats, out)
+        _record_variety(script, store, art_stats, out, [f.text for f in brief.facts])
         _release_held(store, job.id)
     except VoiceUnavailable as exc:  # hold the video; no other voice is ever used
         log.warning("voice unavailable for %s: %s", job.id, exc)
@@ -1271,7 +1306,7 @@ def _hold_for_writer(settings: Settings, store: JobStore, today: date, topic: st
     return DailyResult(topic, "claude (held)", note=f"held: waiting for Claude ({why[:120]})")
 
 
-def _record_variety(script, store: JobStore, art_stats: dict, out: Path) -> None:
+def _record_variety(script, store: JobStore, art_stats: dict, out: Path, facts: list[str] | None = None) -> None:
     """Save what this video used (for the next video's no-repeat checks); log any repeat."""
     from .studio import variety
 
@@ -1280,11 +1315,7 @@ def _record_variety(script, store: JobStore, art_stats: dict, out: Path) -> None
           "opening_pose": (art_stats or {}).get("opening_pose") or sl.get("pose"),
           "thumb_layout": "/".join(__import__("glivarao.art.doodle", fromlist=["thumb_style"]).thumb_style(
               int(store.kv_get(f"variety_count:{script.format}", "0")))), "music": sl.get("music"), "job": out.name}
-    issues = variety.record(store, script.format, fp)
-    from .studio.repetition import record_examples
-    from .studio.week import today_tk
-
-    record_examples(store, script, today_tk())
+    issues = variety.record(store, script.format, fp)   # example numbers: recorded when the draft passed its checks
     (out / "variety.json").write_text(json.dumps({"fingerprint": fp, "repeats_previous": issues}, indent=2))
     if issues:
         log.warning("%s repeats the previous %s video: %s", out.name, script.format, "; ".join(map(str, issues)))
@@ -1533,8 +1564,12 @@ def supervised_daily(settings: Settings, store: JobStore, today: date | None = N
     try:
         done_key = f"daily_done:{today.isoformat()}"
         if store.kv_get(done_key) and not force:
-            log.info("daily set for %s already produced; skipping (use --force to redo)", today)
-            return None
+            short_of = _still_needed_today(settings, store, today) if scheduled else 0
+            if not short_of:
+                log.info("daily set for %s already produced; skipping (use --force to redo)", today)
+                return None
+            log.info("%d video(s) still needed today (rejected or duplicates don't count): making replacements",
+                     short_of)
         from .studio import delivery
 
         plan_ = None
@@ -1625,6 +1660,19 @@ def _series_name(store, ctx: dict, brief, today: date) -> str | None:
     if b:
         return b["series"]
     return None if batch.active(store) else series_for(brief.topic_key, today)
+
+
+def _still_needed_today(settings: Settings, store: JobStore, today: date) -> int:
+    """Videos today still needs (weekly pace; rejected and duplicate videos don't count), until the deadline."""
+    if getattr(settings, "pace_mode", "") != "weekly":
+        return 0
+    from .studio import delivery, week
+
+    now = delivery.now_local(settings)
+    if now >= delivery._at(settings, today, settings.delivery_deadline):
+        return 0
+    n_long, n_short, _ = week.today_quota(store, settings, today)
+    return n_long + n_short
 
 
 def cost_dir(settings: Settings) -> Path:

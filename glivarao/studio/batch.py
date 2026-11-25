@@ -610,3 +610,50 @@ def approve_next(store, pv: str) -> list[str] | None:
 __all__ = ["BATCH1", "PARTS", "plan", "plan_issues", "plan_text", "active", "next_long", "card_for", "short_angles",
            "mark_planned", "record_jobs", "topic_jobs", "topics", "version", "fetch_metrics", "rank", "propose_next",
            "send_report", "due_for_report", "approve_next", "video_id", "mark_done"]
+
+
+# ----------------------------------------------------------------------------------------------- daily Shorts
+def _pillar(key: str) -> str:
+    from .pillars import pillar_of
+
+    return getattr(pillar_of(key), "key", key)
+
+
+def pillars_today(store, day) -> list[str]:
+    return json.loads(store.kv_get(f"short_pillars:{day.isoformat()}", "[]"))
+
+
+def note_pillar(store, day, key: str) -> None:
+    p = pillars_today(store, day) + [_pillar(key)]
+    store.kv_set(f"short_pillars:{day.isoformat()}", json.dumps(p))
+
+
+def next_short_topic(store, day) -> BatchTopic | None:
+    """Daily Shorts come from the batch topics first, round-robin, never the same pillar twice in one day."""
+    ts = topics(store)
+    used = set(pillars_today(store, day))
+    start = int(store.kv_get("short_topic_rr", "0"))
+    for k in range(len(ts)):
+        t = ts[(start + k) % len(ts)]
+        if _pillar(t.key) not in used:
+            store.kv_set("short_topic_rr", str(start + k + 1))
+            return t
+    return None
+
+
+def short_card(store, t: BatchTopic) -> dict:
+    """A Shorts card for a batch topic: its official facts, and its next unused single idea."""
+    from ..research.finance_filter import CONCEPTS
+
+    used = set(json.loads(store.kv_get(f"short_ideas_used:{t.slug}", "[]")))
+    idea = next((s for s in t.shorts if s.idea not in used), None)
+    if idea is not None:
+        store.kv_set(f"short_ideas_used:{t.slug}", json.dumps(sorted(used | {idea.idea})))
+    con = next((c for c in CONCEPTS if c.key == t.key), None)
+    facts = ([idea.fact] if idea else []) + [f for f in t.facts if not idea or f is not idea.fact]
+    return {"key": t.key, "topic": t.title, "category": con.category if con else "Personal Finance",
+            "market": "US", "score": 100.0, "confidence": "high", "news": bool(t.publish_by),
+            "why": [f"Batch topic Short: {t.title}"], "angle": "", "affiliate_category": t.affiliate,
+            "viewer_questions": [], "documented_problems": [], "launch_facts": [asdict(f) for f in facts],
+            "sources": ["Batch test (official US sources)"],
+            "batch_short": {"topic": t.slug, "idea": idea.idea if idea else "", "fact": idea.fact.text if idea else ""}}

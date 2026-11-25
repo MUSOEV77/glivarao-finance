@@ -15,13 +15,25 @@ def _s(text):
 
 
 def test_example_numbers_are_not_reused_within_30_days(store):
-    s1 = _s("For example, if you owe $5,000 at 22.36% and pay $200 a month, it takes years.")
-    assert R.example_numbers(s1) == {"$5000", "22.36%", "$200"}
-    R.record_examples(store, s1, date(2026, 11, 1))
-    again = _s("Say you owe $5,000 on a card.")
-    assert R.example_issues(again, store, DAY) and "$5000" in R.example_issues(again, store, DAY)[0]
-    assert R.example_issues(again, store, date(2026, 12, 5)) == []          # older than 30 days: fine
-    assert R.example_issues(_s("For example, a $3,200 balance."), store, DAY) == []
+    facts = ["As of November 2026, the average card rate was 22.36%."]
+    s1 = _s("Put $500 a month away for 30 years at 0.05% versus 1% and the gap is $101,744. Cards charge 22.36%.")
+    assert R.example_numbers(s1, facts) == {"$500", "0.05%", "1%", "$101744"}          # fact numbers excluded
+    R.record_examples(store, s1, date(2026, 11, 23), facts)
+    again = _s("Paychecks: save $500 a month at 0.05% instead of 1% and you lose $101,744.")
+    assert R.example_issues(again, store, DAY, facts)                                   # no 'example' word needed
+    assert R.example_issues(again, store, date(2026, 12, 30), facts) == []              # older than 30 days
+    assert R.example_issues(_s("A $3,200 balance at 22.36%."), store, DAY, facts) == []
+
+
+def test_script_must_match_its_topic():
+    from types import SimpleNamespace as N
+
+    b = N(topic="Paychecks", topic_key="paycheck")
+    off = _s("Put $500 a month away for 30 years and watch it grow.")
+    assert R.topic_issues(off, b)
+    on = Script(format="short", topic="t", title="Your Paycheck Leaks", description="", thumbnail_text="",
+                scenes=[Scene(heading="h", narration="Your paycheck shrinks before it lands.")])
+    assert R.topic_issues(on, b) == []
 
 
 def test_writer_is_told_which_example_numbers_to_avoid(monkeypatch):
@@ -51,3 +63,34 @@ def test_short_formats_rotate(store):
     nxt = R.next_short_formats(store, 3)
     seq = first + nxt
     assert all(a != b for a, b in zip(seq, seq[1:])) and len(set(seq)) == 6
+
+
+def test_daily_shorts_batch_round_robin_distinct_pillars(store):
+    from glivarao.studio import batch
+
+    store.kv_set("batch_mode", "on")
+    picked = []
+    for _ in range(3):
+        t = batch.next_short_topic(store, DAY)
+        picked.append(t)
+        batch.note_pillar(store, DAY, t.key)
+    pillars = [batch._pillar(t.key) for t in picked]
+    assert len(set(pillars)) == 3                                 # never the same pillar twice in a day
+    card = batch.short_card(store, picked[0])
+    assert card["batch_short"]["idea"] and card["launch_facts"][0]["text"] == card["batch_short"]["fact"]
+    assert batch.short_card(store, picked[0])["batch_short"]["idea"] != card["batch_short"]["idea"]   # next idea
+
+
+def test_rejected_shorts_get_replaced_the_same_day(store, settings, monkeypatch):
+    from dataclasses import replace
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from glivarao import daily_v2
+    from glivarao.studio import delivery
+
+    ws = replace(settings, pace_mode="weekly")
+    monkeypatch.setattr(delivery, "now_local", lambda s: datetime(2026, 11, 24, 15, 0, tzinfo=ZoneInfo("Asia/Tashkent")))
+    assert daily_v2._still_needed_today(ws, store, DAY) > 0       # nothing good yet: replacements are made
+    monkeypatch.setattr(delivery, "now_local", lambda s: datetime(2026, 11, 24, 20, 5, tzinfo=ZoneInfo("Asia/Tashkent")))
+    assert daily_v2._still_needed_today(ws, store, DAY) == 0      # after 20:00: no more

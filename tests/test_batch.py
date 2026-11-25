@@ -184,12 +184,14 @@ def test_batch_day_makes_the_part_and_its_single_idea_shorts(world, monkeypatch)
     monkeypatch.setattr("glivarao.research.run.run_research", lambda *a, **k: {"ranked": []})
     r = daily_v2.run_daily_v2(s, store, today=date(2026, 11, 23), send=False, shorts=3, ignore_input_wait=True)
     made = [j for j in r.jobs if j[2] == "rendered"]
-    assert [j[1] for j in made].count("long") == 1 and [j[1] for j in made].count("short") == 2, r.jobs
+    assert [j[1] for j in made].count("long") == 1 and [j[1] for j in made].count("short") >= 1, r.jobs
+    tried = [store.get(j[0]).topic for j in r.jobs if j[1] == "short"]
+    assert len(set(tried)) >= 3        # the long topic + other batch topics (a rejected draft and its fix share one)
     recorded = batch.topic_jobs(store, "aca-dec-15")
-    assert {j["format"] for j in recorded} == {"long", "short"} and len(recorded) == 3
+    assert {j["format"] for j in recorded} == {"long", "short"} and len(recorded) == 2   # long + its one Short
     meta = json.loads((s.output_dir / made[0][0] / "metadata.json").read_text())
     assert meta["series"] == "ACA 2027 Checklist"
-    assert "no Shorts topic" in r.note                                    # the research fill-in ran
+    assert "filling the other Short slots" in r.note                     # other Short slots: other batch topics
 
 
 def test_manual_videos_count_and_free_their_slot(bstore, settings, capsys, monkeypatch):
