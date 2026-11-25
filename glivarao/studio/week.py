@@ -149,6 +149,26 @@ def long_days(store, settings, n: int, day: date | None = None) -> list[date]:
     return out[:n]
 
 
+STORIES_PER_WEEK = 2
+
+
+def stories_this_week(store, day: date | None = None) -> int:
+    """Long videos in the 'money_story' format made this Monday-Sunday week (from the variety record)."""
+    import json as _json
+
+    mon = monday(day or today_tk()).strftime("%Y%m%d")
+    end = (monday(day or today_tk()) + timedelta(days=6)).strftime("%Y%m%d")
+    hist = _json.loads(store.kv_get("variety_history:long", "[]"))
+    return sum(1 for h in hist if h.get("structure") == "money_story" and mon <= str(h.get("job", ""))[:8] <= end)
+
+
+def want_story(store, brief, day: date | None = None) -> bool:
+    """2 of the 4 weekly long videos are money stories (when a documented story is on file for the topic)."""
+    from .stories import has_story
+
+    return has_story(brief) and stories_this_week(store, day) < STORIES_PER_WEEK
+
+
 def week_has_room(store, settings, slot_day: date, fmt: str) -> bool:
     """For catch-up publish slots: True while that week's booked Short slots are below the weekly target."""
     from .publish_times import taken

@@ -740,14 +740,20 @@ def batch_make(settings: Settings, store: JobStore, slug: str, part: int, send: 
                 log.warning("fact: %s", note)
         hist = format_history(store)
         want = card["batch"]["format"]
+        from .studio.mytake import take_for
+        from .studio.week import want_story
+
+        if want_story(store, brief, today):
+            want = "money_story"
+        creator = take_for(store, entry["id"])
         style = want if want in eligible(brief) and (not hist or hist[-1] != want) else choose_format(brief, hist)
         used, history = originality.used_lines(store), originality.load_history(store)
         from .scriptgen.claude import LAST_WRITER, ClaudeUnavailable
 
         try:
-            long_ = _originality_gate(_write_long(brief, style, "", used, True, settings, store=store), brief, today,
-                                      history, settings, True, used,
-                                      lambda k: _write_long(brief, style, "", used, True, settings, variant=k,
+            long_ = _originality_gate(_write_long(brief, style, creator, used, True, settings, store=store), brief,
+                                      today, history, settings, True, used,
+                                      lambda k: _write_long(brief, style, creator, used, True, settings, variant=k,
                                                             store=store))
             drafts = [long_]
             if with_shorts:
@@ -764,8 +770,8 @@ def batch_make(settings: Settings, store: JobStore, slug: str, part: int, send: 
         writer = LAST_WRITER.get("name") or "claude"
         result = DailyResult(brief.topic, writer, style=style, note=f"batch-make {slug} Part {part}" +
                              (f"; {len(notes)} fact(s) dropped or unconfirmed" if notes else ""))
-        _produce_drafts(drafts, brief, "", writer, True, card, None, {"ranked": []}, today, settings, store, send,
-                        workers, result)
+        _produce_drafts(drafts, brief, creator, writer, True, card, None, {"ranked": []}, today, settings, store,
+                        send, workers, result)
         made = [j for j in result.jobs if j[2] in ("rendered", "pending_approval", "held")]
         if any(j[1] == "long" for j in made):
             batch.mark_planned(store, entry["id"])          # counted: never made again
@@ -917,14 +923,14 @@ def _render_and_review(job, script, brief, claims, ctx: dict, settings: Settings
 
                 n = int(store.kv_get("variety_count:short", "0"))
                 pal, lay = _var.cover_style(n)
-                from .art.doodle import HOOK_EMOTION
+                from .art.doodle import pose_for
                 from .render.doodle import NUM as _NUM
 
                 hk = _var.hook_type(_var.opening_line(script))
                 first = " ".join(script.scenes[0].narration.split()[:40]) if script.scenes else ""
                 m = _NUM.search(first)
                 cov = {"text": bold_words(script, 1)[0], "palette": pal, "layout": lay,
-                       "pose": HOOK_EMOTION.get(hk, "shocked"), "number": m.group(0) if m else ""}
+                       "pose": pose_for(hk, n), "number": m.group(0) if m else ""}
             try:
                 script, art_stats = prepare(script, out, settings, store, avoid_places=avoid,
                                             opening_pose=sl.get("pose"), cover=cov)
@@ -1306,10 +1312,11 @@ def make_thumbnails(script, brief, out: Path, settings: Settings, store: JobStor
 
         palette, layout = thumb_style(int(store.kv_get(f"variety_count:{script.format}", "0")))
         prop = TOPIC_PROP.get(brief.topic_key, "coin_stack")
-        from .art.doodle import HOOK_EMOTION, visual_options
+        from .art.doodle import pose_for, visual_options
 
-        first = HOOK_EMOTION.get(variety.hook_type(variety.opening_line(script)), "shocked")   # matches the hook
-        emotions = [first] + [e for e in ("shocked", "worried", "thinking", "pointing") if e != first]
+        first = pose_for(variety.hook_type(variety.opening_line(script)),
+                         int(store.kv_get(f"variety_count:{script.format}", "0")))   # matches the hook, rotates
+        emotions = [first] + [e for e in ("pointing", "thinking", "shocked", "sad", "worried") if e != first]
         opts = visual_options(data)              # real visuals only; a different one than the last long video
         last_vis = store.kv_get("thumb_visual_last", "")
         vis = next((v for v in opts if v != last_vis), opts[0] if opts else "")
@@ -1320,7 +1327,8 @@ def make_thumbnails(script, brief, out: Path, settings: Settings, store: JobStor
             dst = out / (f"thumbnail_{k + 1}.jpg" if script.format == "long" else "thumbnail.jpg")
             doodle_thumb(words, emo, dst, seed=k + 1, max_img=load_pose(settings, emo), value=data["value"],
                          points=data["points"] if vis == "line" else None, layout=layout, palette=palette,
-                         prop=prop, visual=vis, pair=data.get("pair"))
+                         prop=prop, visual=vis, pair=data.get("pair"),
+                         value_label=data.get("label", "") if vis == "badge" else "")
             paths.append(dst)
         panel = (f"line chart of {len(data['points'])} real data points" if vis == "line" else
                  f"{vis.replace('_', '/')} {data['pair'][0]} vs {data['pair'][2]}" if vis in ("bars", "before_after")

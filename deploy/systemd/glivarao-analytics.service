@@ -1,0 +1,14 @@
+[Unit]
+Description=GLIVARAO: daily YouTube analytics for linked videos (read-only); Monday report in Telegram
+After=network-online.target
+OnFailure=glivarao-alert@%n.service
+StartLimitIntervalSec=6h
+StartLimitBurst=3
+
+[Service]
+Type=oneshot
+User=glivarao
+WorkingDirectory=/opt/glivarao/app
+ExecStart=/opt/glivarao/app/.venv/bin/python -m glivarao analytics-pull
+NoNewPrivileges=true
+PrivateTmp=true

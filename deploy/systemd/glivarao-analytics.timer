@@ -1,0 +1,9 @@
+[Unit]
+Description=Daily analytics pull at 09:00 Tashkent (weekly report on Mondays)
+
+[Timer]
+OnCalendar=*-*-* 09:00:00 Asia/Tashkent
+Persistent=true
+
+[Install]
+WantedBy=timers.target

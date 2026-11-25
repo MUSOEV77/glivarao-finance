@@ -185,6 +185,15 @@ def handle_message(msg: dict, store, settings, client, workdir: Path | None = No
     handled = _channel_command(text, reply_to, store, settings, client)
     if handled:
         return handled
+    from datetime import date as _date
+
+    from . import mytake
+
+    req = mytake.pending(store, _date.today())
+    if req and text and (reply_to == req.get("msg") or not q.awaiting_input()):   # your take for tomorrow
+        eng = mytake.save(settings, store, req, text)
+        client.call("sendMessage", chat_id=chat, text=f"✅ Saved as \"My take\" for \"{req['topic']}\":\n{eng}")
+        return "take_saved"
     it = q.by_message(reply_to) if reply_to else None
     if it is None or it.status not in ("awaiting_input", "ready"):
         waiting = q.awaiting_input()

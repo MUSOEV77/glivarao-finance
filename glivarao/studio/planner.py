@@ -133,13 +133,22 @@ def plan_next(settings, store, today: date | None = None, research_dir: Path | N
 
     hist = format_history(store)
     want = (card["batch"]["format"] if bentry is not None else launch.format if launch is not None else "")
+    from .week import want_story
+
+    if want_story(store, brief, today):        # 2 of 4 weekly longs: a true documented money story
+        want = "money_story"
     style = (want if want in eligible(brief) and (not hist or hist[-1] != want)   # never the last video's structure
              else choose_format(brief, hist))
     push_format(store, style)
     q = TopicQueue(store)
     item = q.add_proposals([card], today)[0]
     status = "awaiting_input" if settings.creator_input_wait_hours > 0 else "ready"
-    item = q.update(item.id, status=status, format=style, auto=True, why=why,
+    take = ""
+    if bentry is not None:                     # batch part: your take was asked for at 10:00 the day before
+        from .mytake import take_for
+
+        take, status = take_for(store, bentry["id"]), "ready"
+    item = q.update(item.id, status=status, format=style, auto=True, why=why, creator_input=take,
                     picked_at=datetime.now(timezone.utc).isoformat(timespec="seconds"))
     _mark_used(store, today, card["key"], card["category"], family_of(card["key"]), angle_text(card),
                news=is_news(card))

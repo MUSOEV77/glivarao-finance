@@ -315,7 +315,7 @@ def cmd_thumb_samples(args, s):
         pal, lay = D.thumb_style(n)
         p = out / f"thumb_{n + 1}_{vis}_{lay}.jpg"
         D.thumbnail(text, emo, p, seed=n + 1, max_img=load_pose(s, emo), value=data["value"], layout=lay,
-                    palette=pal, prop=prop, visual=vis, pair=data["pair"])
+                    palette=pal, prop=prop, visual=vis, pair=data["pair"], value_label=data.get("label", ""))
         paths.append(p)
         print(p)
     if not args.no_telegram:
@@ -357,6 +357,32 @@ def cmd_cover_samples(args, s):
                 c.call("sendPhoto", files={"photo": fh}, chat_id=s.telegram_approver_chat_id,
                        caption=f"Shorts cover sample: {p.stem}")
         print("sent to Telegram")
+
+
+def cmd_analytics_pull(args, s):
+    """Daily (09:00): pull analytics for linked videos; on Mondays send the weekly report."""
+    from datetime import date as _d
+
+    from .studio import analytics_report as A
+
+    st = _store(s)
+    data = A.pull(s, st)
+    print(f"{len(data)} linked video(s) measured")
+    if _d.today().weekday() == 0 and not args.no_telegram:
+        from .publish.telegram import notify
+
+        notify(s, A.weekly_text(st, data))
+        print("weekly report sent")
+
+
+def cmd_ask_take(args, s):
+    """10:00: ask for 1-2 sentences of your take on tomorrow's long video."""
+    from datetime import date as _d
+
+    from .studio import mytake
+
+    r = mytake.ask(s, _store(s), _d.today())
+    print(f"asked for: {r['topic']}" if r else "no long video tomorrow: nothing asked")
 
 
 def cmd_set_link(args, s):
@@ -999,6 +1025,13 @@ def cmd_publish(args, s):
 
 
 def cmd_auth(args, s):
+    if getattr(args, "phone", False):      # no computer: the code + link arrive in Telegram
+        from .publish.telegram import notify
+        from .studio.analytics_report import device_auth
+
+        device_auth(s, lambda t: (print(t), notify(s, t)))
+        print(f"token saved to {s.youtube_token_file}")
+        return
     from .publish.youtube import authorize
 
     authorize(s)
@@ -1239,7 +1272,14 @@ def main(argv=None):
     pu = sub.add_parser("publish")
     pu.add_argument("job_id")
     pu.set_defaults(fn=cmd_publish)
-    sub.add_parser("youtube-auth").set_defaults(fn=cmd_auth)
+    ya = sub.add_parser("youtube-auth", help="YouTube sign-in (--phone: code + link in Telegram, no computer)")
+    ya.add_argument("--phone", action="store_true")
+    ya.set_defaults(fn=cmd_auth)
+    ap = sub.add_parser("analytics-pull", help="daily: views, CTR, avg view %%, 30-s retention; Monday report")
+    ap.add_argument("--no-telegram", action="store_true")
+    ap.set_defaults(fn=cmd_analytics_pull)
+    at = sub.add_parser("ask-take", help="10:00: ask for your take on tomorrow's long video")
+    at.set_defaults(fn=cmd_ask_take)
     an = sub.add_parser("analytics")
     an.add_argument("--days", type=int, default=28)
     an.set_defaults(fn=cmd_analytics)

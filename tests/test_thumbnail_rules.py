@@ -43,7 +43,7 @@ def test_cut_headline_is_rejected_and_regenerated_never_cut():
 
 
 def test_one_number_gives_a_badge_and_no_chart():
-    assert D.thumb_data([CARD], 2026) == {"value": "22.36% APR", "points": [], "pair": None}
+    assert D.thumb_data([CARD], 2026) == {"value": "22.36% APR", "points": [], "pair": None, "label": ""}
     # two numbers ('up from 6.26% a year earlier') are still not a series: badge only
     assert D.thumb_data([("The 30-year mortgage rate averaged 7.28%, up from 6.26% a year earlier.", "u")],
                         2026)["points"] == []
@@ -156,3 +156,17 @@ def test_real_visuals_only_and_short_emotional_headline():
         D.thumbnail("Don't Be Fooled", "worried", None, value=d["value"], visual=vis, pair=d["pair"],
                     layout="max_right", palette="cream", prop="house", info=info)
         assert D.phone_readability(info) == [], vis
+
+
+def test_lone_percent_badge_gets_a_label_and_poses_rotate():
+    from glivarao.studio.fact_library import EMERGENCY
+
+    d = D.thumb_data([(f.text, f.url) for f in EMERGENCY], 2026)
+    assert d["value"] == "55%" and d["label"] == "have 3 months saved"
+    assert 2 <= len(d["label"].split()) <= 4
+    info = {}
+    D.thumbnail("It Adds Up", "pointing", None, value=d["value"], value_label=d["label"], info=info)
+    assert D.phone_readability(info) == []
+    poses = {D.pose_for(h, n) for h in D.POSES_FOR_HOOK for n in range(3)}
+    assert "happy" not in poses and len(poses) >= 5
+    assert len({D.pose_for("warning", n) for n in range(3)}) == 3

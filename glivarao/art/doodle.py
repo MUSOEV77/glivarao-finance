@@ -511,7 +511,7 @@ def thumbnail(text: str, emotion: str = "shocked", out: Path | None = None, seed
               max_img: Image.Image | None = None, value: str = "", start_year: str = "", end_year: str = "",
               info: dict | None = None, points: list | None = None, layout: str = "max_right",
               palette: str = "cream", scene_bg: Image.Image | None = None, prop: str = "",
-              visual: str = "", pair: tuple | None = None) -> Image.Image:
+              visual: str = "", pair: tuple | None = None, value_label: str = "") -> Image.Image:
     """Warm paper, a complete 2-4 word statement ending with a period (huge), a soft green panel and Max with an
     emotion. Drawn at 2x, saved at 1280x720. `info` receives the text boxes (in output pixels) for the readability
     test.
@@ -659,8 +659,14 @@ def thumbnail(text: str, emotion: str = "shocked", out: Path | None = None, seed
         tw = f.getlength(value)
         padx, pady = vs * 0.45, vs * 0.22
         bw_, bh_ = tw + 2 * padx, vs * 1.05 + 2 * pady
-        cx, cy = (px0 + px1) / 2, (py0 + py1) / 2
+        cx, cy = (px0 + px1) / 2, (py0 + py1) / 2 - (H2 * 0.05 if value_label else 0)
         p.d.rounded_rectangle((cx - bw_ / 2, cy - bh_ / 2, cx + bw_ / 2, cy + bh_ / 2), int(bh_ * 0.3), fill=INK)
+        if value_label:                   # a lone number needs a few words to make sense ("have 3 months saved")
+            ls = int(H2 * 0.075)
+            while ls > H2 * 0.04 and hand(ls).getlength(value_label) > (px1 - px0) * 0.9:
+                ls -= 3
+            p.d.text((cx, cy + bh_ / 2 + ls * 0.25), value_label, font=hand(ls), fill=INK, anchor="mt",
+                     stroke_width=1, stroke_fill=INK)
         p.d.text((cx, cy), value, font=f, fill=GOLD, anchor="mm", stroke_width=3, stroke_fill=GOLD)
         boxes["value"] = p.d.textbbox((cx, cy), value, font=f, anchor="mm", stroke_width=3)
     if max_img is not None:   # the Nano Banana Max cutout (same file in every video)
@@ -848,8 +854,9 @@ def thumb_data(facts: list, today_year: int) -> dict:
     if num:
         pct = "%" in num or "percent" in num.lower()
         value = compact_number(num) if pct or _amount(num) >= 100000 else num
-    return {"value": badge_text(src, value) if value else "", "points": pts if len(pts) >= 3 else [],
-            "pair": value_pair(facts)}
+    badge = badge_text(src, value) if value else ""
+    return {"value": badge, "points": pts if len(pts) >= 3 else [], "pair": value_pair(facts),
+            "label": badge_label(src, num) if badge and badge == value else ""}
 
 
 def visual_options(data: dict) -> list[str]:
@@ -914,6 +921,45 @@ def reference_sheet(path: Path | None = None) -> Image.Image:
 __all__ = ["compact_number", "key_number", "phone_readability", "THUMB_PAPER", "THUMB_PANEL", "sparkle", "paper", "Pen", "draw_max", "max_figure", "icon", "spike_chart", "bar_chart", "thumbnail",
            "reference_sheet", "brand_mark", "statement", "wrap", "hand", "EMOTIONS", "GREEN", "GOLD", "INK", "PAPER",
            "GREY", "VERSION"]
+
+
+POSES_FOR_HOOK = {   # Max's pose rotates among these per video (never happy/cheering)
+    "number": ("shocked", "pointing", "thinking"), "mistake": ("worried", "sad", "pointing"),
+    "warning": ("worried", "pointing", "shocked"), "myth": ("thinking", "shocked", "pointing"),
+    "story": ("sad", "worried", "thinking"), "comparison": ("pointing", "thinking", "shocked"),
+    "question": ("thinking", "pointing", "worried")}
+
+
+def pose_for(hook: str, n: int) -> str:
+    opts = POSES_FOR_HOOK.get(hook, ("shocked", "pointing", "thinking"))
+    return opts[n % len(opts)]
+
+
+BADGE_LABELS = [   # curated 2-4 word labels for lone numbers (matched in the fact text)
+    ("set aside money for three months", "have 3 months saved"),
+    ("cover a hypothetical $400", "pay $400 with cash"), ("would not be able to pay", "can't pay $400 now"),
+    ("tax-preferred retirement account", "have a retirement account"),
+    ("credit card accounts", "average card rate"), ("in some stage of delinquency", "of debt is late"),
+    ("30-year fixed mortgage", "30-year mortgage rate"), ("third-party collection", "have a collection"),
+    ("unexpected expense in the prior 12 months", "had a surprise bill"),
+    ("federal funds rate", "Fed's target rate"), ("premium tax credit", "income range for help"),
+]
+
+
+def badge_label(fact: str, value: str) -> str:
+    """2-4 words that say what a lone number is, from a curated list or the fact's own words after the number."""
+    low = fact.lower()
+    for key, lab in BADGE_LABELS:
+        if key.lower() in low:
+            return lab
+    import re as _re
+
+    m = _re.search(_re.escape(value.split()[0].rstrip("%")), fact)
+    words = [w.strip(",.;:()") for w in fact[m.end():].split()] if m else []
+    words = [w for w in words if w and w.lower() not in ("%", "percent", "of", "the", "a", "an")][:4]
+    while words and words[-1].lower() in ("of", "the", "a", "to", "in", "on", "for", "and", "was", "is"):
+        words.pop()
+    return " ".join(words) if len(words) >= 2 else ""
 
 
 HOOK_EMOTION = {"number": "shocked", "mistake": "worried", "warning": "worried", "myth": "shocked",

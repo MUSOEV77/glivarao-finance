@@ -140,7 +140,9 @@ def build_brief(card: dict, today: date) -> Brief:
     for f in card.get("launch_facts", []):  # official facts checked for the launch list (with source URLs)
         b.facts.append(Fact("DATA", f["text"], f["source"], f["url"]))
     from ..studio.fact_library import add_to_brief
+    from ..studio.stories import add_to_brief as add_stories
 
+    add_stories(b)    # a true documented story (official record) when one is on file for the topic
     add_to_brief(b)   # the topic's reviewed official facts (e.g. HHS poverty guidelines for ACA topics)
     for n in news[:3]:
         b.facts.append(Fact("DATA", f"{n['source']}, {n['date']}: {n['title']}. {n.get('summary', '')}".strip(),

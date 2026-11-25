@@ -1,0 +1,9 @@
+[Unit]
+Description=Ask for your take on tomorrow's long video at 10:00 Tashkent
+
+[Timer]
+OnCalendar=*-*-* 10:00:00 Asia/Tashkent
+Persistent=true
+
+[Install]
+WantedBy=timers.target

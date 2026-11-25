@@ -112,12 +112,13 @@ def test_telegram_routing_and_unauthorized(settings, store):
 # ---------------------------------------------------------------- 3: formats
 def test_every_format_has_its_own_structure_and_opening():
     b = brief()
-    assert set(eligible(b)) == set(FORMATS)
-    scripts = {k: write_long_format(b, k, TAKE) for k in FORMATS}
+    ours = {k for k in FORMATS if k != "money_story"}            # money_story needs a documented story on file
+    assert set(eligible(b)) == ours
+    scripts = {k: write_long_format(b, k, TAKE) for k in ours}
     structures = {k: tuple(originality.structure_of(s)) for k, s in scripts.items()}
-    assert len(set(structures.values())) == len(FORMATS)          # all different structures
-    assert len({s.hook for s in scripts.values()}) == len(FORMATS)  # all different openings
-    assert len({s.scenes[-1].narration for s in scripts.values()}) == len(FORMATS)  # different closings
+    assert len(set(structures.values())) == len(ours)             # all different structures
+    assert len({s.hook for s in scripts.values()}) == len(ours)  # all different openings
+    assert len({s.scenes[-1].narration for s in scripts.values()}) == len(ours)  # different closings
     for s in scripts.values():
         assert sum(x.beat == "creator" for x in s.scenes) == 1 and "two years in my twenties" in \
             next(x.narration for x in s.scenes if x.beat == "creator")

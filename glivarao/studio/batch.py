@@ -505,6 +505,21 @@ def waiting_for_facts(store, winner_slug: str) -> list:
             (family_of(v.key) == family_of(win.key) or getattr(pillar_of(v.key), "key", None) == pil)]
 
 
+def story_vs_explainer(store) -> str:
+    """Average views / CTR of the batch's money-story long videos vs the other long videos (daily analytics)."""
+    data = json.loads(store.kv_get("analytics_daily", "{}") or "{}")
+    hist = {h.get("job"): h for h in json.loads(store.kv_get("variety_history:long", "[]"))}
+    groups: dict = {"story": [], "explainer/other": []}
+    for t in topics(store):
+        for j in topic_jobs(store, t.slug):
+            if j["format"] == "long" and j["job"] in data:
+                k = "story" if hist.get(j["job"], {}).get("structure") == "money_story" else "explainer/other"
+                groups[k].append(data[j["job"]])
+    parts = [f"{k}: {sum(m['views'] for m in v) / len(v):,.0f} views, CTR {sum(m['ctr'] for m in v) / len(v):.1f}%"
+             f" ({len(v)} videos)" for k, v in groups.items() if v]
+    return ("Story vs explainer: " + "; ".join(parts)) if parts else ""
+
+
 def report_text(store, ranking: list[dict], proposals: list, note: str = "", waiting: list | None = None) -> str:
     lines = [f"📊 GLIVARAO batch report ({version(store)}): 5 topics ranked (views and subscribers include Shorts; "
              "CTR and average view % from the long videos)"]
@@ -516,6 +531,9 @@ def report_text(store, ranking: list[dict], proposals: list, note: str = "", wai
         lines.append(f"\n🏆 Winner: {ranking[0]['title']}")
     if note:
         lines.append(note)
+    sv = story_vs_explainer(store)
+    if sv:
+        lines.append(sv)
     lines.append("\nProposed next 5 topics (closest to the winner, official facts on file):")
     for k, v in enumerate(proposals, 1):
         lines.append(f"{k}. {v.topic}")

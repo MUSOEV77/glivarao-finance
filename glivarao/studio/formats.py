@@ -24,6 +24,15 @@ class Format:
 
 
 FORMATS: dict[str, Format] = {
+    "money_story": Format(
+        "money_story", "Money Story", "MONEY STORY", "gold",
+        "A true documented money story, then what it means for your wallet.",
+        "MONEY STORY: open with the true story from the STORY fact on the fact sheet (an official record: SEC, "
+        "FDIC, Federal Reserve or a court), told by Max as the narrator, using only what the record states (no "
+        "invented details, no real person drawn or quoted); then 'What it means for your wallet' with fact-sheet "
+        "numbers, and three concrete steps.",
+        intros=("This really happened, and it explains {topic} better than any chart.",),
+        outros=("That's the story, and that's what it means for your money.",)),
     "explainer": Format(
         "explainer", "Explainer", "EXPLAINER", "navy",
         "How it works, the math, the mistakes, and a plan.",
@@ -97,6 +106,8 @@ PERSONAS = ("Dana", "Marcus", "Priya", "Luis", "Grace", "Owen", "Aisha", "Tom")
 def eligible(brief) -> list[str]:
     """Formats that genuinely suit this topic's material."""
     keys = ["explainer", "myth_vs_fact", "case_study"]
+    if any(getattr(f, "kind", "") == "STORY" for f in getattr(brief, "facts", [])):
+        keys.append("money_story")
     if brief.viewer_questions:
         keys.append("viewer_question")
     if brief.calcs and len(brief.calcs) >= 2:

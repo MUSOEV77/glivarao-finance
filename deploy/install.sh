@@ -72,14 +72,14 @@ if [ "$SKIP_SYSTEMD" != "1" ]; then
   systemctl reset-failed 'glivarao-*' 2>/dev/null || true   # clear any old start-limit-hit state
   systemctl disable --now glivarao-propose.timer 2>/dev/null || true   # weekly ideas are only for TOPIC_MODE=queue
   # always on: Telegram polling, health report, backups
-  systemctl enable --now glivarao-poll.timer glivarao-backup.timer glivarao-health.timer
+  systemctl enable --now glivarao-poll.timer glivarao-backup.timer glivarao-health.timer glivarao-analytics.timer
   if [ -f "$APP_DIR/data/PAUSED" ]; then
     # production is paused by the owner: keep production timers OFF until `python -m glivarao resume`
-    systemctl disable --now glivarao-daily.timer glivarao-plan.timer glivarao-voice-retry.timer \
+    systemctl disable --now glivarao-daily.timer glivarao-plan.timer glivarao-voice-retry.timer glivarao-take.timer \
       glivarao-competitors.timer 2>/dev/null || true
     echo "   production is PAUSED (data/PAUSED): production timers left off"
   else
-    systemctl enable --now glivarao-daily.timer glivarao-plan.timer glivarao-competitors.timer \
+    systemctl enable --now glivarao-daily.timer glivarao-plan.timer glivarao-competitors.timer glivarao-take.timer \
       glivarao-voice-retry.timer
   fi
   systemctl list-timers 'glivarao-*' --no-pager
