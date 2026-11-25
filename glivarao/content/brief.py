@@ -142,7 +142,8 @@ def build_brief(card: dict, today: date) -> Brief:
     from ..studio.fact_library import add_to_brief
     from ..studio.stories import add_to_brief as add_stories
 
-    add_stories(b)    # a true documented story (official record) when one is on file for the topic
+    if card.get("story"):   # story facts ONLY on a money-story video's sheet (never leak into other videos)
+        add_stories(b)
     add_to_brief(b)   # the topic's reviewed official facts (e.g. HHS poverty guidelines for ACA topics)
     for n in news[:3]:
         b.facts.append(Fact("DATA", f"{n['source']}, {n['date']}: {n['title']}. {n.get('summary', '')}".strip(),

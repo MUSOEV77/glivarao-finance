@@ -405,6 +405,29 @@ def cmd_backfill_episodes(args, s):
     print(f"{len(added)} video(s) registered" + (": " + ", ".join(added) if added else ""))
 
 
+def cmd_edit_draft(args, s):
+    """Edit a saved draft (no writer/LLM call): show, replace exact text, delete sentences, drop unsourced
+    claims. A backup of script.json is kept."""
+    from .daily_v2 import edit_draft
+
+    if args.show:
+        import json as _json
+
+        p = s.output_dir / args.job_id / "script.json"
+        print(f"script: {p}  (JSON: scenes[].narration is what is spoken)")
+        for k, sc in enumerate(_json.loads(p.read_text())["scenes"]):
+            print(f"[{k}] {sc['heading']}: {sc['narration']}")
+    try:
+        r = edit_draft(s, _store(s), args.job_id, replace=[tuple(x) for x in (args.replace or [])],
+                       delete=args.delete, drop_unsourced=args.drop_unsourced)
+    except (ValueError, FileNotFoundError, KeyError) as exc:
+        raise SystemExit(f"not edited: {exc}")
+    for c in r["changes"]:
+        print("changed:", c)
+    print("claims without a source URL:", r["unsourced"] or "none")
+    print("current checks:", "; ".join(e[:140] for e in r["errors"]) or "all pass")
+
+
 def cmd_render_draft(args, s):
     """Render a rejected draft from its saved script (no new writing cost) and send it for review."""
     from .daily_v2 import render_draft
@@ -1190,6 +1213,13 @@ def main(argv=None):
     sl.set_defaults(fn=cmd_set_link)
     be = sub.add_parser("backfill-episodes", help="register approved/published videos as episodes")
     be.set_defaults(fn=cmd_backfill_episodes)
+    ed = sub.add_parser("edit-draft", help="edit a saved draft's script (no writer/LLM call)")
+    ed.add_argument("job_id")
+    ed.add_argument("--show", action="store_true", help="print every scene's narration")
+    ed.add_argument("--replace", nargs=2, action="append", metavar=("OLD", "NEW"), help="exact text -> new text")
+    ed.add_argument("--delete", action="append", metavar="TEXT", help="delete the sentence containing TEXT")
+    ed.add_argument("--drop-unsourced", action="store_true", help="delete sentences whose claim has no source")
+    ed.set_defaults(fn=cmd_edit_draft)
     rd = sub.add_parser("render-draft", help="render a rejected draft from its saved script (no writing cost)")
     rd.add_argument("job_id")
     rd.add_argument("--force", action="store_true", help="render even if it still fails a check")

@@ -137,8 +137,12 @@ def plan_next(settings, store, today: date | None = None, research_dir: Path | N
 
     if want_story(store, brief, today):        # 2 of 4 weekly longs: a true documented money story
         want = "money_story"
+        card["story"] = True                   # only now do the story facts go on the sheet
+        brief = build_brief(card, today)
     style = (want if want in eligible(brief) and (not hist or hist[-1] != want)   # never the last video's structure
              else choose_format(brief, hist))
+    if style != "money_story" and card.pop("story", None):    # not a story after all: no story facts
+        brief = build_brief(card, today)
     push_format(store, style)
     q = TopicQueue(store)
     item = q.add_proposals([card], today)[0]

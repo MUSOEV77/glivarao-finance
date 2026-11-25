@@ -164,9 +164,9 @@ def stories_this_week(store, day: date | None = None) -> int:
 
 def want_story(store, brief, day: date | None = None) -> bool:
     """2 of the 4 weekly long videos are money stories (when a documented story is on file for the topic)."""
-    from .stories import has_story
+    from .stories import available
 
-    return has_story(brief) and stories_this_week(store, day) < STORIES_PER_WEEK
+    return available(brief.topic_key) and stories_this_week(store, day) < STORIES_PER_WEEK
 
 
 def week_has_room(store, settings, slot_day: date, fmt: str) -> bool:

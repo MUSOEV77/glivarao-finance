@@ -717,6 +717,61 @@ def recheck(settings: Settings, store: JobStore, job_id: str) -> list[str]:
     return errs
 
 
+def edit_draft(settings: Settings, store: JobStore, job_id: str, replace: list | None = None,
+               delete: list | None = None, drop_unsourced: bool = False) -> dict:
+    """Edit a saved draft's script (output/<job>/script.json) without any writer/LLM call. `replace`:
+    [(old, new)] exact text in the narration; `delete`: sentences containing this exact text; `drop_unsourced`:
+    remove sentences whose claim has no source URL. A backup is kept (script.json.bak-<time>). Returns
+    {'changes', 'unsourced', 'errors'} (errors = what the current checks still say)."""
+    import shutil
+    import time as _t
+
+    from .content.brief import load_brief
+    from .models import Script
+    from .studio import factcheck
+
+    out = settings.output_dir / job_id
+    path = out / "script.json"
+    script = Script.model_validate_json(path.read_text())
+    brief = load_brief(out / "brief.json")
+    changes = []
+    scenes = [sc.model_copy() for sc in script.scenes]
+
+    def sents(t):
+        return [x for x in re.split(r"(?<=[.!?])\s+", t.strip()) if x]
+
+    for old, new in replace or []:
+        hit = [k for k, sc in enumerate(scenes) if old in sc.narration]
+        if not hit:
+            raise ValueError(f"not found in the script: {old!r}")
+        for k in hit:
+            scenes[k] = scenes[k].model_copy(update={"narration": scenes[k].narration.replace(old, new)})
+        changes.append(f"replaced {old!r} -> {new!r} (scene {', '.join(str(k) for k in hit)})")
+    targets = list(delete or [])
+    if drop_unsourced:
+        claims = factcheck.needs_source(factcheck.check_claims(script.model_copy(update={"scenes": scenes}),
+                                                               brief, ""))
+        targets += [c.text for c in claims]
+    for text in targets:
+        found = False
+        for k, sc in enumerate(scenes):
+            keep = [x for x in sents(sc.narration) if text not in x]
+            if len(keep) != len(sents(sc.narration)):
+                scenes[k] = sc.model_copy(update={"narration": " ".join(keep)})
+                found = True
+        if not found:
+            raise ValueError(f"no sentence contains: {text!r}")
+        changes.append(f"deleted the sentence containing {text!r}")
+    if changes:
+        shutil.copy(path, out / f"script.json.bak-{int(_t.time())}")
+        new_script = script.model_copy(update={"scenes": scenes})
+        path.write_text(new_script.model_dump_json(indent=2))
+    final = Script.model_validate_json(path.read_text())
+    unsourced = [c.text for c in factcheck.needs_source(factcheck.check_claims(final, brief, ""))]
+    errors = recheck(settings, store, job_id)
+    return {"changes": changes, "unsourced": unsourced, "errors": errors}
+
+
 def render_draft(settings: Settings, store: JobStore, job_id: str, send: bool = True, workers: int | None = None,
                  force: bool = False) -> tuple:
     """Render a REJECTED draft from its saved script and facts, with no new writing (no Claude cost): re-checked
@@ -825,8 +880,12 @@ def batch_make(settings: Settings, store: JobStore, slug: str, part: int, send: 
 
         if want_story(store, brief, today):
             want = "money_story"
+            card["story"] = True
+            brief = build_brief(card, today)
         creator = take_for(store, entry["id"])
         style = want if want in eligible(brief) and (not hist or hist[-1] != want) else choose_format(brief, hist)
+        if style != "money_story" and card.pop("story", None):   # not a story after all: no story facts
+            brief = build_brief(card, today)
         used, history = originality.used_lines(store), originality.load_history(store)
         from .scriptgen.claude import LAST_WRITER, ClaudeUnavailable
 

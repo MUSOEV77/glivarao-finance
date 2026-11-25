@@ -9,8 +9,6 @@ STORIES: dict[str, list[LaunchFact]] = {
     "us_banks": [INDYMAC, CRISIS_BANKS],
     "deposit_insurance": [INDYMAC],
     "financial_crisis": [INDYMAC, CRISIS_BANKS],
-    "hysa": [INDYMAC],
-    "emergency_fund": [INDYMAC],
 }
 
 
@@ -25,6 +23,10 @@ def add_to_brief(brief) -> None:
 
 def has_story(brief) -> bool:
     return any(f.kind == "STORY" for f in brief.facts)
+
+
+def available(topic_key: str) -> bool:
+    return bool(STORIES.get(topic_key))
 
 
 __all__ = ["STORIES", "add_to_brief", "has_story"]
