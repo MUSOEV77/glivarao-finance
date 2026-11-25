@@ -85,3 +85,16 @@ def test_prompts_carry_the_retention_rules_and_keep_the_fact_rules():
     assert "loop line" in user_prompt("t", "short", 0.8) and "open loop" in user_prompt("t", "long", 16)
     p = sponsor_prompt("{}", [], False, retention_issues=["opens with an intro"])
     assert "hold US viewers" in p and "opens with an intro" in p
+
+
+def test_long_videos_only_the_hook_rejects():
+    from glivarao.compliance import check_script
+
+    weak = _s("long", ["You pay 22.36% on that card. The weather is nice and the park is green and quiet today. "
+                       + " ".join(_long_body(110)), DISC])
+    rep = check_script(weak, retention=True)
+    assert not [e for e in rep.errors if e.startswith("Won't hold viewers") and "0-5 s" not in e]
+    assert any("5-15 s" in w or "15-30 s" in w for w in rep.warnings)
+    nohook = _s("long", ["The weather is nice and the park is green and quiet in the autumn season. "
+                         + " ".join(_long_body(110)), DISC])
+    assert any("0-5 s" in e for e in check_script(nohook, retention=True).errors)

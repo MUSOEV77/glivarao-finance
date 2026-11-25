@@ -160,6 +160,11 @@ def absolute_claim_issues(script: Script, facts: list[str] | None = None) -> lis
     return list(dict.fromkeys(out))
 
 
+def is_hook_issue(issue: str) -> bool:
+    """The 0-5 s hook (the only retention rule that can reject a long video)."""
+    return issue.startswith(("0-5 s", "first sentence is not a hook", "opens with an intro"))
+
+
 def retention_issues(script: Script, previous: dict | None = None) -> list[str]:
     """Hook in the first seconds, no intro, short sentences to 'you', open loops every 45-60 s (long videos), the
     0-30 s opening structure, and no repeats of the previous video (studio/variety.py)."""
@@ -298,7 +303,9 @@ def check_script(script: Script, enforce_length: bool = True,
     r = ComplianceReport()
     if retention:
         for issue in retention_issues(script, previous_video):
-            (r.errors if enforce_length else r.warnings).append(f"Won't hold viewers: {issue}")
+            # long videos: only the 0-5 s hook can reject; every other retention rule is a warning
+            block = enforce_length and (script.format != "long" or is_hook_issue(issue))
+            (r.errors if block else r.warnings).append(f"Won't hold viewers: {issue}")
         r.warnings += [f"⚠ PACING: {i}" for i in pacing_warnings(script)]
         if previous_video is not None:      # variety repeats: a warning in the review, never a rejection
             from .studio.variety import script_issues

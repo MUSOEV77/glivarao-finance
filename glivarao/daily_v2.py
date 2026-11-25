@@ -509,8 +509,11 @@ def _produce_job(job, script, sim, brief, creator, writer, paid, card, item, rep
     sheet = [f.text for f in brief.facts]
     from .studio.repetition import example_issues as _ex, topic_issues as _top
 
-    hold = (retention_issues(script, prev_video) + absolute_claim_issues(script, sheet) +
-            _ex(script, store, today, sheet) + _top(script, brief))
+    from .compliance import is_hook_issue
+
+    ret = [i for i in retention_issues(script, prev_video)
+           if script.format != "long" or is_hook_issue(i)]        # long: warnings don't cost a rewrite
+    hold = ret + absolute_claim_issues(script, sheet) + _ex(script, store, today, sheet) + _top(script, brief)
     if (issues or ever or hold or not has_what_to_do(script)) and paid:  # sponsor, evergreen, retention, "What to do"
         from .scriptgen.claude import ClaudeUnavailable, rewrite_for_sponsor
 
