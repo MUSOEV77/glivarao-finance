@@ -4,6 +4,8 @@ Titles create curiosity but must stay accurate. Every number used comes from the
 """
 from __future__ import annotations
 
+import re
+
 from ..models import Script
 from .brief import Brief
 
@@ -149,10 +151,69 @@ def title_options(b: Brief, script: Script) -> list[str]:
         pool += [f"{q}", f"{t} in 60 Seconds", f"The {t} Rule Nobody Explains", base]
     out = []
     for x in pool:
-        x = title_case(x.strip())[:100]
+        x = short_title(title_case(x.strip()))
         if x and x.lower() not in {o.lower() for o in out}:
             out.append(x)
     return out[:3]
+
+
+TITLE_MAX = 60
+_TSTOP = set("a an the and or of to in on for with your my our at by from is are vs".split())
+
+
+def short_title(t: str, limit: int = TITLE_MAX) -> str:
+    """A title of at most `limit` characters: drop a trailing clause after ':', ' - ' or '(' first, else cut at a
+    word boundary and never end on a small word. ' #Shorts' is kept."""
+    tag = " #Shorts" if t.endswith("#Shorts") else ""
+    body = t[: -len(tag)].strip() if tag else t.strip()
+    room = limit - len(tag)
+    for sep in (" (", ": ", " - ", " — "):
+        if len(body) > room and sep in body:
+            body = body.split(sep)[0].strip()
+    if len(body) > room:
+        ws = body[:room + 1].split()
+        if len(" ".join(ws)) > room:
+            ws = ws[:-1]
+        while len(ws) > 1 and ws[-1].lower().strip(",.;:") in _TSTOP:
+            ws.pop()
+        body = " ".join(ws).rstrip(",;:")
+    return body + tag
+
+
+RESEARCH_ONLY = re.compile(r"stackexchange\.com|stackoverflow\.com|reddit\.com|quora\.com", re.I)
+_MY_TAKE = ' The "My take" section is the channel host\'s own view.'
+
+
+def _plain_inputs(m: "re.Match") -> str:
+    import ast
+
+    try:
+        d = ast.literal_eval(m.group(1))
+    except (ValueError, SyntaxError):
+        return ""
+    parts = [f"{str(k).replace('_', ' ')} {v}" for k, v in d.items() if v not in (0, 0.0, None, "", [])]
+    return ("for " + ", ".join(parts)) if parts else ""
+
+
+def clean_description(desc: str, has_take: bool, disclosure: str = "", keep_disclosure: bool = False) -> str:
+    """The description that goes to YouTube: research-only links (Stack Exchange, Reddit...) are not sources, no
+    Python dicts (one plain sentence per example), no [AFFILIATE: ...] placeholders and no affiliate disclosure
+    until real links exist, and no 'My take' sentence when the video has none."""
+    lines = []
+    for ln in desc.split("\n"):
+        if RESEARCH_ONLY.search(ln) or re.search(r"\[AFFILIATE:[^\]]*\]", ln):
+            continue
+        ln = re.sub(r"\(?inputs:\s*(\{[^}]*\})\s*;?\s*", lambda m: _plain_inputs(m) + "; ", ln)
+        ln = re.sub(r";\s*\)", ")", ln).replace("(; ", "(").replace("()", "").rstrip("; ")
+        lines.append(ln)
+    out = "\n".join(lines)
+    if disclosure and not keep_disclosure:
+        out = out.replace(disclosure, "")
+    if not has_take:
+        out = out.replace(_MY_TAKE, "")
+    out = re.sub(r"\n{3,}", "\n\n", out).strip() + "\n"
+    out = re.sub(r"(?m)^Sources:\s*\n(?=\n|\Z)", "", out)        # an empty Sources block goes too
+    return out
 
 
 def add_affiliate_disclosure(description: str, text: str) -> str:

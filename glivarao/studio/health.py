@@ -95,15 +95,43 @@ def report(settings, store) -> str:
         lines += [f"⏸ PRODUCTION PAUSED since {ps.get('since')} ({ps.get('reason')}). Nothing is produced or spent "
                   "until you send: python -m glivarao resume", ""]
     lines += ["BUFFER", buffer.text(b, settings), ""]
-    made, due = buffer.long_due(store, date.today(), settings)
-    shorts = sum(n for d, n in json.loads(store.kv_get("short_counts", "{}")).items()
-                 if d[:7] == date.today().isoformat()[:7])
-    lines += ["PACE (this month)", f"Long videos: {made}/{settings.long_videos_per_month} (due by now incl. "
-              f"{settings.production_lead_days}-day lead: {due})",
-              f"Shorts: {shorts}/{settings.shorts_per_month}",
-              f"Launch list: {16 - launch_plan.remaining(store)}/16 planned", ""]
+    if getattr(settings, "pace_mode", "") == "weekly":
+        from . import week
+
+        p = week.plan(store, settings)
+        c = p["counted"]
+        today = p["days"][0] if p["days"] else {"long": 0, "shorts": 0}
+        lines += [f"PACE (week of {p['monday']}, Mon-Sun)",
+                  f"Long videos: {len(c['long'])}/{settings.week_long}  Shorts: {len(c['short'])}/{settings.week_shorts}",
+                  f"Next production day: {today.get('long', 0)} long + {today.get('shorts', 0)} Shorts", ""]
+    else:
+        made, due = buffer.long_due(store, date.today(), settings)
+        shorts = sum(n for d, n in json.loads(store.kv_get("short_counts", "{}")).items()
+                     if d[:7] == date.today().isoformat()[:7])
+        lines += ["PACE (this month)", f"Long videos: {made}/{settings.long_videos_per_month} (due by now incl. "
+                  f"{settings.production_lead_days}-day lead: {due})",
+                  f"Shorts: {shorts}/{settings.shorts_per_month}",
+                  f"Launch list: {16 - launch_plan.remaining(store)}/16 planned", ""]
+    from . import batch
+
+    bn = batch.next_long(store) if batch.active(store) else None
     nxt = active_item(store)
-    lines += ["NEXT", f"{nxt.topic} ({nxt.status})" if nxt else "Next topic is picked at 09:00", ""]
+    if bn is not None:
+        lines += ["NEXT", f"{bn['title']}: Part {bn['part']} {bn['label']} (batch test)", ""]
+    else:
+        lines += ["NEXT", f"{nxt.topic} ({nxt.status})" if nxt else "Next topic is picked at 09:00", ""]
+    try:
+        from . import cost_report
+
+        cr = cost_report.build(settings, store, days=30)
+        per = [f"{'long' if k == 'long' else 'Short'} ${a['total']:.2f} (Claude ${a['claude']:.2f})"
+               for k, a in cr["avg"].items()]
+        if per:
+            lines += ["COST PER VIDEO (30 days)", ", ".join(per) +
+                      (f"; ~${cr['month_estimate']['usd']:.0f}/month at the weekly pace" if cr["month_estimate"] else ""),
+                      ""]
+    except Exception:  # noqa: BLE001  the report must never fail on this
+        pass
     held = held_videos(store)
     wh = json.loads(store.kv_get("writer_held", "{}"))
     if wh:

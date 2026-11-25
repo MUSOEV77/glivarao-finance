@@ -62,11 +62,20 @@ def build_pack(job, settings, store) -> dict:
     if series:
         episode = S.record_episode(store, job.id, series, pillar or "", titles[0], job.format,
                                    slot.date() if slot else date.today())
+    else:                                  # render-draft / by hand: still an episode, so its link can be saved
+        episode = S.ensure_episode(store, job)
     blocks = S.description_blocks(store, job.id, series, pillar, job.format, meta.get("topic_key", ""))
     from . import affiliates
 
-    _, pending_aff = affiliates.for_video(store, meta.get("topic_key", ""), pillar, job.format)
+    real_aff, pending_aff = affiliates.for_video(store, meta.get("topic_key", ""), pillar, job.format)
     description = S.insert_blocks(meta["description"], list(blocks), settings.affiliate_disclosure)
+    from ..content.packaging import add_affiliate_disclosure, clean_description, short_title
+
+    if real_aff:                           # the disclosure only once real affiliate links are in the description
+        description = add_affiliate_disclosure(description, settings.affiliate_disclosure)
+    description = clean_description(description, has_take=bool((meta.get("creator_input") or "").strip()),
+                                    disclosure=settings.affiliate_disclosure, keep_disclosure=bool(real_aff))
+    titles = [short_title(t) for t in titles]
     return {"job": job.id, "format": job.format, "titles": titles, "description": description,
             "series": series, "episode": episode, "pending_affiliates": pending_aff, "end_screen": S.end_screen_advice(store, job.id, series, job.format),
             "tags": tags_line(meta.get("tags", [])), "video": Path(job.video_path),
@@ -84,7 +93,7 @@ def send_pack(job, settings, store, client=None) -> dict:
     send = lambda text, **kw: c.call("sendMessage", chat_id=chat, text=text, parse_mode="HTML",  # noqa: E731
                                      disable_web_page_preview=True, **kw)
     ep = p["episode"]
-    series_line = (f"Series: <b>{_e(p['series'])}</b> (episode {ep['episode']})\n" if ep else "")
+    series_line = (f"Series: <b>{_e(p['series'])}</b> (episode {ep['episode']})\n" if ep and p['series'] else "")
     send(f"📦 <b>UPLOAD PACK — {kind}</b> ({_e(job.id)})\n{series_line}"
          f"Schedule it in YouTube Studio for:\n<b>{_e(p['when'])}</b>\n\n"
          "Steps: save the video file below → YouTube Studio app → ＋ → choose the video → paste the title, "

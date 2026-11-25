@@ -72,6 +72,12 @@ def plan_next(settings, store, today: date | None = None, research_dir: Path | N
     from ..research.run import run_research
 
     existing = active_item(store)
+    from . import batch as _b
+
+    if existing is not None and _b.active(store) and _b.next_long(store) is not None and \
+            not (existing.card or {}).get("batch"):     # batch testing: an old non-batch topic is set aside
+        TopicQueue(store).update(existing.id, status="skipped")
+        existing = None
     if existing is not None:
         return existing
     today = today or date.today()

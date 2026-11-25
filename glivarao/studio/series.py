@@ -47,6 +47,46 @@ def record_episode(store, job_id: str, series: str, pillar: str, title: str, fmt
     return e
 
 
+def ensure_episode(store, job, settings=None) -> dict:
+    """Register a video as an episode if it isn't one yet (videos made by render-draft, batch-make or by hand):
+    its series = the metadata series, else its batch topic's series, else 'Single videos'."""
+    import json as _json
+    from pathlib import Path as _P
+
+    for e in _get(store, "series_episodes", []):
+        if e["job"] == job.id:
+            return e
+    meta = {}
+    if job.video_path and (_P(job.video_path).parent / "metadata.json").exists():
+        meta = _json.loads((_P(job.video_path).parent / "metadata.json").read_text())
+    series = meta.get("series")
+    if not series:
+        from . import batch
+
+        for t in batch.topics(store):
+            if job.id in [j["job"] for j in batch.topic_jobs(store, t.slug)]:
+                series = t.series
+                break
+    title = (meta.get("title_options") or [meta.get("title") or job.topic])[0]
+    fmt = getattr(job.format, "value", str(job.format))
+    return record_episode(store, job.id, series or "Single videos", meta.get("pillar") or "", title, fmt,
+                          date.fromisoformat(job.created_at[:10]) if job.created_at else date.today())
+
+
+def backfill_episodes(store) -> list[str]:
+    """Every approved or published video gets an episode record (so its YouTube link can be saved)."""
+    from ..models import JobStatus
+
+    have = {e["job"] for e in _get(store, "series_episodes", [])}
+    added = []
+    for st in (JobStatus.APPROVED, JobStatus.PUBLISHED):
+        for job in store.list(st, limit=1000):
+            if job.id not in have:
+                ensure_episode(store, job)
+                added.append(job.id)
+    return added
+
+
 def set_link(store, job_id: str, url: str) -> dict | None:
     eps = _get(store, "series_episodes", [])
     for e in eps:
@@ -54,7 +94,12 @@ def set_link(store, job_id: str, url: str) -> dict | None:
             e["url"] = url
             _set(store, "series_episodes", eps)
             return e
-    return None
+    try:                                   # not an episode yet (render-draft, by hand): register it, then save
+        job = store.get(job_id)
+    except KeyError:
+        return None
+    ensure_episode(store, job)
+    return set_link(store, job_id, url)
 
 
 def next_episode_number(store, series: str, fmt: str = "long") -> int:

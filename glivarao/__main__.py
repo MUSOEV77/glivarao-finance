@@ -359,6 +359,26 @@ def cmd_cover_samples(args, s):
         print("sent to Telegram")
 
 
+def cmd_set_link(args, s):
+    """Save a video's YouTube link (registers it as an episode if needed)."""
+    from .studio import series as S
+
+    if not S.YOUTUBE_VIDEO.match(args.url):
+        raise SystemExit("not a YouTube video link")
+    ep = S.set_link(_store(s), args.job_id, args.url)
+    if ep is None:
+        raise SystemExit(f"no video {args.job_id}")
+    print(f"saved: {args.job_id} -> {args.url} ({ep['series']}, episode {ep['episode']})")
+
+
+def cmd_backfill_episodes(args, s):
+    """Register every approved/published video as an episode (so links can be saved)."""
+    from .studio import series as S
+
+    added = S.backfill_episodes(_store(s))
+    print(f"{len(added)} video(s) registered" + (": " + ", ".join(added) if added else ""))
+
+
 def cmd_render_draft(args, s):
     """Render a rejected draft from its saved script (no new writing cost) and send it for review."""
     from .daily_v2 import render_draft
@@ -1131,6 +1151,12 @@ def main(argv=None):
     cs = sub.add_parser("cover-samples", help="3 sample Shorts covers to Telegram")
     cs.add_argument("--no-telegram", action="store_true")
     cs.set_defaults(fn=cmd_cover_samples)
+    sl = sub.add_parser("set-link", help="save a video's YouTube link")
+    sl.add_argument("job_id")
+    sl.add_argument("url")
+    sl.set_defaults(fn=cmd_set_link)
+    be = sub.add_parser("backfill-episodes", help="register approved/published videos as episodes")
+    be.set_defaults(fn=cmd_backfill_episodes)
     rd = sub.add_parser("render-draft", help="render a rejected draft from its saved script (no writing cost)")
     rd.add_argument("job_id")
     rd.add_argument("--force", action="store_true", help="render even if it still fails a check")

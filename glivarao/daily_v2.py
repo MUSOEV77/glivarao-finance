@@ -166,9 +166,15 @@ def _originality_gate(script, brief, today, history, settings, paid, used, regen
 
             from .studio import costs
 
+            from .scriptgen.claude import RewriteBudgetReached
+
             t, vs_ = script.cost_tag, script.variety_slot
-            with costs.tag(t):
-                script = rewrite_for_originality(script, sim.reasons, sim.repeated_phrases, settings)
+            try:
+                with costs.tag(t):
+                    script = rewrite_for_originality(script, sim.reasons, sim.repeated_phrases, settings)
+            except RewriteBudgetReached as exc:      # this video already had its one rewrite
+                log.info("originality: %s", exc)
+                break
             script = script.model_copy(update={"cost_tag": t, "variety_slot": vs_})
         else:
             script = regen(attempt + 1)
@@ -949,8 +955,10 @@ def _render_and_review(job, script, brief, claims, ctx: dict, settings: Settings
         from .studio.affiliates import add_placeholder, category_for
 
         aff_cat = category_for(brief.topic_key, ctx.get("card"))
-        desc = add_placeholder(desc, aff_cat)  # "[AFFILIATE: category]": no real links yet
-        desc = add_affiliate_disclosure(desc, settings.affiliate_disclosure)
+        from .content.packaging import clean_description
+
+        del add_placeholder, add_affiliate_disclosure      # no placeholders/disclosure until real links exist
+        desc = clean_description(desc, has_take=bool(creator.strip()), disclosure=settings.affiliate_disclosure)
         script = script.model_copy(update={"description": finalize_description(
             desc, [s.heading for s in script.scenes], res.scene_starts or [], script.format == "long")})
         Path(job.script_path).write_text(script.model_dump_json(indent=2))

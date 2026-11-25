@@ -16,7 +16,9 @@ class Calc:
     formula: str
 
     def fact(self, key: str) -> str:
-        return f"{self.name}: {key} = {self.results[key]} (inputs: {self.inputs}; {self.formula})"
+        ins = ", ".join(f"{k.replace('_', ' ')} {v}" for k, v in self.inputs.items() if v not in (0, 0.0, None, ""))
+        return f"{self.name}: {key.replace('_', ' ')} = {self.results[key]}" + (f" for {ins}" if ins else "") + \
+            f" ({self.formula})"
 
 
 def minimum_payment_payoff(balance: float, apr: float, principal_pct: float = 0.01, min_floor: float = 25.0) -> Calc:

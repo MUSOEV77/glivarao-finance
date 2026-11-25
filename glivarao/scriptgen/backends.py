@@ -81,13 +81,14 @@ HINTS = {401: "OPENROUTER_API_KEY is invalid or revoked (set it again: deploy/se
 
 
 def openrouter_chat(settings, system: str, prompt: str, max_tokens: int, schema: dict | None = None,
-                    effort: str | None = None, session=None, sleep=time.sleep, attempts: int = 4) -> tuple[str, dict]:
+                    effort: str | None = None, session=None, sleep=time.sleep, attempts: int = 4,
+                    model: str | None = None) -> tuple[str, dict]:
     """One Claude answer through OpenRouter: (text, usage). usage has prompt/completion tokens and OpenRouter's
     own cost in USD when it reports it. Retries 408/429/5xx with backoff; anything else raises WriterUnavailable.
     The key goes only in the Authorization header and never appears in errors or logs."""
     if not settings.openrouter_api_key:
         raise WriterUnavailable("OPENROUTER_API_KEY is not set (deploy/set-key.sh OPENROUTER_API_KEY)")
-    model = settings.openrouter_model
+    model = model or settings.openrouter_model
     if not model.startswith("anthropic/"):
         raise WriterUnavailable(f"OPENROUTER_MODEL={model!r} is not a Claude model (Claude only)")
     body: dict = {"model": model, "max_tokens": max_tokens,

@@ -66,6 +66,14 @@ class Settings:
     # cost reported by OpenRouter is recorded when present; these prices are for the pre-flight cap check.
     openrouter_price_in: float = field(default_factory=lambda: float(_env("OPENROUTER_PRICE_IN_PER_M", "2")))
     openrouter_price_out: float = field(default_factory=lambda: float(_env("OPENROUTER_PRICE_OUT_PER_M", "10")))
+    # rewrites/fixes use a cheaper Claude model; at most MAX_REWRITES per video; production stops at
+    # CLAUDE_STOP_AT (share of the monthly budget)
+    openrouter_rewrite_model: str = field(default_factory=lambda: _env("OPENROUTER_REWRITE_MODEL",
+                                                                        "anthropic/claude-haiku-5.5"))
+    rewrite_price_in: float = field(default_factory=lambda: float(_env("REWRITE_PRICE_IN_PER_M", "1")))
+    rewrite_price_out: float = field(default_factory=lambda: float(_env("REWRITE_PRICE_OUT_PER_M", "5")))
+    max_rewrites: int = field(default_factory=lambda: int(_env("MAX_REWRITES", "1")))
+    claude_stop_at: float = field(default_factory=lambda: float(_env("CLAUDE_STOP_AT", "0.8")))
     openrouter_effort: str = field(default_factory=lambda: _env("OPENROUTER_EFFORT", "high"))
     vertex_project_id: str = field(default_factory=lambda: _env("VERTEX_PROJECT_ID"))
     vertex_region: str = field(default_factory=lambda: _env("VERTEX_REGION", "global"))

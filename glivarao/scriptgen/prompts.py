@@ -108,7 +108,7 @@ Format rules:
   videos, 15-35 words for Shorts). Headings are on-screen titles of at most 6 words. thumbnail_text is a COMPLETE
   2-4 word phrase that makes sense on its own, never ending on a small word such as 'the', 'a', 'on', 'of', 'to' or
   'your' (good: 'Stuck On The Minimum'; bad: 'Stuck On The').
-- Titles must be honest and specific (no ALL CAPS, no misleading clickbait), at most 90 characters.
+- Titles must be honest and specific (no ALL CAPS, no misleading clickbait), at most 60 characters.
 - Direction fields (set, entrance, transition, money_fx): use "auto" unless a scene clearly benefits from a
   specific choice (e.g. "bank" set for banking, "coins" when money grows, "iris" for a reveal). Vary sets
   across the video; avoid the same set more than three scenes in a row.

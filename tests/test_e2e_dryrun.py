@@ -255,7 +255,7 @@ def test_tonight_launch_1_short_and_long(world):
             meta = json.loads((s.output_dir / rep[-1][0] / "metadata.json").read_text())
             job = store.get(rep[-1][0])
             assert 30 <= job.duration_sec <= 59, job.duration_sec              # Shorts length rules
-            assert "[AFFILIATE:" in json.loads((s.output_dir / rep[-1][0] / "script.json").read_text())["description"]
+            assert "[AFFILIATE:" not in json.loads((s.output_dir / rep[-1][0] / "script.json").read_text())["description"]
             assert meta["affiliate_category"] == "debt payoff"
     assert launch_plan.done(store) == [1]
 

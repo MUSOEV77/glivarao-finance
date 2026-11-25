@@ -37,6 +37,10 @@ class ClaudeUnavailable(ScriptGenerationError):
     production is held and retried hourly."""
 
 
+class RewriteBudgetReached(ClaudeUnavailable):
+    """This video already had its rewrite (MAX_REWRITES): keep the draft as it is."""
+
+
 class ClaudeBudgetExceeded(ScriptGenerationError):
     pass
 
@@ -82,9 +86,12 @@ def _check_budget(settings: Settings, ledger: ClaudeSpendLedger, prompt_chars: i
                   price_in: float, price_out: float) -> None:
     est = (prompt_chars / 3.5 + len(SYSTEM_PROMPT) / 3.5) * price_in / 1e6 + EST_OUTPUT_TOKENS[fmt] * price_out / 1e6
     spent = ledger.spent()
-    if spent + est > settings.claude_monthly_budget_usd:
+    stop = settings.claude_monthly_budget_usd * getattr(settings, "claude_stop_at", 1.0)
+    if spent + est > stop:
         raise ClaudeBudgetExceeded(f"Claude monthly budget: ${spent:.2f} spent + ~${est:.2f} for this request "
-                                   f"would exceed ${settings.claude_monthly_budget_usd:.2f}")
+                                   f"would pass {getattr(settings, 'claude_stop_at', 1.0):.0%} of "
+                                   f"${settings.claude_monthly_budget_usd:.2f}: production stops until next month "
+                                   "(or raise CLAUDE_MONTHLY_BUDGET_USD)")
 
 
 def _request(client, settings: Settings, ledger: ClaudeSpendLedger, prompt: str, fmt: str,
@@ -132,14 +139,18 @@ def _parse_json(text: str) -> dict:
         raise ScriptGenerationError(f"Invalid JSON from model: {exc}") from exc
 
 
-def _request_openrouter(settings: Settings, ledger: ClaudeSpendLedger, prompt: str, fmt: str, session=None) -> dict:
-    """Same prompts, schema and rules as the other Claude backends, through OpenRouter."""
+def _request_openrouter(settings: Settings, ledger: ClaudeSpendLedger, prompt: str, fmt: str, session=None,
+                        rewrite: bool = False) -> dict:
+    """Same prompts, schema and rules as the other Claude backends, through OpenRouter. Rewrites and fixes use
+    the cheaper OPENROUTER_REWRITE_MODEL (still Claude)."""
     from .backends import openrouter_chat
 
-    p_in, p_out = settings.openrouter_price_in, settings.openrouter_price_out
+    model = getattr(settings, "openrouter_rewrite_model", "") if rewrite else ""
+    p_in, p_out = ((settings.rewrite_price_in, settings.rewrite_price_out) if model else
+                   (settings.openrouter_price_in, settings.openrouter_price_out))
     _check_budget(settings, ledger, len(prompt), fmt, p_in, p_out)
     text, u = openrouter_chat(settings, SYSTEM_PROMPT, prompt, MAX_TOKENS, schema=SCRIPT_SCHEMA,
-                              effort=settings.openrouter_effort or None, session=session)
+                              effort=settings.openrouter_effort or None, session=session, model=model or None)
     tin, tout = u["prompt_tokens"], u["completion_tokens"]
     usd = float(u["cost"]) if u.get("cost") is not None else tin * p_in / 1e6 + tout * p_out / 1e6
     ledger.add(usd, tin, tout)  # billed even when the output is unusable
@@ -152,6 +163,35 @@ def _request_openrouter(settings: Settings, ledger: ClaudeSpendLedger, prompt: s
     return _parse_json(text)
 
 
+def _rewrite_guard(settings: Settings) -> None:
+    """At most MAX_REWRITES Claude calls after the first draft, per video (counted on the cost log)."""
+    from ..studio import costs
+
+    tag = costs.current()
+    if not tag:
+        return
+    events, links = costs.load([Path(settings.claude_spend_ledger_path).parent])
+    me = costs.resolve(tag, links)
+    calls = sum(1 for e in events if e["kind"] == "claude" and costs.resolve(e.get("tag") or "", links) == me)
+    if calls >= 1 + getattr(settings, "max_rewrites", 1):
+        raise RewriteBudgetReached(f"this video already had {calls - 1} rewrite(s) (MAX_REWRITES="
+                                   f"{settings.max_rewrites}); keeping the draft")
+
+
+import contextvars as _cv  # noqa: E402
+
+_REWRITE = _cv.ContextVar("glivarao_rewrite", default=False)
+
+
+def _ask_rewrite(*args, **kw) -> dict:
+    """A rewrite/fix of an existing draft: cheaper model, counted against MAX_REWRITES."""
+    token = _REWRITE.set(True)
+    try:
+        return _ask(*args, **kw)
+    finally:
+        _REWRITE.reset(token)
+
+
 def _ask(settings: Settings, prompt: str, fmt: str, client=None, ledger: ClaudeSpendLedger | None = None) -> dict:
     """Claude only (OpenRouter, Vertex or Anthropic API, per WRITER). Any failure raises ClaudeUnavailable:
     production is held and retried hourly; no other writer is ever used."""
@@ -160,9 +200,12 @@ def _ask(settings: Settings, prompt: str, fmt: str, client=None, ledger: ClaudeS
     from .backends import WriterUnavailable, claude_client
 
     ledger = ledger or ClaudeSpendLedger(Path(settings.claude_spend_ledger_path))
+    rewrite = _REWRITE.get()
+    if rewrite:
+        _rewrite_guard(settings)          # raises RewriteBudgetReached before any spend
     try:
         if settings.writer == "claude_openrouter":  # `client` (tests) is the HTTP session
-            data = _request_openrouter(settings, ledger, prompt, fmt, session=client)
+            data = _request_openrouter(settings, ledger, prompt, fmt, session=client, rewrite=rewrite)
             LAST_WRITER.update(name=f"Claude {settings.openrouter_model} (OpenRouter)", note="")
             return data
         if client is not None:  # injected (tests): treat as the configured platform
@@ -206,7 +249,7 @@ def generate_with_claude(topic: str, fmt: str, settings: Settings, minutes: floa
         target = int(minutes * WORDS_PER_MINUTE)
         log.info("Claude draft has %d words (target %d-%d); requesting revision %d", n, lo, hi, attempt + 1)
         try:
-            revised = _to_script(_ask(settings, revise_prompt(script.model_dump_json(), fmt, n, target, lo, hi, angle),
+            revised = _to_script(_ask_rewrite(settings, revise_prompt(script.model_dump_json(), fmt, n, target, lo, hi, angle),
                                       fmt, client, ledger), fmt, topic)
         except ScriptGenerationError:
             log.warning("no writer available for a length revision; keeping the draft")
@@ -220,7 +263,7 @@ def generate_with_claude(topic: str, fmt: str, settings: Settings, minutes: floa
 def rewrite_for_originality(script: Script, reasons: list[str], phrases: list[str], settings: Settings,
                             client=None, ledger: ClaudeSpendLedger | None = None) -> Script:
     """One paid rewrite of a draft that the anti-repetition check flagged."""
-    data = _ask(settings, originality_prompt(script.model_dump_json(), reasons, phrases, script.format),
+    data = _ask_rewrite(settings, originality_prompt(script.model_dump_json(), reasons, phrases, script.format),
                 script.format, client, ledger)
     out = _to_script(data, script.format, script.topic)
     return out.model_copy(update={"style": script.style})
@@ -231,7 +274,7 @@ def rewrite_for_compliance(script: Script, errors: list[str], facts: list[str], 
     """One paid fix-up after a compliance rejection, with the rejection reasons and the fact sheet."""
     from .prompts import compliance_prompt
 
-    data = _ask(settings, compliance_prompt(script.model_dump_json(), errors, facts), script.format, client, ledger)
+    data = _ask_rewrite(settings, compliance_prompt(script.model_dump_json(), errors, facts), script.format, client, ledger)
     return _to_script(data, script.format, script.topic).model_copy(update={"style": script.style})
 
 
@@ -242,7 +285,7 @@ def rewrite_for_sponsor(script: Script, issues: list[str], needs_what_to_do: boo
     """One paid rewrite that removes profanity/panic/political-side wording and adds the "What to do" section."""
     from .prompts import sponsor_prompt
 
-    data = _ask(settings, sponsor_prompt(script.model_dump_json(), issues, needs_what_to_do, evergreen_issues,
+    data = _ask_rewrite(settings, sponsor_prompt(script.model_dump_json(), issues, needs_what_to_do, evergreen_issues,
                                          retention_issues),
                 script.format, client, ledger)
     return _to_script(data, script.format, script.topic).model_copy(update={"style": script.style})
@@ -251,5 +294,5 @@ def rewrite_for_sponsor(script: Script, issues: list[str], needs_what_to_do: boo
 def rewrite_for_sources(script: Script, unsourced: list[str], settings: Settings, client=None,
                         ledger: ClaudeSpendLedger | None = None) -> Script:
     """One paid rewrite that removes or replaces claims without a source on the fact sheet."""
-    data = _ask(settings, sources_prompt(script.model_dump_json(), unsourced), script.format, client, ledger)
+    data = _ask_rewrite(settings, sources_prompt(script.model_dump_json(), unsourced), script.format, client, ledger)
     return _to_script(data, script.format, script.topic).model_copy(update={"style": script.style})
