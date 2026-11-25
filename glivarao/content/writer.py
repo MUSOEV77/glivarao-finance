@@ -246,7 +246,8 @@ def _wrap(b: Brief, fmt: str, scenes: list[Scene], suffix: str = "") -> Script:
 def write_with_claude(b: Brief, fmt: str, settings: Settings, angle: str = "", style: str | None = None,
                       creator_text: str = "", avoid_lines: list[str] | None = None,
                       variety_slot: int | None = None, previous: dict | None = None,
-                      avoid_numbers: set[str] | None = None) -> Script:
+                      avoid_numbers: set[str] | None = None, hook: str | None = None,
+                      avoid_hooks: list[str] | None = None) -> Script:
     """Grounded generation: the model may only use facts from the brief's fact sheet; the format sets the
     structure; the host's own input is woven in as a 'creator' scene; recent openings are off limits."""
     from ..scriptgen.claude import generate_with_claude
@@ -288,8 +289,10 @@ def write_with_claude(b: Brief, fmt: str, settings: Settings, angle: str = "", s
     if variety_slot is not None:   # 7-video rotation: never the previous video's hook type / lines
         from ..studio.variety import HOOK_HOW, slot
 
-        hk = slot(variety_slot)["hook"]
-        rule = (f"ASSIGNED HOOK TYPE (rotation, checked by code): {hk.upper()}: {HOOK_HOW[hk]}. The first sentence "
+        hk = hook or slot(variety_slot)["hook"]
+        rule = ((f"Do NOT use these hook types (used by the last videos): {', '.join(avoid_hooks)}. "
+                 if avoid_hooks else "") +
+                f"ASSIGNED HOOK TYPE (rotation, checked by code): {hk.upper()}: {HOOK_HOW[hk]}. The first sentence "
                 "MUST be this type" + ("" if hk == "question" else
                                         " and must NOT be a question (no question mark in the first sentence)") +
                 ". Still a real number or costly mistake to 'you' in the first 5 seconds.")

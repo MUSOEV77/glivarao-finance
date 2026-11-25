@@ -117,9 +117,44 @@ def script_fingerprint(script) -> dict:
             "slot": script.variety_slot}
 
 
+ASSIGNABLE = ("number", "mistake", "myth", "story", "comparison", "warning")
+DEAD = ("rejected", "failed", "rejected_compliance")
+
+
+def live_history(store, fmt: str) -> list[dict]:
+    """Videos that still count: a video you rejected (or that failed) is not a 'previous video'."""
+    out = []
+    for h in json.loads(store.kv_get(f"variety_history:{fmt}", "[]")):
+        try:
+            st = getattr(store.get(h["job"]).status, "value", "") if h.get("job") else ""
+        except KeyError:
+            st = ""
+        if st not in DEAD:
+            out.append(h)
+    return out
+
+
 def previous(store, fmt: str) -> dict | None:
-    hist = json.loads(store.kv_get(f"variety_history:{fmt}", "[]"))
+    hist = live_history(store, fmt)
     return hist[-1] if hist else None
+
+
+def recent_hooks(store, fmt: str, n: int = 3) -> list[str]:
+    """The hook types of the last n videos of this format that still count."""
+    return [h.get("hook_type", "") for h in live_history(store, fmt)[-n:] if h.get("hook_type")]
+
+
+def required_hook(store, fmt: str, taken: tuple = ()) -> str:
+    """The hook type the next script MUST use: least recently used first (never used = first), never one of
+    `taken` (already assigned to another draft in this run) or of the last 3 videos when avoidable."""
+    hist = live_history(store, fmt)
+    last = {}
+    for i, h in enumerate(hist):
+        if h.get("hook_type"):
+            last[h["hook_type"]] = i
+    avoid = set(recent_hooks(store, fmt)) | set(taken)
+    pool = [h for h in ASSIGNABLE if h not in avoid] or [h for h in ASSIGNABLE if h not in taken] or list(ASSIGNABLE)
+    return min(pool, key=lambda h: (last.get(h, -1), ASSIGNABLE.index(h)))
 
 
 def history(store, fmt: str) -> list[dict]:

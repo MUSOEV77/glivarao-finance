@@ -107,7 +107,9 @@ def _write_long(brief, style, creator, used, paid, settings, variant=0, store=No
         with costs.tag(t):
             s = write_with_claude(brief, "long", settings, style=style, creator_text=creator, avoid_lines=used,
                                   variety_slot=vs, previous=variety.previous(store, "long") if store else None,
-                                  avoid_numbers=_avoid_numbers(store))
+                                  avoid_numbers=_avoid_numbers(store),
+                                  hook=variety.required_hook(store, "long") if store else None,
+                                  avoid_hooks=variety.recent_hooks(store, "long") if store else None)
         return s.model_copy(update={"cost_tag": t, "variety_slot": vs})
     return write_long_format(brief, style, creator, used, variant=variant).model_copy(update={"variety_slot": vs})
 
@@ -128,8 +130,10 @@ def _write_shorts(brief, style, n, used, paid, settings, store=None, angles=None
         angles = next_short_formats(store, n) if store is not None else list(SHORT_FORMATS[:n])
     from .studio import costs
 
-    out = []
+    out, taken = [], []
     for i, a in enumerate(angles[:n]):
+        hk = variety.required_hook(store, "short", tuple(taken)) if store is not None else None
+        taken.append(hk)
         t = costs.new_draft("short")
         prev = (variety.previous(store, "short") if i == 0 else
                 variety.script_fingerprint(out[-1])) if store is not None else None
@@ -137,7 +141,9 @@ def _write_shorts(brief, style, n, used, paid, settings, store=None, angles=None
             s = write_with_claude(brief, "short", settings,
                                   angle=a if "Not a cut-down" in a else a + ". Not a cut-down of the long video.",
                                   avoid_lines=used, variety_slot=vs(i), previous=prev,
-                                  avoid_numbers=_avoid_numbers(store))
+                                  avoid_numbers=_avoid_numbers(store), hook=hk,
+                                  avoid_hooks=(variety.recent_hooks(store, "short") + taken[:-1])[-3:]
+                                  if store is not None else None)
         out.append(s.model_copy(update={"style": f"short_{i}", "cost_tag": t, "variety_slot": vs(i)}))
     return out
 
@@ -463,6 +469,25 @@ def _fix_rejected(job_id: str, brief, settings: Settings, store: JobStore):
 VARIETY_ERR = re.compile(r"same (?:structure|hook type|opening line|ending line) as the previous video")
 
 
+def _fix_hook(script, warning: str, settings: Settings, job_id: str):
+    """Rewrite ONLY scene 0 (the hook) with the VARIETY warning's own suggestion; every other scene, fact,
+    number and source stays exactly as it was. Returns the new script, or None (keep the WARN)."""
+    from .scriptgen.claude import ClaudeUnavailable, rewrite_hook
+    from .studio import costs
+
+    try:
+        with costs.tag(job_id):
+            new = rewrite_hook(script, warning.split(": ", 2)[-1], settings)
+    except (ClaudeUnavailable, Exception) as exc:  # noqa: BLE001  e.g. the one-rewrite budget: keep the WARN
+        log.info("%s: hook not rewritten (%s)", job_id, exc)
+        return None
+    if not new.scenes or not new.scenes[0].narration.strip():
+        return None
+    s0 = script.scenes[0].model_copy(update={"narration": new.scenes[0].narration})
+    first = re.split(r"(?<=[.!?])\s+", s0.narration.strip())[0]
+    return script.model_copy(update={"scenes": [s0] + list(script.scenes[1:]), "hook": first[:200]})
+
+
 def _produce_one(script, sim, brief, creator, writer, paid, card, item, report, today, settings, store, send,
                  workers, final: bool = False) -> tuple:
     from .studio import factcheck
@@ -530,22 +555,39 @@ def _produce_job(job, script, sim, brief, creator, writer, paid, card, item, rep
     Path(job.script_path).write_text(script.model_dump_json(indent=2))
     store.transition(job, JobStatus.SCRIPTED, f"{writer}; {script.style}; {script.word_count} words")
 
-    ok, why = finance_only_check(script)
-    report_c = check_script(script, enforce_length=paid, evergreen=not brief.timely, retention=True,
-                            previous_video=prev_video)
     from .studio.repetition import example_issues, topic_issues
 
-    for issue in example_issues(script, store, today, sheet) + topic_issues(script, brief):   # block (rewrite once)
-        (report_c.errors if paid else report_c.warnings).append(f"Repeat/topic: {issue}")
-    for issue in absolute_claim_issues(script, sheet):     # literally true for the viewer, or on the fact sheet
-        (report_c.errors if paid else report_c.warnings).append(f"Overstated: {issue}")
-    if not ok:
-        report_c.errors.append(f"Finance-only gate failed: {why}")
-    if not sim.ok:
-        report_c.errors.append("Too similar to earlier videos even after rewriting: " + "; ".join(sim.reasons))
-    if missing:
-        report_c.errors.append(f"{len(missing)} claim(s) without a source URL: "
-                               + " | ".join(c.text[:80] for c in missing[:3]))
+    def checks(script, missing):
+        ok, why = finance_only_check(script)
+        report_c = check_script(script, enforce_length=paid, evergreen=not brief.timely, retention=True,
+                                previous_video=prev_video)
+        for issue in example_issues(script, store, today, sheet) + topic_issues(script, brief):   # block
+            (report_c.errors if paid else report_c.warnings).append(f"Repeat/topic: {issue}")
+        for issue in absolute_claim_issues(script, sheet):     # literally true for the viewer, or on the sheet
+            (report_c.errors if paid else report_c.warnings).append(f"Overstated: {issue}")
+        if not ok:
+            report_c.errors.append(f"Finance-only gate failed: {why}")
+        if not sim.ok:
+            report_c.errors.append("Too similar to earlier videos even after rewriting: " + "; ".join(sim.reasons))
+        if missing:
+            report_c.errors.append(f"{len(missing)} claim(s) without a source URL: "
+                                   + " | ".join(c.text[:80] for c in missing[:3]))
+        return report_c
+
+    report_c = checks(script, missing)
+    hook_warn = [w for w in report_c.warnings if "VARIETY" in w and "hook type" in w]
+    if paid and report_c.ok and hook_warn:     # ONE retry: rewrite only the hook (scene 0), then check again
+        fixed = _fix_hook(script, hook_warn[0], settings, job.id)
+        if fixed is not None:
+            claims2 = factcheck.check_claims(fixed, brief, creator)
+            rep2 = checks(fixed, factcheck.needs_source(claims2))
+            if rep2.ok and not [w for w in rep2.warnings if "VARIETY" in w and "hook type" in w]:
+                script, claims, report_c = fixed, claims2, rep2
+                job.script_path = str(out / "script.json")
+                Path(job.script_path).write_text(script.model_dump_json(indent=2))
+                (out / "fact_check.md").write_text("# " + factcheck.report(claims, limit=500).replace("\n", "\n\n")
+                                                   + "\n")
+                log.info("%s: hook rewritten for variety (scene 0 only)", job.id)
     if final and report_c.errors and all(VARIETY_ERR.search(e) for e in report_c.errors):
         # after 2 rewrites only the variety check still fails: send it, with a warning in the review
         report_c.warnings += [f"⚠ VARIETY (sent anyway after 2 rewrites): {e}" for e in report_c.errors]

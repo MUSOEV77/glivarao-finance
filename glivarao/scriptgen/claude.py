@@ -278,6 +278,18 @@ def rewrite_for_compliance(script: Script, errors: list[str], facts: list[str], 
     return _to_script(data, script.format, script.topic).model_copy(update={"style": script.style})
 
 
+def rewrite_hook(script: Script, suggestion: str, settings: Settings, client=None,
+                 ledger: ClaudeSpendLedger | None = None) -> Script:
+    """Rewrite only the first scene's narration (the hook) following `suggestion`; the caller keeps every other
+    scene from the original. Cheap model; counted as the video's one rewrite."""
+    prompt = ("Rewrite ONLY the narration of the FIRST scene (the hook) of this GLIVARAO script: " + suggestion +
+              ". Keep every fact, number and source exactly as in the draft, keep it the same length (the hook "
+              "lands in the first sentence, said to 'you', no intro), and return the whole script JSON with all "
+              "other scenes unchanged.\n\nDRAFT:\n" + script.model_dump_json())
+    data = _ask_rewrite(settings, prompt, script.format, client, ledger)
+    return _to_script(data, script.format, script.topic)
+
+
 def rewrite_for_sponsor(script: Script, issues: list[str], needs_what_to_do: bool, settings: Settings,
                         client=None, ledger: ClaudeSpendLedger | None = None,
                         evergreen_issues: list[str] | None = None,
