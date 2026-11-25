@@ -118,18 +118,19 @@ def script_fingerprint(script) -> dict:
 
 
 ASSIGNABLE = ("number", "mistake", "myth", "story", "comparison", "warning")
-DEAD = ("rejected", "failed", "rejected_compliance")
+COUNTS = ("approved", "published")
 
 
 def live_history(store, fmt: str) -> list[dict]:
-    """Videos that still count: a video you rejected (or that failed) is not a 'previous video'."""
+    """Videos that count for the hook rotation: only ones you APPROVED (or that are uploaded). Rejected, failed
+    and still-in-review videos are not a 'previous video'."""
     out = []
     for h in json.loads(store.kv_get(f"variety_history:{fmt}", "[]")):
         try:
-            st = getattr(store.get(h["job"]).status, "value", "") if h.get("job") else ""
+            st = getattr(store.get(h["job"]).status, "value", "") if h.get("job") else None
         except KeyError:
-            st = ""
-        if st not in DEAD:
+            st = None                     # no job record (older history): counts
+        if st is None or st in COUNTS:
             out.append(h)
     return out
 

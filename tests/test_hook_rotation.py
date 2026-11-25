@@ -7,7 +7,7 @@ from glivarao.studio import variety
 from tests.test_e2e_dryrun import fake_claude, world  # noqa: F401  (fixture)
 
 
-def _rec(store, fmt, hook, status=JobStatus.PENDING_APPROVAL):
+def _rec(store, fmt, hook, status=JobStatus.APPROVED):
     job = store.create(fmt, "t")
     for st in (JobStatus.SCRIPTED, JobStatus.RENDERED, JobStatus.PENDING_APPROVAL):
         store.transition(store.get(job.id), st, "")
@@ -107,3 +107,9 @@ def test_retry_happens_once_then_the_warning_stays(world, monkeypatch):  # noqa:
     r = daily_v2.make_now(s, store, 1, short=True, send=False)
     assert r.jobs[-1][2] == "rendered" and len(hook_calls) == 1
     assert "VARIETY" in (s.output_dir / r.jobs[-1][0] / "compliance.txt").read_text()
+
+
+def test_only_approved_or_uploaded_videos_count(store):
+    _rec(store, "short", "number")
+    _rec(store, "short", "story", status=JobStatus.PENDING_APPROVAL)    # still in review: doesn't count
+    assert variety.recent_hooks(store, "short") == ["number"]
